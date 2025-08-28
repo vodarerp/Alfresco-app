@@ -1,0 +1,20 @@
+﻿using Alfresco.Contracts.Request;
+using Alfresco.Contracts.Response;
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Text;
+using System.Threading.Tasks;
+
+namespace Alfresco.Apstraction.Interfaces
+{
+    public interface IAlfrescoReadApi
+    {
+        Task<bool> PingAsync(CancellationToken ct = default);
+
+        Task<NodeChildrenResponse> GetNodeChildrenAsync(string nodeId, CancellationToken ct = default);
+
+        Task<NodeChildrenResponse> SearchAsync(PostSearchRequest request, CancellationToken ct = default);
+
+    }
+}
