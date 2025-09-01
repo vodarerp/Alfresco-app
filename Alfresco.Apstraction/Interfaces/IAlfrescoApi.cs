@@ -16,5 +16,8 @@ namespace Alfresco.Apstraction.Interfaces
 
         Task<NodeChildrenResponse> PostSearch(PostSearchRequest inRequest, CancellationToken cancellationToken = default);
 
+
+        Task<bool> MoveDocumentAsync(string nodeId, string targetFolderId, string? newName = default, CancellationToken ct = default);
+
     }
 }

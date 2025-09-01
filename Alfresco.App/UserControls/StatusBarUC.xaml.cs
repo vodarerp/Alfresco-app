@@ -25,7 +25,7 @@ namespace Alfresco.App.UserControls
     public partial class StatusBarUC : UserControl, INotifyPropertyChanged
     {
 
-        private readonly IAlfrescoApi _alfrescoService;
+        private readonly IAlfrescoReadApi _alfrescoService;
         #region -Connected- property
         private  bool _Connected;
         public  bool Connected
@@ -47,7 +47,7 @@ namespace Alfresco.App.UserControls
         {
             DataContext = this;
             InitializeComponent();
-            _alfrescoService = App.AppHost.Services.GetRequiredService<IAlfrescoApi>(); 
+            _alfrescoService = App.AppHost.Services.GetRequiredService<IAlfrescoReadApi>(); 
 
             this.Loaded += StatusBarUC_Loaded;
 

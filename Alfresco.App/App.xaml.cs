@@ -4,6 +4,7 @@ using Alfresco.Apstraction.Models;
 using Alfresco.Client;
 using Alfresco.Client.Handlers;
 using Alfresco.Client.Helpers;
+using Alfresco.Client.Implementation;
 using Alfresco.Contracts.Oracle;
 using Dapper;
 using Microsoft.Extensions.Configuration;
@@ -37,7 +38,39 @@ namespace Alfresco.App
 
                     services.AddTransient<BasicAuthHandler>();
 
-                    services.AddHttpClient<IAlfrescoApi, AlfrescoAPI>(cli =>
+                    //services.AddHttpClient<IAlfrescoApi, AlfrescoAPI>(cli =>
+                    //{
+                    //    cli.Timeout = TimeSpan.FromSeconds(30);
+                    //})
+                    //    .ConfigureHttpClient((sp, cli) =>
+                    //    {
+                    //        var options = sp.GetRequiredService<IOptions<AlfrescoOptions>>().Value;
+                    //        cli.BaseAddress = new Uri(options.BaseUrl);
+                    //        cli.DefaultRequestHeaders.Accept.Add(new System.Net.Http.Headers.MediaTypeWithQualityHeaderValue("application/json"));
+                    //    })
+
+                    //    .AddHttpMessageHandler<BasicAuthHandler>()
+                    //    .SetHandlerLifetime(TimeSpan.FromMinutes(5))
+                    //    .AddPolicyHandler(GetRetryPlicy())
+                    //    .AddPolicyHandler(GetCircuitBreakerPolicy());
+
+                    services.AddHttpClient<IAlfrescoReadApi, AlfrescoReadApi>(cli =>
+                    {
+                        cli.Timeout = TimeSpan.FromSeconds(30);
+                    })
+                        .ConfigureHttpClient((sp, cli) =>
+                        {
+                            var options = sp.GetRequiredService<IOptions<AlfrescoOptions>>().Value;
+                            cli.BaseAddress = new Uri(options.BaseUrl);
+                            cli.DefaultRequestHeaders.Accept.Add(new System.Net.Http.Headers.MediaTypeWithQualityHeaderValue("application/json"));
+                        })
+
+                        .AddHttpMessageHandler<BasicAuthHandler>()
+                        .SetHandlerLifetime(TimeSpan.FromMinutes(5))
+                        .AddPolicyHandler(GetRetryPlicy())
+                        .AddPolicyHandler(GetCircuitBreakerPolicy());
+
+                    services.AddHttpClient<IAlfrescoWriteApi, AlfrescoWriteApi>(cli =>
                     {
                         cli.Timeout = TimeSpan.FromSeconds(30);
                     })

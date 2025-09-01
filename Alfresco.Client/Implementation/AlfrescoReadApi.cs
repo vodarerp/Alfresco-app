@@ -9,6 +9,7 @@ using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using Newtonsoft.Json;
+using Microsoft.Extensions.Options;
 
 namespace Alfresco.Client.Implementation
 {
@@ -17,27 +18,28 @@ namespace Alfresco.Client.Implementation
         private readonly HttpClient _client;
         private readonly AlfrescoOptions _options;
 
-        public AlfrescoReadApi()
+        public AlfrescoReadApi(HttpClient client, IOptions<AlfrescoOptions> options)
         {
-            
+            _client = client;
+            _options = options.Value;
         }
         public async Task<NodeChildrenResponse> GetNodeChildrenAsync(string nodeId, CancellationToken ct = default)
         {
-            using var r = await _client.GetAsync($"/alfresco/api/-default-/public/alfresco/versions/1/nodes/{nodeId}/children", ct);
-            var body = await r.Content.ReadAsStringAsync(ct);
-            if (!r.IsSuccessStatusCode)
-                throw new AlfrescoException("Neuspešan odgovor pri čitanju root čvora.", (int)r.StatusCode, body);
+            using var getResponse = await _client.GetAsync($"/alfresco/api/-default-/public/alfresco/versions/1/nodes/{nodeId}/children", ct);
+            var body = await getResponse.Content.ReadAsStringAsync(ct);
+            if (!getResponse.IsSuccessStatusCode)
+                throw new AlfrescoException("Neuspešan odgovor pri čitanju root čvora.", (int)getResponse.StatusCode, body); // izbaciti
 
             var toRet = JsonConvert.DeserializeObject<NodeChildrenResponse>(body);
             return toRet;
         }
 
-        public async Task<bool> PingAsync(CancellationToken ct = default)
-        {
-            using var toRet = await _client.GetAsync("/alfresco/api/-default-/public/alfresco/versions/1/probes/-live-", ct);
+        public async Task<bool> PingAsync(CancellationToken ct = default) => (await _client.GetAsync("/alfresco/api/-default-/public/alfresco/versions/1/probes/-live-", ct)).IsSuccessStatusCode;
+        //{
+        //    using var toRet = await _client.GetAsync("/alfresco/api/-default-/public/alfresco/versions/1/probes/-live-", ct);
 
-            return toRet.IsSuccessStatusCode;
-        }
+        //    return toRet.IsSuccessStatusCode;
+        //}
 
         public async Task<NodeChildrenResponse> SearchAsync(PostSearchRequest inRequest, CancellationToken ct = default)
         {
@@ -51,13 +53,13 @@ namespace Alfresco.Client.Implementation
 
             using var bodyRequest = new StringContent(json, Encoding.UTF8, "application/json");
 
-            var x = await bodyRequest.ReadAsStringAsync();
+            //var x = await bodyRequest.ReadAsStringAsync();
 
-            using var r = await _client.PostAsync($"/alfresco/api/-default-/public/search/versions/1/search", bodyRequest, ct);
+            using var postResponse = await _client.PostAsync($"/alfresco/api/-default-/public/search/versions/1/search", bodyRequest, ct);
 
 
-            var tpRet = await r.Content.ReadAsStringAsync(ct);
-            var toRet = JsonConvert.DeserializeObject<NodeChildrenResponse>(tpRet);
+            var stringResponse = await postResponse.Content.ReadAsStringAsync(ct);
+            var toRet = JsonConvert.DeserializeObject<NodeChildrenResponse>(stringResponse) ;
 
 
             return toRet;

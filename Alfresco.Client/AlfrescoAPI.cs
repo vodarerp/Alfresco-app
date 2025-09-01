@@ -32,7 +32,7 @@ namespace Alfresco.Client
 
         private static HttpClient Create(AlfrescoOptions inOptions)
         {
-                       var client = new HttpClient
+            var client = new HttpClient
             {
                 BaseAddress = new Uri(inOptions.BaseUrl),
                 Timeout = inOptions.Timeout
@@ -86,6 +86,40 @@ namespace Alfresco.Client
 
 
             return toRet;
+        }
+
+        public async Task<bool> MoveDocumentAsync(string nodeId, string targetFolderId, string? newName = default, CancellationToken ct = default)
+        {
+            /*
+                api http://localhost:8080/alfresco/api/-default-/public/alfresco/versions/1/nodes/{{docId}}/move -- {{docId}} dokumnet koji se move
+                {
+                  "targetParentId": "6f8f81ea-4ffc-4be6-8f81-ea4ffc3be66f", -- id foldera u koji se move
+                   "name": "TEst123.xlsx" -- novo ime ako se menja
+             */
+
+            var jsonSerializerSettings = new JsonSerializerSettings
+            {
+                NullValueHandling = NullValueHandling.Ignore,
+                ContractResolver = new Newtonsoft.Json.Serialization.CamelCasePropertyNamesContractResolver()
+            };
+
+            var bodyRequest = new MoveRequest
+            {
+                TargetParentId = targetFolderId
+            };
+
+            var json = JsonConvert.SerializeObject(bodyRequest, jsonSerializerSettings);
+            var body = new StringContent(json, Encoding.UTF8, "application/json");
+            using var moveResponse = await _client.PostAsync($"/alfresco/api/-default-/public/alfresco/versions/1/nodes/{nodeId}/move", body, ct);
+
+            var stringResponse = await moveResponse.Content.ReadAsStringAsync(ct);
+
+            var toRet = JsonConvert.DeserializeObject<object>(stringResponse);
+
+
+            return moveResponse.IsSuccessStatusCode;
+
+            //throw new NotImplementedException();
         }
     }
 }

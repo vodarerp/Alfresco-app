@@ -34,6 +34,10 @@ namespace Alfresco.App.UserControls
     {
 
         private readonly IAlfrescoApi _alfrescoService;
+        private readonly IAlfrescoWriteApi _alfrescoWriteService;
+        private readonly IAlfrescoReadApi _alfrescoReadService;
+
+
         private readonly IDocStagingRepository _docStagingRepository;
 
 
@@ -78,17 +82,19 @@ namespace Alfresco.App.UserControls
             DataContext = this;
             InitializeComponent();
             Entries = new();
-            _alfrescoService = App.AppHost.Services.GetRequiredService<IAlfrescoApi>(); 
+            _alfrescoWriteService = App.AppHost.Services.GetRequiredService<IAlfrescoWriteApi>();
+            _alfrescoReadService = App.AppHost.Services.GetRequiredService<IAlfrescoReadApi>();
+            //_alfrescoService = App.AppHost.Services.GetRequiredService<IAlfrescoApi>(); 
             _docStagingRepository = App.AppHost.Services.GetRequiredService<IDocStagingRepository>();
         }
 
         private async void btnLoad_Click(object sender, RoutedEventArgs e)
         {
-            var res = await _alfrescoService.GetNodeChildrenAsync("8f2105b4-daaf-4874-9e8a-2152569d109b");
+            var res = await _alfrescoReadService.GetNodeChildrenAsync("8f2105b4-daaf-4874-9e8a-2152569d109b");
 
-            var resp = JsonConvert.DeserializeObject<NodeChildrenResponse>(res);
+            //var resp = JsonConvert.DeserializeObject<NodeChildrenResponse>(res);
 
-            Entries = new ObservableCollection<Entry>(resp.List.Entries.Select(x => x.Entry));
+            Entries = new ObservableCollection<Entry>(res.List.Entries.Select(x => x.Entry));
 
 
             var x = 1;
@@ -100,7 +106,8 @@ namespace Alfresco.App.UserControls
 
             var resp = await _alfrescoService.PostSearch(request);
 
-            Entries = new ObservableCollection<Entry>(resp.List.Entries.Select(x => x.Entry));
+            if ((resp!= null ) && (resp?.List?.Entries?.Count() > 0))
+                Entries = new ObservableCollection<Entry>(resp.List.Entries.Select(x => x.Entry));
 
 
         }
@@ -181,6 +188,11 @@ namespace Alfresco.App.UserControls
             }
                 
 
+        }
+
+        private async void btnMove_Click(object sender, RoutedEventArgs e)
+        {
+            var res = await _alfrescoService.MoveDocumentAsync("nodeIdToMov", "destFolderID");
         }
     }
 }

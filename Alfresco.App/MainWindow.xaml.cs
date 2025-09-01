@@ -22,7 +22,7 @@ namespace Alfresco.App
         public MainWindow()
         {
             InitializeComponent();
-            _alfrescoService = App.AppHost.Services.GetRequiredService<IAlfrescoApi>();
+           // _alfrescoService = App.AppHost.Services.GetRequiredService<IAlfrescoApi>();
         }
     }
 }
