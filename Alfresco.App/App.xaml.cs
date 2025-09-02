@@ -105,6 +105,8 @@ namespace Alfresco.App
                     });
 
                     services.AddTransient<IDocStagingRepository, DocStagingRepository>();
+                    services.AddTransient<IFolderStagingRepository, FolderStagingRepository>();
+
 
                     services.AddTransient<MainWindow>();
 

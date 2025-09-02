@@ -10,7 +10,26 @@ namespace Mapper
 {
     public static class MyMapper
     {
-       
+
+        public static FolderStaging ToFolderStaging(this Entry inEntryi)
+        {
+            return new FolderStaging
+            {
+                NodeId = inEntryi.Id,
+                ParentId = inEntryi.ParentId,
+                Name = inEntryi.Name,
+                Status = "NEW",
+                CreatedAt = DateTime.UtcNow,
+                UpdatedAt = DateTime.UtcNow
+            };
+        }
+
+        public static List<FolderStaging> ToFolderStagingList(this IEnumerable<Entry> inEntries)
+        {
+            return inEntries.Select(e => e.ToFolderStaging()).ToList();
+        }
+
+
         public static DocStaging ToDocStaging(this Entry inEntryi)
         {
             return new DocStaging

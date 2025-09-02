@@ -1,6 +1,7 @@
 ﻿using Alfresco.Apstraction.Interfaces;
 using Alfresco.Contracts.Models;
 using Alfresco.Contracts.Oracle.Models;
+using Alfresco.Contracts.Request;
 using Alfresco.Contracts.Response;
 using Mapper;
 using Microsoft.Extensions.DependencyInjection;
@@ -40,6 +41,8 @@ namespace Alfresco.App.UserControls
 
         private readonly IDocStagingRepository _docStagingRepository;
 
+        private readonly IFolderStagingRepository _folderStagingRepository;
+
 
         //public ObservableCollection<Entry> Entries { get; set; } = new();
 
@@ -75,6 +78,23 @@ namespace Alfresco.App.UserControls
         }
         #endregion
 
+
+        #region -Entries- property
+        private ObservableCollection<Entry> _Folders;
+        public ObservableCollection<Entry> Folders
+        {
+            get { return _Folders; }
+            set
+            {
+                if (_Folders != value)
+                {
+                    _Folders = value;
+                    NotifyPropertyChanged();
+                }
+            }
+        }
+        #endregion
+
         //public static ObservableCollection<Entry> Entries { get; set; } = new();
 
         public Main()
@@ -86,6 +106,7 @@ namespace Alfresco.App.UserControls
             _alfrescoReadService = App.AppHost.Services.GetRequiredService<IAlfrescoReadApi>();
             //_alfrescoService = App.AppHost.Services.GetRequiredService<IAlfrescoApi>(); 
             _docStagingRepository = App.AppHost.Services.GetRequiredService<IDocStagingRepository>();
+            _folderStagingRepository = App.AppHost.Services.GetRequiredService<IFolderStagingRepository>();
         }
 
         private async void btnLoad_Click(object sender, RoutedEventArgs e)
@@ -193,6 +214,56 @@ namespace Alfresco.App.UserControls
         private async void btnMove_Click(object sender, RoutedEventArgs e)
         {
             var res = await _alfrescoService.MoveDocumentAsync("nodeIdToMov", "destFolderID");
+        }
+
+        private async void btnFolders_Click(object sender, RoutedEventArgs e)
+        {
+
+            for(var x =0; x<20; x++)
+            {
+                var res = await _alfrescoWriteService.CreateFolderAsync("67dbe2a3-aaf7-4ef0-9be2-a3aaf73ef0aa", $"TestFolder-{x}");
+
+                if( res != "")
+                {
+                    for(var y = 0; y < 3; y++)
+                    {
+                        var fileRes = await _alfrescoWriteService.CreateFileAsync(res, $"TestFile{x}-{y}.txt");
+                    }
+                }
+            }
+
+            MessageBox.Show("Gotovo");
+
+        }
+
+        private async void btnGetFolders_Click(object sender, RoutedEventArgs e)
+        {
+            var req = new PostSearchRequest()
+            {
+                Query = new Contracts.Request.QueryRequest()
+                {
+                    Language = "cmis",
+                    Query = "SELECT * FROM cmis:folder WHERE cmis:name LIKE '%TestFolder-%'"
+                },
+                Paging = new Contracts.Request.PagingRequest()
+                {
+                    MaxItems = 100,
+                    SkipCount = 0
+                },Sort = null
+            };
+
+            var resp = await _alfrescoReadService.SearchAsync(req);
+
+            if (resp?.List?.Entries?.Count > 0)
+            {
+
+                    Folders = new ObservableCollection<Entry>(resp.List.Entries.Select(x => x.Entry));
+
+                var FoldersOrtacle = Folders.ToFolderStagingList();
+
+                var resOracle = await _folderStagingRepository.InsertManyAsync(FoldersOrtacle);
+                var rr = 1;
+            }
         }
     }
 }
