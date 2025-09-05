@@ -63,8 +63,8 @@ namespace Alfresco.App.UserControls
         #endregion
 
         #region -Entries- property
-        private  ObservableCollection<Entry> _Entries;
-        public  ObservableCollection<Entry> Entries
+        private ObservableCollection<Entry> _Entries;
+        public ObservableCollection<Entry> Entries
         {
             get { return _Entries; }
             set
@@ -127,7 +127,7 @@ namespace Alfresco.App.UserControls
 
             var resp = await _alfrescoService.PostSearch(request);
 
-            if ((resp!= null ) && (resp?.List?.Entries?.Count() > 0))
+            if ((resp != null) && (resp?.List?.Entries?.Count() > 0))
                 Entries = new ObservableCollection<Entry>(resp.List.Entries.Select(x => x.Entry));
 
 
@@ -135,13 +135,13 @@ namespace Alfresco.App.UserControls
 
         private async void btnSearch_Click_1(object sender, RoutedEventArgs e)
         {
-            var test =  (await _docStagingRepository.GetListAsync()).ToList();
+            var test = (await _docStagingRepository.GetListAsync()).ToList();
 
             Documents = new ObservableCollection<DocStaging>(test);
 
             var x = 1;
 
-            
+
         }
 
 
@@ -207,25 +207,37 @@ namespace Alfresco.App.UserControls
                 var forInsert = Entries.ToDocStagingList();
                 var res = await _docStagingRepository.InsertManyAsync(forInsert);
             }
-                
+
 
         }
 
         private async void btnMove_Click(object sender, RoutedEventArgs e)
         {
-            var res = await _alfrescoService.MoveDocumentAsync("nodeIdToMov", "destFolderID");
+            
+            
+            var folders = await _folderStagingRepository.GetListAsync();
+
+            var docs = await _docStagingRepository.GetListAsync();
+
+            foreach(var doc in docs)
+            {
+                var move = await _alfrescoService.MoveDocumentAsync(doc.NodeId, doc.ToPath);
+            }
+
+
+            //var res = await _alfrescoService.MoveDocumentAsync("nodeIdToMov", "destFolderID");
         }
 
         private async void btnFolders_Click(object sender, RoutedEventArgs e)
         {
 
-            for(var x =0; x<20; x++)
+            for (var x = 0; x < 20; x++)
             {
-                var res = await _alfrescoWriteService.CreateFolderAsync("67dbe2a3-aaf7-4ef0-9be2-a3aaf73ef0aa", $"TestFolder-{x}");
+                var res = await _alfrescoWriteService.CreateFolderAsync("bc5b358a-ec9d-49d2-9b35-8aec9d19d27b", $"TestFolder-{x}");
 
-                if( res != "")
+                if (res != "")
                 {
-                    for(var y = 0; y < 3; y++)
+                    for (var y = 0; y < 3; y++)
                     {
                         var fileRes = await _alfrescoWriteService.CreateFileAsync(res, $"TestFile{x}-{y}.txt");
                     }
@@ -249,7 +261,8 @@ namespace Alfresco.App.UserControls
                 {
                     MaxItems = 100,
                     SkipCount = 0
-                },Sort = null
+                },
+                Sort = null
             };
 
             var resp = await _alfrescoReadService.SearchAsync(req);
@@ -257,12 +270,47 @@ namespace Alfresco.App.UserControls
             if (resp?.List?.Entries?.Count > 0)
             {
 
-                    Folders = new ObservableCollection<Entry>(resp.List.Entries.Select(x => x.Entry));
+                Folders = new ObservableCollection<Entry>(resp.List.Entries.Select(x => x.Entry));
 
                 var FoldersOrtacle = Folders.ToFolderStagingList();
 
                 var resOracle = await _folderStagingRepository.InsertManyAsync(FoldersOrtacle);
                 var rr = 1;
+            }
+        }
+
+
+      
+        private async void GetDocsFromFolder(object sender, RoutedEventArgs e)
+        {
+            if (Folders.Any())
+            {
+
+                 //Root new folder
+
+                foreach (var folder in Folders)
+                {
+                    var newFolderName = folder.Name.Replace("-", "");
+                    var newFolderId = await _alfrescoReadService.GetFolderByRelative("caac4e9d-27a3-4e9c-ac4e-9d27a30e9ca0", newFolderName);
+                    if (string.IsNullOrEmpty(newFolderId))
+                    {
+                        newFolderId = await _alfrescoWriteService.CreateFolderAsync("caac4e9d-27a3-4e9c-ac4e-9d27a30e9ca0", newFolderName);
+                    }
+                    var res = await _alfrescoReadService.GetNodeChildrenAsync(folder.Id);
+                    if (res?.List?.Entries?.Count > 0)
+                    {
+                       
+
+                        var docs = res.List.Entries.Select(x => x.Entry).ToDocStagingList();
+                        foreach (var item in docs)
+                        {
+                            item.FromPath = folder.Id;
+                            item.ToPath = newFolderId;
+                        }
+                        var resOracle = await _docStagingRepository.InsertManyAsync(docs);
+                        var rr = 1;
+                    }
+                }
             }
         }
     }

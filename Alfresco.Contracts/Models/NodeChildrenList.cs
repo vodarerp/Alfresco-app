@@ -11,5 +11,7 @@ namespace Alfresco.Contracts.Models
     {
         public Pagination? Pagination { get; set; }
         public List<ListEntry>? Entries { get; set; }
+
+        public Entry? Source { get; set; }
     }
 }

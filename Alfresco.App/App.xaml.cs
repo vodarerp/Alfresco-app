@@ -118,78 +118,7 @@ namespace Alfresco.App
         }
 
         protected override void OnStartup(StartupEventArgs e)
-        {
-            //AppHost = Host.CreateDefaultBuilder()
-            // .ConfigureAppConfiguration(config =>
-            // {
-            //     config.AddJsonFile("appsettings.json", optional: false, reloadOnChange: true);
-            // })
-            // .ConfigureServices((c, services) =>
-            // {
-            //     var section = c.Configuration.GetSection("Alfresco");
-            //     services.AddAlfrescoClient(opts =>
-            //     {
-            //         opts.BaseUrl = section["BaseUrl"] ?? "";
-            //         opts.Username = section["Username"] ?? "";
-            //         opts.Password = section["Password"] ?? "";
-            //     });
-
-            //     services.AddTransient<MainWindow>();
-            //     //DIs
-            //     services.AddTransient<StatusBarUC>();
-            //     services.AddTransient<Main>();
-
-            // })
-            // .Build();
-
-            //AppHost = Host.CreateDefaultBuilder()
-            //    .ConfigureServices((context, services) =>
-            //    {
-            //        services.Configure<AlfrescoOptions>(context.Configuration.GetSection("Alfresco"));
-
-            //        services.AddTransient<BasicAuthHandler>();
-
-            //        services.AddHttpClient<IAlfrescoApi, AlfrescoAPI>(cli =>
-            //        {
-            //            cli.Timeout = TimeSpan.FromSeconds(30);
-            //        })
-            //            .ConfigureHttpClient((sp, cli) =>
-            //            {
-            //                var options = sp.GetRequiredService<IOptions<AlfrescoOptions>>().Value;
-            //                cli.BaseAddress = new Uri(options.BaseUrl);
-            //                cli.DefaultRequestHeaders.Accept.Add(new System.Net.Http.Headers.MediaTypeWithQualityHeaderValue("application/json"));
-            //            })
-
-            //            .AddHttpMessageHandler<BasicAuthHandler>()
-            //            .SetHandlerLifetime(TimeSpan.FromMinutes(5))
-            //            .AddPolicyHandler(GetRetryPlicy())
-            //            .AddPolicyHandler(GetCircuitBreakerPolicy());
-
-            //        services.Configure<OracleOptions>(context.Configuration.GetSection("Oracle"));
-
-            //        services.AddSingleton(sp => sp.GetRequiredService<IOptions<OracleOptions>>().Value);
-
-            //        services.AddTransient<OracleConnection>((sp) =>
-            //        {
-            //            var options = sp.GetRequiredService<OracleOptions>();
-            //            var conn = new OracleConnection(options.ConnectionString);
-            //            conn.Open();
-            //            return conn;
-            //        });
-
-            //        services.AddTransient<OracleTransaction>(sp =>
-            //        {
-            //            var conn = sp.GetRequiredService<OracleConnection>();
-            //            return conn.BeginTransaction();  // IsolationLevel.ReadCommitted po defaultu
-            //        });
-
-            //        services.AddTransient<IDocStagingRepository, DocStagingRepository>();
-
-            //        services.AddTransient<MainWindow>();
-
-            //    }).Build();
-
-           
+        {                    
 
             AppHost.Start();
 

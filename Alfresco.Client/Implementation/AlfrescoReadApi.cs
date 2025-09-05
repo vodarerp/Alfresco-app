@@ -23,6 +23,26 @@ namespace Alfresco.Client.Implementation
             _client = client;
             _options = options.Value;
         }
+
+        public async Task<string> GetFolderByRelative(string inNodeId, string inRelativePath, CancellationToken ct = default)
+        {
+            var toRet = string.Empty;
+            //http://localhost:8080/alfresco/api/-default-/public/alfresco/versions/1/nodes/caac4e9d-27a3-4e9c-ac4e-9d27a30e9ca0/children?relativePath=v&includeSource=true
+            using var getRespone = await _client.GetAsync($"/alfresco/api/-default-/public/alfresco/versions/1/nodes/{inNodeId}/children?relativePath={Uri.EscapeDataString(inRelativePath)}&includeSource=true", ct);
+
+            if ((getRespone != null) && (getRespone.IsSuccessStatusCode)) 
+            {
+                var body = await getRespone.Content.ReadAsStringAsync(ct);
+                var resp = JsonConvert.DeserializeObject<NodeChildrenResponse>(body);
+                if ((resp != null) && (resp.List != null) && (resp.List.Source != null) )
+                    toRet = resp.List.Source.Id;
+            }
+
+            return toRet;
+
+            //throw new NotImplementedException();
+        }
+
         public async Task<NodeChildrenResponse> GetNodeChildrenAsync(string nodeId, CancellationToken ct = default)
         {
             using var getResponse = await _client.GetAsync($"/alfresco/api/-default-/public/alfresco/versions/1/nodes/{nodeId}/children", ct);

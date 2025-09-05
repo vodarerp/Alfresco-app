@@ -110,12 +110,12 @@ namespace Oracle.Infractructure.Implementation
         public async Task<IEnumerable<T>> GetListAsync(object? filters = null, int? skip = null, int? take = null, string[]? orderBy = null, CancellationToken ct = default)
         {
 
-            var cnt = await _connection.ExecuteScalarAsync<int>("select  count(*) from dual");
+            //var cnt = await _connection.ExecuteScalarAsync<int>("select  count(*) from dual");
 
-            var cnt1 = await _connection.ExecuteScalarAsync<int>("select  count(*) from appUser.DOCSTAGING");
+           // var cnt1 = await _connection.ExecuteScalarAsync<int>("select  count(*) from appUser.DOCSTAGING");
 
 
-            string sql = $"SELECT * FROM appUser.{TableName}";
+            string sql = $"SELECT * FROM {TableName}";
 
             var res = await _connection.QueryAsync<T>(new CommandDefinition(sql, cancellationToken: ct));
 

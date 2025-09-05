@@ -17,6 +17,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Oracle.Infractructure", "Or
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Mapper", "Mapper\Mapper.csproj", "{70094585-26D0-4379-817C-6B4F6EB25ADD}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Migration.Apstaction", "Migration.Apstaction\Migration.Apstaction.csproj", "{34F71BE8-61C3-489E-8909-2A94A197D16D}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -51,6 +53,10 @@ Global
 		{70094585-26D0-4379-817C-6B4F6EB25ADD}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{70094585-26D0-4379-817C-6B4F6EB25ADD}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{70094585-26D0-4379-817C-6B4F6EB25ADD}.Release|Any CPU.Build.0 = Release|Any CPU
+		{34F71BE8-61C3-489E-8909-2A94A197D16D}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{34F71BE8-61C3-489E-8909-2A94A197D16D}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{34F71BE8-61C3-489E-8909-2A94A197D16D}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{34F71BE8-61C3-489E-8909-2A94A197D16D}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
