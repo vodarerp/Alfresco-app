@@ -19,6 +19,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Mapper", "Mapper\Mapper.csp
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Migration.Apstaction", "Migration.Apstaction\Migration.Apstaction.csproj", "{34F71BE8-61C3-489E-8909-2A94A197D16D}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Migration.Infrastructure", "Migration.Infrastructure\Migration.Infrastructure.csproj", "{76374C5A-8EB1-4993-98E9-FA6F12BC79B8}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -57,6 +59,10 @@ Global
 		{34F71BE8-61C3-489E-8909-2A94A197D16D}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{34F71BE8-61C3-489E-8909-2A94A197D16D}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{34F71BE8-61C3-489E-8909-2A94A197D16D}.Release|Any CPU.Build.0 = Release|Any CPU
+		{76374C5A-8EB1-4993-98E9-FA6F12BC79B8}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{76374C5A-8EB1-4993-98E9-FA6F12BC79B8}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{76374C5A-8EB1-4993-98E9-FA6F12BC79B8}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{76374C5A-8EB1-4993-98E9-FA6F12BC79B8}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
