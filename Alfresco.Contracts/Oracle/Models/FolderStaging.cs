@@ -20,6 +20,8 @@ namespace Alfresco.Contracts.Oracle.Models
 
         public string Status { get; set; } = "NEW";
 
+        public string? DestFolderId { get; set; }
+
         public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 
         public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;

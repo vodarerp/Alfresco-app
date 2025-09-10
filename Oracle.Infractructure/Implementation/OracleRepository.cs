@@ -10,12 +10,13 @@ using System.Threading;
 using Oracle.Infractructure.Helpers;
 
 
+
 namespace Oracle.Infractructure.Implementation
 {
     public class OracleRepository<T, TKey> : IRepository<T, TKey>
     {
-        private readonly OracleConnection _connection;
-        private readonly OracleTransaction _transaction;
+        internal readonly OracleConnection _connection;
+        internal readonly OracleTransaction _transaction;
         
         public OracleRepository(OracleConnection connection, OracleTransaction transaction)
         {
@@ -97,14 +98,29 @@ namespace Oracle.Infractructure.Implementation
             return toRet;
         }
 
-        public Task DeleteAsync(long id, CancellationToken cancellationToken = default)
+        public async Task DeleteAsync(long id, CancellationToken cancellationToken = default)
         {
-            throw new NotImplementedException();
+            var key = OracleHelpers<T>.TableProps.Where(o => o.IsKey).FirstOrDefault();
+
+            var sql = $"DELETE FROM {TableName} WHERE {key.Col} = :id";
+
+            var dp = new DynamicParameters();
+            dp.Add(":id", id);
+
+            var cmd = new CommandDefinition(sql, dp, _transaction, cancellationToken: cancellationToken);
+            await _connection.ExecuteAsync(cmd).ConfigureAwait(false);
         }
 
-        public Task<T?> GetByIdAsync(long id, CancellationToken cancellationToken = default)
+        public async Task<T?> GetByIdAsync(long id, CancellationToken cancellationToken = default)
         {
-            throw new NotImplementedException();
+            var key = OracleHelpers<T>.TableProps.Where(o => o.IsKey).FirstOrDefault();
+
+            string sql = $"SELECT * FROM {TableName} WHERE {key.Col} = :id";
+
+            var dp = new DynamicParameters();
+            dp.Add(":id", id);
+            var cmd = new CommandDefinition(sql, dp, _transaction, cancellationToken: cancellationToken);
+            return await _connection.QueryFirstOrDefaultAsync<T>(cmd).ConfigureAwait(false);
         }
 
         public async Task<IEnumerable<T>> GetListAsync(object? filters = null, int? skip = null, int? take = null, string[]? orderBy = null, CancellationToken ct = default)
@@ -114,10 +130,30 @@ namespace Oracle.Infractructure.Implementation
 
            // var cnt1 = await _connection.ExecuteScalarAsync<int>("select  count(*) from appUser.DOCSTAGING");
 
+            var (whereSql, dp) = OracleHelpers<T>.BuildWhere(filters);
 
-            string sql = $"SELECT * FROM {TableName}";
+            var sql = $"SELECT * FROM {TableName} {whereSql} ";
 
-            var res = await _connection.QueryAsync<T>(new CommandDefinition(sql, cancellationToken: ct));
+            if (orderBy != null && orderBy.Length > 0)
+            {
+                var orderSql = string.Join(", ", orderBy);
+
+                sql += $" ORDER BY {orderSql} ";
+            }
+
+            if(skip.HasValue || take.HasValue)
+            {
+
+                int s = skip ?? 0;
+                int t = take ?? 100;
+                sql += $" OFFSET {s} ROWS FETCH NEXT {t} ROWS ONLY ";
+            }
+
+            //string sql = $"SELECT * FROM {TableName}";
+            //var res = await _connection.QueryAsync<T>(new CommandDefinition(sql, cancellationToken: ct));
+
+            var cmd = new CommandDefinition(sql, dp, _transaction, cancellationToken: ct);
+            var res = await _connection.QueryAsync<T>(cmd).ConfigureAwait(false);
 
             return res;
 
@@ -125,9 +161,27 @@ namespace Oracle.Infractructure.Implementation
 
        
 
-        public Task UpdateAsync(T entity, CancellationToken cancellationToken = default)
+        public async Task UpdateAsync(T entity, CancellationToken cancellationToken = default)
         {
-            throw new NotImplementedException();
+            var key = OracleHelpers<T>.TableProps.Where(o => o.IsKey).FirstOrDefault();
+            
+            var setCols = OracleHelpers<T>.TableProps.Where(o => !o.IsKey && !o.IsIdentity).ToArray();
+
+            if (setCols.Count() == 0) return;
+
+            var setPart = string.Join(", ", setCols.Select(c => $"{c.Col} = :{c.Col}"));
+            string sql = $"UPDATE {TableName} SET {setPart} WHERE {key.Col} = :{key.Col}";
+
+            var dp = new DynamicParameters();
+
+            foreach (var (Prop, Col, IsKey, IsIdentity) in setCols)
+            {
+                var val = Prop.GetValue(entity);
+                dp.Add($":{Col}", val);
+            }
+
+            var cmd = new CommandDefinition(sql, dp, _transaction, cancellationToken: cancellationToken);
+            await _connection.ExecuteAsync(cmd).ConfigureAwait(false);
         }
 
 

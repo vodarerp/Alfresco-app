@@ -53,6 +53,10 @@ namespace Oracle.Infractructure.Helpers
 
     public static class OracleHelpers<T>
     {
+
+        #region CacheMetada
+
+
         private static readonly Lazy<(PropertyInfo Prop, string Col, bool IsKey, bool IsIdentity)[]> _tableProps =
                 new(() =>
                 {
@@ -68,5 +72,46 @@ namespace Oracle.Infractructure.Helpers
                 }, LazyThreadSafetyMode.ExecutionAndPublication);
 
         public static IReadOnlyList<(PropertyInfo Prop, string Col, bool IsKey, bool IsIdentity)> TableProps => _tableProps.Value;
+
+        #endregion
+
+
+        #region Helpers
+
+        public static (string sql, DynamicParameters dp) BuildWhere(object? filters)
+        {
+
+            var dp = new DynamicParameters();
+
+            if (filters == null) return ("", dp);
+
+            var props = filters.GetType().GetProperties(BindingFlags.Public | BindingFlags.Instance);
+            var conds = new List<string>();
+
+            foreach(var p in props)
+            {
+                var val = p.GetValue(filters);
+                if (val == null) continue;
+
+                var col = TableProps.FirstOrDefault(c =>
+                   string.Equals(c.Prop.Name, p.Name, StringComparison.OrdinalIgnoreCase) ||
+                   string.Equals(c.Col, p.Name, StringComparison.OrdinalIgnoreCase));
+
+                var param = ":f_" + p.Name;
+                conds.Add($"{(string.IsNullOrEmpty(col.Col) ? p.Name.ToUpperInvariant() : col.Col)} = {param}");
+                dp.Add(param, val);
+
+                //var col = TableProps.FirstOrDefault(tp => tp.Prop.Name == p.Name).Col ?? p.Name;
+                //var paramName = $"p_{p.Name}";
+                //conds.Add($"{col} = :{paramName}");
+                //dp.Add(paramName, val);
+            }
+
+            if (conds.Count == 0) return ("", dp);
+
+            return ("where " + string.Join(" and ", conds),dp);
+        }
+
+        #endregion
     }
 }
