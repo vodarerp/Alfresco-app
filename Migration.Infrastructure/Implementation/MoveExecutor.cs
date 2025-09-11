@@ -23,9 +23,39 @@ namespace Migration.Infrastructure.Implementation
         }
 
 
-        public Task<int> ExecuteMoveAsync(int take, CancellationToken ct)
+        public async Task<int> ExecuteMoveAsync(int take, CancellationToken ct)
         {
-            throw new NotImplementedException();
+            //throw new NotImplementedException();
+
+            int added = 0;
+            var list = await _docRepo.TakeReadyForProcessingAsync(take, ct);
+            foreach(var item in list)
+            {
+                try
+                {
+                    ct.ThrowIfCancellationRequested();
+                    await _docRepo.SetStatusAsync(item.Id, "PROCESSING", null, ct);
+                    if (await _write.MoveDocumentAsync(item.NodeId, item.ToPath,null, ct: ct))
+                    {
+                        await _docRepo.SetStatusAsync(item.Id, "DONE", null, ct);
+                        added++;
+                    }
+                    else
+                    {
+                        await _docRepo.FailAsync(item.Id, "Move operation returned false", ct);
+                    }
+
+                    //await _write.MoveNodeAsync(item.SourceNodeId, item.DestFolderId, ct);
+                }
+                catch (Exception ex)
+                {
+                    await _docRepo.FailAsync(item.Id, ex.Message, ct);
+                }
+            }
+
+
+            return added;
+
         }
     }
 }
