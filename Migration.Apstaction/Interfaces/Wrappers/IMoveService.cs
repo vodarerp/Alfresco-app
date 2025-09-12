@@ -1,0 +1,17 @@
+﻿using Migration.Apstaction.Models;
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Text;
+using System.Threading.Tasks;
+
+namespace Migration.Apstaction.Interfaces.Wrappers
+{
+    internal interface IMoveService
+    {
+        //Task<int> MoveAsync(MoveRequest inRequest, CancellationToken ct);
+        Task<MoveBatchResult> RunBatchAsync(MoveBatchRequest inRequest, CancellationToken ct);
+
+        Task RunLoopAsync(MoveLoopOptions inOptions, CancellationToken ct);
+    }
+}

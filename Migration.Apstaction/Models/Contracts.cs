@@ -9,6 +9,33 @@ namespace Migration.Apstaction.Models
 
 
 
-    public sealed record DiscoverRequest(string SrcRootId, string DestRootId, string NameFilter, int PageSize);
+    public sealed record FolderDiscoverRequest(string SrcRootId, string DestRootId, string NameFilter, int PageSize);
+    public sealed record DocumentDiscoverRequest(string SrcRootId);
+
+    public sealed record MoveRequest(string DocumentId, string DestFolderId, string? NewDocumentName);
+    //---------------------------------------------
+
+    public sealed record FolderDiscoveryBatchRequest(int Take, string? RootFolderID);
+    public sealed record DocumentDiscoveryBatchRequest(int DocPageSize);
+
+    public sealed record MoveBatchRequest(int Take, int defreeOfParralelism);
+    public sealed record MoveLoopOptions(MoveBatchRequest Batch, TimeSpan IdleDelay);
+
+
+    public sealed record FolderDiscoveryLoopOptions(FolderDiscoveryBatchRequest Batch, TimeSpan IdleDelay);
+    public sealed record DocumentDiscoveryLoopOptions(DocumentDiscoveryBatchRequest Batch, TimeSpan IdleDelay);
+
+
+    public sealed record MoveBatchResult(int Done, int Failed);
+    public sealed record FolderBatchResult(int InsertedCount);
+    public sealed record DocumentBatchResult(int PlannedCount);
+
+    public sealed record MoveExecutorRequest(string DocumentId, string DestFolderId, string? NewDocumentName);
+
+    public sealed record FolderReaderRequest(string RootId, string NameFilter, int Skip, int Take);
+
+    public sealed record MoveReaderResponse(string DocumentNodeId, string FolderDestId);
+
+
+
 }
-        

@@ -9,7 +9,7 @@ using System.Threading.Tasks;
 
 namespace Migration.Infrastructure.Implementation
 {
-    public class MoveExecutor : IMoveExecutor
+    public class MoveExecutor 
     {
 
         private readonly IDocStagingRepository _docRepo;

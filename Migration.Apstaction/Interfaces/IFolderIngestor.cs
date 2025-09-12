@@ -1,12 +1,15 @@
 ﻿
 
+using Alfresco.Contracts.Models;
 using Migration.Apstaction.Models;
 
 namespace Migration.Apstaction.Interfaces
 {
     public interface IFolderIngestor
     {
-        Task UpsertAsync(FolderIngestorItem item, CancellationToken ct);
+        //Task UpsertAsync(FolderIngestorItem item, CancellationToken ct);
+
+        Task<int> InserManyAsync(IReadOnlyList<Entry> items, CancellationToken ct);
     }
 
 

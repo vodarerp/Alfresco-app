@@ -11,7 +11,7 @@ using System.Threading.Tasks;
 
 namespace Migration.Infrastructure.Implementation
 {
-    public class FolderScanner : IFolderScanner
+    public class FolderScanner
     {
         private readonly IAlfrescoReadApi _read;
 

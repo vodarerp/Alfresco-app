@@ -9,7 +9,7 @@ using System.Threading.Tasks;
 
 namespace Migration.Infrastructure.Implementation
 {
-    public class MovePlanner : IMovePlanner
+    public class MovePlanner 
     {
         private readonly IAlfrescoReadApi _read;
         private readonly IDocStagingRepository _docRepo;

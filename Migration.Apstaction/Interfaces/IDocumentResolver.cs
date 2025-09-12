@@ -6,8 +6,8 @@ using System.Threading.Tasks;
 
 namespace Migration.Apstaction.Interfaces
 {
-    public interface IMovePlanner
+    public interface IDocumentResolver
     {
-        Task<int> PlanAsync(string srcFolderId, string destFodlerId, int pageSize, CancellationToken ct);
+        Task<string> ResolveAsync(string destinationRootId, string newFolderName,CancellationToken ct);
     }
 }

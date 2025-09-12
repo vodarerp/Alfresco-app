@@ -9,5 +9,8 @@ namespace Migration.Apstaction.Interfaces
     public interface IMoveExecutor
     {
         Task<int> ExecuteMoveAsync(int take, CancellationToken ct);
+
+        Task MoveAsync(MoveExecutorRequest inRequest, CancellationToken ct);
+
     }
 }
