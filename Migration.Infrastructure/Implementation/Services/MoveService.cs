@@ -1,5 +1,4 @@
-﻿using Migration.Apstaction.Interfaces;
-using Migration.Apstaction.Interfaces.Services;
+﻿using Migration.Apstaction.Interfaces.Wrappers;
 using Migration.Apstaction.Models;
 using System;
 using System.Collections.Generic;
@@ -9,14 +8,14 @@ using System.Threading.Tasks;
 
 namespace Migration.Infrastructure.Implementation.Services
 {
-    public class FolderDiscoveryService : IFolderDiscoveryService
+    internal class MoveService : IMoveService
     {
-        public Task<FolderBatchResult> RunBatchAsync(FolderDiscoveryBatchRequest inRequest, CancellationToken ct)
+        public Task<MoveBatchResult> RunBatchAsync(MoveBatchRequest inRequest, CancellationToken ct)
         {
             throw new NotImplementedException();
         }
 
-        public Task RunLoopAsync(FolderDiscoveryLoopOptions inOptions, CancellationToken ct)
+        public Task RunLoopAsync(MoveLoopOptions inOptions, CancellationToken ct)
         {
             throw new NotImplementedException();
         }

@@ -7,7 +7,7 @@ using System.Threading.Tasks;
 
 namespace Migration.Apstaction.Interfaces.Wrappers
 {
-    internal interface IMoveService
+    public interface IMoveService
     {
         //Task<int> MoveAsync(MoveRequest inRequest, CancellationToken ct);
         Task<MoveBatchResult> RunBatchAsync(MoveBatchRequest inRequest, CancellationToken ct);

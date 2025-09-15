@@ -9,6 +9,6 @@ namespace Migration.Apstaction.Interfaces
 {
     public interface IDocumentReader
     {
-        public Task<IReadOnlyList<Entry>> ReadBatchAsync(string folderNodeId, CancellationToken ct);
+        public Task<IReadOnlyList<ListEntry>> ReadBatchAsync(string folderNodeId, CancellationToken ct);
     }
 }

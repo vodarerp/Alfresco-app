@@ -1,4 +1,5 @@
-﻿using System;
+﻿using Migration.Apstaction.Models;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
@@ -8,9 +9,9 @@ namespace Migration.Apstaction.Interfaces
 {
     public interface IMoveExecutor
     {
-        Task<int> ExecuteMoveAsync(int take, CancellationToken ct);
+       // Task<int> ExecuteMoveAsync(int take, CancellationToken ct);
 
-        Task MoveAsync(MoveExecutorRequest inRequest, CancellationToken ct);
+        Task<bool> MoveAsync(MoveExecutorRequest inRequest, CancellationToken ct);
 
     }
 }

@@ -14,9 +14,4 @@
     <ProjectReference Include="..\Oracle.Apstaction\Oracle.Apstaction.csproj" />
   </ItemGroup>
 
-  <ItemGroup>
-    <Folder Include="Implementation\Move\" />
-    <Folder Include="Implementation\Document\" />
-  </ItemGroup>
-
 </Project>

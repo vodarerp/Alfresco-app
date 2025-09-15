@@ -7,7 +7,7 @@ using System.Threading.Tasks;
 
 namespace Migration.Apstaction.Interfaces.Wrappers
 {
-    internal interface IDocumentDiscoveryService
+    public interface IDocumentDiscoveryService
     {
         //Task<int> DiscoverAsync(DocumentDiscoverRequest inRequest, CancellationToken ct);
 
