@@ -15,8 +15,8 @@ namespace Migration.Apstaction.Models
     public sealed record MoveRequest(string DocumentId, string DestFolderId, string? NewDocumentName);
     //---------------------------------------------
 
-    public sealed record FolderDiscoveryBatchRequest(int Take, string? RootFolderID);
-    public sealed record DocumentDiscoveryBatchRequest(int DocPageSize);
+    public sealed record FolderDiscoveryBatchRequest(int Take, FolderReaderRequest FolderRequest);
+    public sealed record DocumentDiscoveryBatchRequest(int Take, string RootDestinationFolder);
 
     public sealed record MoveBatchRequest(int Take, int defreeOfParralelism);
     public sealed record MoveLoopOptions(MoveBatchRequest Batch, TimeSpan IdleDelay);
@@ -34,7 +34,7 @@ namespace Migration.Apstaction.Models
 
     public sealed record FolderReaderRequest(string RootId, string NameFilter, int Skip, int Take);
 
-    public sealed record MoveReaderResponse(string DocumentNodeId, string FolderDestId);
+    public sealed record MoveReaderResponse(long DocStagingId, string DocumentNodeId, string FolderDestId);
 
 
 

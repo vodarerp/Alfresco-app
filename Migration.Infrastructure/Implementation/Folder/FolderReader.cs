@@ -31,7 +31,7 @@ namespace Migration.Infrastructure.Implementation.Folder
                 Query = new QueryRequest()
                 {
                     Language = "cmis",
-                    Query = $"SELECT * FROM cmis:folder WHERE cmis:name LIKE '%{cmsLike}%' order by cmis:name"
+                    Query = $"SELECT * FROM cmis:folder WHERE cmis:parentId = '{inRequest.RootId}' and cmis:name LIKE '%{cmsLike}%' order by cmis:name" //IN_TREE('<id>') umose parentId = ''
                 },
                 Paging = new PagingRequest()
                 {

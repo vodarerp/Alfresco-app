@@ -27,7 +27,7 @@ namespace Alfresco.Contracts.Oracle.Models
 
         public string ToPath { get; set; } = string.Empty;
 
-        public string Status { get; set; } = "NEW"; // NEW, DONE, ERR
+        public string Status { get; set; } = "READY"; // NEW, DONE, ERR
 
         public int RetryCount { get; set; }
 

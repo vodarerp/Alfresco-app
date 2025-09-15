@@ -22,10 +22,10 @@ namespace Migration.Infrastructure.Implementation.Move
             _write = wirte;
         }
 
-        public async Task<bool> MoveAsync(MoveExecutorRequest inRequest, CancellationToken ct)
+        public async Task<bool> MoveAsync(string DocumentId, string DestFolderId, CancellationToken ct)
         {
 
-            var toRet = await _write.MoveDocumentAsync(inRequest.DocumentId, inRequest.DestFolderId,null, ct);
+            var toRet = await _write.MoveDocumentAsync(DocumentId, DestFolderId,null, ct);
 
             return toRet;
             //throw new NotImplementedException();

@@ -22,15 +22,15 @@ namespace Migration.Infrastructure.Implementation.Folder
             _folderRepo = folderRepo;
         }
 
-        public async Task<int> InserManyAsync(IReadOnlyList<Entry> items, CancellationToken ct)
+        public async Task<int> InserManyAsync(IReadOnlyList<FolderStaging> items, CancellationToken ct)
         {
             int added = 0;
 
             if (items != null && items.Count > 0)
             {
-                var toInsert = items.ToFolderStagingList();
+                //var toInsert = items.ToFolderStagingList();
                 //toInsert = items.ToFolderStagingList();
-                added = await _folderRepo.InsertManyAsync(toInsert, ct);
+                added = await _folderRepo.InsertManyAsync(items, ct);
             }
 
             return added;

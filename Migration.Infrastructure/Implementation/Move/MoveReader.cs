@@ -31,7 +31,7 @@ namespace Migration.Infrastructure.Implementation.Move
             //    toRet.Add(new MoveReaderResponse(item.NodeId, item.ToPath));
             //}
 
-            var toRet = list.Select(x => new MoveReaderResponse(x.NodeId, x.ToPath)).ToList() ?? new();
+            var toRet = list.Select(x => new MoveReaderResponse(x.Id,x.NodeId, x.ToPath)).ToList() ?? new();
 
             //return list.Select(x => new MoveReaderResponse
             //{

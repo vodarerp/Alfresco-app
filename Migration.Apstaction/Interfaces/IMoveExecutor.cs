@@ -11,7 +11,7 @@ namespace Migration.Apstaction.Interfaces
     {
        // Task<int> ExecuteMoveAsync(int take, CancellationToken ct);
 
-        Task<bool> MoveAsync(MoveExecutorRequest inRequest, CancellationToken ct);
+        Task<bool> MoveAsync(string DocumentId, string DestFolderId, CancellationToken ct);
 
     }
 }

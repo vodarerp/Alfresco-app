@@ -1,4 +1,5 @@
 ﻿using Alfresco.Contracts.Models;
+using Alfresco.Contracts.Oracle.Models;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -9,7 +10,7 @@ namespace Migration.Apstaction.Interfaces
 {
     public interface IDocumentIngestor
     {
-        Task<int> InserManyAsync(IReadOnlyList<Entry> items, CancellationToken ct);
+        Task<int> InserManyAsync(IReadOnlyList<DocStaging> items, CancellationToken ct);
 
     }
 }

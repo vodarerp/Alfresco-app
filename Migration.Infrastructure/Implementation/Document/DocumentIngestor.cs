@@ -1,4 +1,5 @@
 ﻿using Alfresco.Contracts.Models;
+using Alfresco.Contracts.Oracle.Models;
 using Mapper;
 using Migration.Apstaction.Interfaces;
 using Oracle.Apstaction.Interfaces;
@@ -18,15 +19,15 @@ namespace Migration.Infrastructure.Implementation.Document
         {
             _documentRepo = doc;
         }
-        public async Task<int> InserManyAsync(IReadOnlyList<Entry> items, CancellationToken ct)
+        public async Task<int> InserManyAsync(IReadOnlyList<DocStaging> items, CancellationToken ct)
         {
             int added = 0;
 
             if (items != null && items.Count > 0)
             {
-                var toInsert = items.ToDocStagingList();
+               // var toInsert = items.ToDocStagingList();
                 //toInsert = items.ToFolderStagingList();
-                added = await _documentRepo.InsertManyAsync(toInsert, ct);
+                added = await _documentRepo.InsertManyAsync(items, ct);
             }
 
             return added;

@@ -11,6 +11,12 @@ namespace Mapper
     public static class MyMapper
     {
 
+
+        public static List<FolderStaging> ToFolderStagingList(this List<ListEntry> inEntry)
+        {
+            return inEntry.Select(e => e.Entry.ToFolderStaging()).ToList();
+        }
+
         public static FolderStaging ToFolderStaging(this Entry inEntryi)
         {
             return new FolderStaging

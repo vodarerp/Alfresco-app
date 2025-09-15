@@ -1,6 +1,7 @@
 ﻿
 
 using Alfresco.Contracts.Models;
+using Alfresco.Contracts.Oracle.Models;
 using Migration.Apstaction.Models;
 
 namespace Migration.Apstaction.Interfaces
@@ -9,7 +10,7 @@ namespace Migration.Apstaction.Interfaces
     {
         //Task UpsertAsync(FolderIngestorItem item, CancellationToken ct);
 
-        Task<int> InserManyAsync(IReadOnlyList<Entry> items, CancellationToken ct);
+        Task<int> InserManyAsync(IReadOnlyList<FolderStaging> items, CancellationToken ct);
     }
 
 
