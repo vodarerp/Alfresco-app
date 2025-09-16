@@ -18,7 +18,7 @@ namespace Alfresco.Contracts.Oracle.Models
 
         public string? Name { get; set; }
 
-        public string Status { get; set; } = "NEW";
+        public string Status { get; set; } = "READY";
 
         public string? DestFolderId { get; set; }
 

@@ -22,6 +22,9 @@
     <ProjectReference Include="..\Alfresco.Client\Alfresco.Client.csproj" />
     <ProjectReference Include="..\Alfresco.Contracts\Alfresco.Contracts.csproj" />
     <ProjectReference Include="..\Mapper\Mapper.csproj" />
+    <ProjectReference Include="..\Migration.Apstaction\Migration.Apstaction.csproj" />
+    <ProjectReference Include="..\Migration.Infrastructure\Migration.Infrastructure.csproj" />
+    <ProjectReference Include="..\Migration.Workers\Migration.Workers.csproj" />
     <ProjectReference Include="..\Oracle.Apstaction\Oracle.Apstaction.csproj" />
     <ProjectReference Include="..\Oracle.Infractructure\Oracle.Infractructure.csproj" />
   </ItemGroup>

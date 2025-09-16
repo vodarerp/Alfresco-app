@@ -1,4 +1,6 @@
 ﻿
+using Alfresco.Contracts.Models;
+
 namespace Migration.Apstaction.Models
 {
     public sealed record FolderSource(string id, string name, string nodeID, string fullPath);
@@ -32,7 +34,14 @@ namespace Migration.Apstaction.Models
 
     public sealed record MoveExecutorRequest(string DocumentId, string DestFolderId, string? NewDocumentName);
 
-    public sealed record FolderReaderRequest(string RootId, string NameFilter, int Skip, int Take);
+    public sealed record FolderReaderRequest(string RootId, string NameFilter, int Skip, int Take, FolderSeekCursor? Cursor);
+
+    public sealed record FolderReaderResult(IReadOnlyList<ListEntry> Items, FolderSeekCursor? Next) 
+    {
+        public bool HasMore => Items != null && Items.Count > 0 && Next is not null;
+    }
+
+    public sealed record FolderSeekCursor(string LastObjectId, DateTimeOffset LastObjectCreated);
 
     public sealed record MoveReaderResponse(long DocStagingId, string DocumentNodeId, string FolderDestId);
 

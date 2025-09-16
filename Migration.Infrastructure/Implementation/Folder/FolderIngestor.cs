@@ -12,7 +12,7 @@ using System.Threading.Tasks;
 
 namespace Migration.Infrastructure.Implementation.Folder
 {
-    internal class FolderIngestor : IFolderIngestor
+    public class FolderIngestor : IFolderIngestor
     {
         private readonly IFolderStagingRepository _folderRepo;
 

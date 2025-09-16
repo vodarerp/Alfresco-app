@@ -11,9 +11,9 @@ namespace Migration.Apstaction.Interfaces.Wrappers
     {
         //Task<int> DiscoverAsync(DocumentDiscoverRequest inRequest, CancellationToken ct);
 
-        Task<DocumentBatchResult> RunBatchAsync(DocumentDiscoveryBatchRequest inRequest, CancellationToken ct);
+        Task<DocumentBatchResult> RunBatchAsync(CancellationToken ct);
 
-        Task RunLoopAsync(DocumentDiscoveryLoopOptions inOptions, CancellationToken ct);
+        Task RunLoopAsync(CancellationToken ct);
 
 
 

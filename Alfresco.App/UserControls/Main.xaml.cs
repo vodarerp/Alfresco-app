@@ -233,7 +233,7 @@ namespace Alfresco.App.UserControls
 
             for (var x = 0; x < 20; x++)
             {
-                var res = await _alfrescoWriteService.CreateFolderAsync("bc5b358a-ec9d-49d2-9b35-8aec9d19d27b", $"TestFolder-{x}");
+                var res = await _alfrescoWriteService.CreateFolderAsync("87e968da-983f-486b-a968-da983fd86b1d", $"TestFolder-{x}");
 
                 if (res != "")
                 {

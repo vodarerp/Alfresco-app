@@ -11,9 +11,9 @@ namespace Migration.Apstaction.Interfaces.Services
     {
         //Task<int> DiscoverAsync(FolderDiscoverRequest inRequest, CancellationToken ct);
 
-        Task<FolderBatchResult> RunBatchAsync(FolderDiscoveryBatchRequest inRequest, CancellationToken ct);
+        Task<FolderBatchResult> RunBatchAsync( CancellationToken ct);
 
-        Task RunLoopAsync(FolderDiscoveryLoopOptions inOptions, CancellationToken ct);
+        Task RunLoopAsync(CancellationToken ct);
 
 
     }

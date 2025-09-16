@@ -10,6 +10,8 @@ namespace Migration.Apstaction.Interfaces
 {
     public interface IFolderReader
     {
-        Task<IList<ListEntry>> ReadBatchAsync(FolderReaderRequest inRequest, CancellationToken ct);
+        //Task<IList<ListEntry>> ReadBatchAsync(FolderReaderRequest inRequest, CancellationToken ct);
+        Task<FolderReaderResult> ReadBatchAsync(FolderReaderRequest inRequest, CancellationToken ct);
+
     }
 }

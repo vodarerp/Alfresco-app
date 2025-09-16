@@ -5,12 +5,18 @@ using Alfresco.Client;
 using Alfresco.Client.Handlers;
 using Alfresco.Client.Helpers;
 using Alfresco.Client.Implementation;
+using Alfresco.Contracts.Options;
 using Alfresco.Contracts.Oracle;
 using Dapper;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Options;
+using Migration.Apstaction.Interfaces;
+using Migration.Apstaction.Interfaces.Services;
+using Migration.Infrastructure.Implementation.Folder;
+using Migration.Infrastructure.Implementation.Services;
+using Migration.Workers;
 using Oracle.Apstaction.Interfaces;
 using Oracle.Infractructure.Helpers;
 using Oracle.Infractructure.Implementation;
@@ -66,9 +72,9 @@ namespace Alfresco.App
                         })
 
                         .AddHttpMessageHandler<BasicAuthHandler>()
-                        .SetHandlerLifetime(TimeSpan.FromMinutes(5))
-                        .AddPolicyHandler(GetRetryPlicy())
-                        .AddPolicyHandler(GetCircuitBreakerPolicy());
+                        .SetHandlerLifetime(TimeSpan.FromMinutes(5));
+                        //.AddPolicyHandler(GetRetryPlicy())
+                        //.AddPolicyHandler(GetCircuitBreakerPolicy());
 
                     services.AddHttpClient<IAlfrescoWriteApi, AlfrescoWriteApi>(cli =>
                     {
@@ -107,6 +113,14 @@ namespace Alfresco.App
                     services.AddTransient<IDocStagingRepository, DocStagingRepository>();
                     services.AddTransient<IFolderStagingRepository, FolderStagingRepository>();
 
+
+                    services.Configure<MigrationOptions>(context.Configuration.GetSection("Migration"));
+
+                    services.AddTransient<IFolderReader, FolderReader>();
+                    services.AddTransient<IFolderIngestor,FolderIngestor>();
+                    services.AddSingleton<IFolderDiscoveryService, FolderDiscoveryService>();
+
+                    services.AddHostedService<FolderDiscoveryWorker>();
 
                     services.AddTransient<MainWindow>();
 
