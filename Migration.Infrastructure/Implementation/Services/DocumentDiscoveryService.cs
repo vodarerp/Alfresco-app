@@ -112,7 +112,7 @@ namespace Migration.Infrastructure.Implementation.Services
                             await Task.Delay(delay, ct);
                     }
                 }                
-                catch (Exception)
+                catch (Exception ex)
                 {
                     
                 }

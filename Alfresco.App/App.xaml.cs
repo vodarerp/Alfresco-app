@@ -14,6 +14,8 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Options;
 using Migration.Apstaction.Interfaces;
 using Migration.Apstaction.Interfaces.Services;
+using Migration.Apstaction.Interfaces.Wrappers;
+using Migration.Infrastructure.Implementation.Document;
 using Migration.Infrastructure.Implementation.Folder;
 using Migration.Infrastructure.Implementation.Services;
 using Migration.Workers;
@@ -73,8 +75,8 @@ namespace Alfresco.App
 
                         .AddHttpMessageHandler<BasicAuthHandler>()
                         .SetHandlerLifetime(TimeSpan.FromMinutes(5));
-                        //.AddPolicyHandler(GetRetryPlicy())
-                        //.AddPolicyHandler(GetCircuitBreakerPolicy());
+                    //.AddPolicyHandler(GetRetryPlicy())
+                    //.AddPolicyHandler(GetCircuitBreakerPolicy());
 
                     services.AddHttpClient<IAlfrescoWriteApi, AlfrescoWriteApi>(cli =>
                     {
@@ -88,9 +90,9 @@ namespace Alfresco.App
                         })
 
                         .AddHttpMessageHandler<BasicAuthHandler>()
-                        .SetHandlerLifetime(TimeSpan.FromMinutes(5))
-                        .AddPolicyHandler(GetRetryPlicy())
-                        .AddPolicyHandler(GetCircuitBreakerPolicy());
+                        .SetHandlerLifetime(TimeSpan.FromMinutes(5));
+                        //.AddPolicyHandler(GetRetryPlicy())
+                        //.AddPolicyHandler(GetCircuitBreakerPolicy());
 
                     services.Configure<OracleOptions>(context.Configuration.GetSection("Oracle"));
 
@@ -120,7 +122,17 @@ namespace Alfresco.App
                     services.AddTransient<IFolderIngestor,FolderIngestor>();
                     services.AddSingleton<IFolderDiscoveryService, FolderDiscoveryService>();
 
+
+                    services.AddTransient<IDocumentReader, DocumentReader>();
+                    services.AddTransient<IDocumentResolver, DocumentResolver>();
+                    services.AddTransient<IDocumentIngestor, DocumentIngestor>();
+                    services.AddSingleton<IDocumentDiscoveryService, DocumentDiscoveryService>();
+
+
                     services.AddHostedService<FolderDiscoveryWorker>();
+                    services.AddHostedService<DocumentDiscoveryWorker>();
+
+
 
                     services.AddTransient<MainWindow>();
 

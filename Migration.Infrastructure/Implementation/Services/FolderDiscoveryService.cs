@@ -73,7 +73,7 @@ namespace Migration.Infrastructure.Implementation.Services
                     if (between > 0) 
                         await Task.Delay(between, ct);
                 }
-                catch (Exception)
+                catch (Exception ex)
                 {
                     //_logger.Error("No more documents to process, exiting loop."); TODO
                     if (delay > 0)

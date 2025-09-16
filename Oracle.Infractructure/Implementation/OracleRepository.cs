@@ -64,35 +64,48 @@ namespace Oracle.Infractructure.Implementation
         public async Task<int> InsertManyAsync(IEnumerable<T> entities, CancellationToken ct = default)
         {
             int toRet = -1;
-            var listEntities = entities.ToList();
-            //var columns = GetColumns().Where(o => !o.IsIdentity).ToArray();
-            var columns = OracleHelpers<T>.TableProps.Where(o => !o.IsIdentity).ToArray();
-            var colNames = string.Join(", ", columns.Select(c => c.Col));
-            var paramNames = string.Join(", ", columns.Select(c => $":{c.Col}"));
-            var idCol = GetColumns().FirstOrDefault(o => o.IsKey).Col ?? "Id";
-
-            string sql = $"INSERT INTO appUser.{TableName} ({colNames}) VALUES ({paramNames})";
-
-            var batchSize = 1000; // promeni da se cita iz OravleOptions.... OravleOptions dodati kroz DI kontejner
-
-            for (int offset = 0; offset < listEntities.Count(); offset += batchSize)
+            //var trans = _connection.BeginTransaction();
+            try
             {
-                var forInsert = listEntities.Skip(offset).Take(batchSize);
+                var listEntities = entities.ToList();
+                //var columns = GetColumns().Where(o => !o.IsIdentity).ToArray();
+                var columns = OracleHelpers<T>.TableProps.Where(o => !o.IsIdentity).ToArray();
+                var colNames = string.Join(", ", columns.Select(c => c.Col));
+                var paramNames = string.Join(", ", columns.Select(c => $":{c.Col}"));
+                var idCol = GetColumns().FirstOrDefault(o => o.IsKey).Col ?? "Id";
 
-                foreach(var o in forInsert)
+                string sql = $"INSERT INTO appUser.{TableName} ({colNames}) VALUES ({paramNames})";
+
+                var batchSize = 1000; // promeni da se cita iz OravleOptions.... OravleOptions dodati kroz DI kontejner
+
+                for (int offset = 0; offset < listEntities.Count(); offset += batchSize)
                 {
-                    ct.ThrowIfCancellationRequested();
+                    var forInsert = listEntities.Skip(offset).Take(batchSize);
 
-                    var param = new DynamicParameters();
-                    foreach(var c in columns)
+                    foreach (var o in forInsert)
                     {
-                        param.Add(c.Col, c.Prop.GetValue(o));
-                    }
+                        ct.ThrowIfCancellationRequested();
 
-                    var cmd = new CommandDefinition(sql, param, _transaction, 100, cancellationToken: ct);
-                    toRet = await _connection.ExecuteAsync(cmd).ConfigureAwait(false);
+                        var param = new DynamicParameters();
+                        foreach (var c in columns)
+                        {
+                            param.Add(c.Col, c.Prop.GetValue(o));
+                        }
+
+                        var cmd = new CommandDefinition(sql, param, _transaction, 100, cancellationToken: ct);
+                        toRet = await _connection.ExecuteAsync(cmd).ConfigureAwait(false);
+
+                        //trans.Commit();
+                    }
                 }
             }
+            catch (Exception ex)
+            {
+
+               // trans.Rollback();
+                toRet = -1;
+            }
+            
 
 
             return toRet;

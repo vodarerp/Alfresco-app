@@ -23,8 +23,7 @@ namespace Mapper
             {
                 NodeId = inEntryi.Id,
                 ParentId = inEntryi.ParentId,
-                Name = inEntryi.Name,
-                Status = "NEW",
+                Name = inEntryi.Name,               
                 CreatedAt = DateTime.UtcNow,
                 UpdatedAt = DateTime.UtcNow
             };
@@ -42,8 +41,7 @@ namespace Mapper
             {
                 NodeId = inEntryi.Id,
                 FromPath = string.Empty, 
-                ToPath = string.Empty,
-                Status = "NEW",
+                ToPath = string.Empty,                
                 RetryCount = 0,
                 ErrorMsg = null,
                 CreatedAt = DateTime.UtcNow,

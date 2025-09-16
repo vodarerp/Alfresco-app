@@ -34,30 +34,55 @@ namespace Oracle.Infractructure.Implementation
 
         public async Task SetStatusAsync(long id, string status, string? error, CancellationToken ct)
         {
-            var sql = @"update FolderStaging
+            var trans = _connection.BeginTransaction();
+            try
+            {
+                
+                var sql = @"update FolderStaging
                         set status = :status,
                             error = :error,
                             updatedAt = SYSTIMESTAMP
                         where id = :id";
 
-            var dp = new DynamicParameters();
+                var dp = new DynamicParameters();
 
-            error = error?.Substring(0, Math.Min(4000, error.Length)); // Oracle VARCHAR2 limit
+                error = error?.Substring(0, Math.Min(4000, error.Length)); // Oracle VARCHAR2 limit
 
-            dp.Add(":status", status);
-            dp.Add(":error", error);
-            dp.Add(":id", id);
-            var cmd = new CommandDefinition(sql, dp, _transaction, cancellationToken: ct);
+                dp.Add(":status", status);
+                dp.Add(":error", error);
+                dp.Add(":id", id);
+                var cmd = new CommandDefinition(sql, dp, trans, cancellationToken: ct);
 
-            await _connection.ExecuteAsync(cmd).ConfigureAwait(false);
+                await _connection.ExecuteAsync(cmd).ConfigureAwait(false);
+
+                trans.Commit();
+            }
+            catch (Exception)
+            {
+                trans.Rollback();
+                //throw;
+            }
+            
+            //_transaction.Commit();
+
         }
 
         public async Task<IReadOnlyList<FolderStaging>> TakeReadyForProcessingAsync(int take, CancellationToken ct)
         {
-            var sql = @"select * from FolderStaging
-                        where status = 'READY'
-                        and ROWNUM <= :take
-                        FOR UPDATE SKIP LOCKED";
+            //var sql = @"select * from FolderStaging
+            //            where status = 'READY'
+            //            and ROWNUM <= :take
+            //
+            // FOR UPDATE SKIP LOCKED";
+            //var sql = @"select * from FolderStaging
+            //            where status = 'READY'                        
+            //            FETCH FIRST :take ROWS ONLY                        
+            //            FOR UPDATE SKIP LOCKED";
+
+            var sql = @"select * from FolderStaging  
+                         where status = 'READY'                           
+                         FETCH FIRST :take ROWS ONLY                          
+                         ";
 
             var dp = new DynamicParameters();
             dp.Add(":take", take);
