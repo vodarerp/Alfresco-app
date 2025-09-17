@@ -25,6 +25,7 @@ using Oracle.Infractructure.Implementation;
 using Oracle.ManagedDataAccess.Client;
 using Polly;
 using Polly.Extensions.Http;
+using System.Configuration;
 using System.Windows;
 using static Alfresco.App.Helpers.PolicyHelpers;
 
@@ -128,10 +129,17 @@ namespace Alfresco.App
                     services.AddTransient<IDocumentIngestor, DocumentIngestor>();
                     services.AddSingleton<IDocumentDiscoveryService, DocumentDiscoveryService>();
 
+                    
+                    
+                    if (context.Configuration.GetValue<bool>("EnableFolderWorker"))
+                    {
+                        services.AddHostedService<FolderDiscoveryWorker>();
 
-                    services.AddHostedService<FolderDiscoveryWorker>();
-                    services.AddHostedService<DocumentDiscoveryWorker>();
-
+                    }
+                    if (context.Configuration.GetValue<bool>("EnableDocumentWorker"))
+                    {                    
+                        services.AddHostedService<DocumentDiscoveryWorker>();
+                    }
 
 
                     services.AddTransient<MainWindow>();

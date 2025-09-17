@@ -64,7 +64,7 @@ namespace Oracle.Infractructure.Implementation
         public async Task<int> InsertManyAsync(IEnumerable<T> entities, CancellationToken ct = default)
         {
             int toRet = -1;
-            //var trans = _connection.BeginTransaction();
+            //using var trans = _connection.BeginTransaction();
             try
             {
                 var listEntities = entities.ToList();
@@ -102,7 +102,7 @@ namespace Oracle.Infractructure.Implementation
             catch (Exception ex)
             {
 
-               // trans.Rollback();
+                //trans.Rollback();
                 toRet = -1;
             }
             
