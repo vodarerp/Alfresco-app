@@ -142,6 +142,10 @@ namespace Alfresco.App
                     {                    
                         services.AddHostedService<DocumentDiscoveryWorker>();
                     }
+                    if (context.Configuration.GetValue<bool>("EnableMoveWorker"))
+                    {
+                        services.AddHostedService<MoveWorker>();
+                    }
 
 
                     services.AddTransient<MainWindow>();

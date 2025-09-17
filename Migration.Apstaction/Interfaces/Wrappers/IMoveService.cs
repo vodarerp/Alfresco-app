@@ -10,8 +10,8 @@ namespace Migration.Apstaction.Interfaces.Wrappers
     public interface IMoveService
     {
         //Task<int> MoveAsync(MoveRequest inRequest, CancellationToken ct);
-        Task<MoveBatchResult> RunBatchAsync(MoveBatchRequest inRequest, CancellationToken ct);
+        Task<MoveBatchResult> RunBatchAsync(  CancellationToken ct);
 
-        Task RunLoopAsync(MoveLoopOptions inOptions, CancellationToken ct);
+        Task RunLoopAsync( CancellationToken ct);
     }
 }
