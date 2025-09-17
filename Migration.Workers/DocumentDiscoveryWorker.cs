@@ -1,4 +1,5 @@
-﻿using Microsoft.Extensions.Hosting;
+﻿using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Migration.Apstaction.Interfaces.Services;
 using Migration.Apstaction.Interfaces.Wrappers;
@@ -14,18 +15,23 @@ namespace Migration.Workers
     {
         private readonly IDocumentDiscoveryService _svc;
         private readonly ILogger<FolderDiscoveryWorker> _logger;
+        private readonly IServiceProvider _sp;
 
-        public DocumentDiscoveryWorker(IDocumentDiscoveryService svc, ILogger<FolderDiscoveryWorker> logger)
+
+        public DocumentDiscoveryWorker(IDocumentDiscoveryService svc, ILogger<FolderDiscoveryWorker> logger, IServiceProvider sp)
         {
             _svc = svc;
             _logger = logger;
+            _sp = sp;
         }
 
         protected override async Task ExecuteAsync(CancellationToken stoppingToken)
         {
             try
             {
-                await _svc.RunLoopAsync(stoppingToken);
+                await using var scope = _sp.CreateAsyncScope();
+                var svc = scope.ServiceProvider.GetRequiredService<IDocumentDiscoveryService>();
+                await svc.RunLoopAsync(stoppingToken);
             }
             catch (Exception ex)
             {

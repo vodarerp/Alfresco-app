@@ -1,11 +1,14 @@
 ﻿using Alfresco.Contracts.Options;
 using Mapper;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 using Migration.Apstaction.Interfaces;
 using Migration.Apstaction.Interfaces.Services;
 using Migration.Apstaction.Models;
+using Oracle.Apstaction.Interfaces;
 using System;
 using System.Collections.Generic;
+using System.Data;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
@@ -18,39 +21,56 @@ namespace Migration.Infrastructure.Implementation.Services
         private readonly IFolderReader _reader;
         private readonly IOptions<MigrationOptions> _options;
         private FolderSeekCursor? _cursor = null;
+        private readonly IServiceProvider _sp;
+        private readonly IUnitOfWork _unitOfWork;
 
-        public FolderDiscoveryService(IFolderIngestor ingestor, IFolderReader reader, IOptions<MigrationOptions> options)
+
+        public FolderDiscoveryService(IFolderIngestor ingestor, IFolderReader reader, IOptions<MigrationOptions> options, IServiceProvider sp, IUnitOfWork unitOfWork)
         {
             _ingestor = ingestor;
             _reader = reader;
             _options = options;
+            _sp = sp;
+            _unitOfWork = unitOfWork;
         }
 
         public async Task<FolderBatchResult> RunBatchAsync(CancellationToken ct)
         {
             var cnt = 0;
             var batch = _options.Value.DocumentDiscovery.BatchSize ?? _options.Value.BatchSize;
-            var dop = _options.Value.DocumentDiscovery.MaxDegreeOfParallelism ?? _options.Value.MaxDegreeOfParallelism;            
+            var dop = _options.Value.DocumentDiscovery.MaxDegreeOfParallelism ?? _options.Value.MaxDegreeOfParallelism;
 
 
-            
             var folderRequest = new FolderReaderRequest(
                 _options.Value.RootDiscoveryFolderId, _options.Value.FolderDiscovery.NameFilter ?? "-", 0, batch, _cursor
                 );
             var page = await _reader.ReadBatchAsync(folderRequest, ct);            
             
             if(!page.HasMore) return new FolderBatchResult(cnt);
+            //using var scope = _sp.CreateScope();
 
-            var toInsert = page.Items.ToList().ToFolderStagingList();
-
-            if (toInsert.Count > 0)
+            //var uow = scope.ServiceProvider.GetRequiredService<IUnitOfWork>();
+            await _unitOfWork.BeginAsync(IsolationLevel.ReadCommitted, ct);
+            try
             {
-                cnt = await _ingestor.InserManyAsync(toInsert, ct);
-            }          
+                var toInsert = page.Items.ToList().ToFolderStagingList();
 
-            _cursor = page.Next;
+                if (toInsert.Count > 0)
+                {
+                    cnt = await _ingestor.InserManyAsync(toInsert, ct);
+                }
+                _cursor = page.Next;
+                await _unitOfWork.CommitAsync();
+                return new FolderBatchResult(cnt);
+            }
+            catch (Exception ex)
+            {
+                await _unitOfWork.RollbackAsync();
+                throw;
+            }
+                 
 
-            return new FolderBatchResult(cnt);
+
 
         }
 

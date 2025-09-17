@@ -14,7 +14,7 @@ namespace Oracle.Infractructure.Implementation
 {
     public class DocStagingRepository : OracleRepository<DocStaging, long>, IDocStagingRepository
     {
-        public DocStagingRepository(OracleConnection connection, OracleTransaction transaction) : base(connection, transaction)
+        public DocStagingRepository(IUnitOfWork uow) : base(uow)
         {
         }
 
@@ -34,9 +34,9 @@ namespace Oracle.Infractructure.Implementation
             dp.Add(":error", error);
             dp.Add(":id", id);
 
-            var cmd = new CommandDefinition(sql, dp, _transaction, cancellationToken: ct);
+            var cmd = new CommandDefinition(sql, dp, Tx, cancellationToken: ct);
 
-            await _connection.ExecuteAsync(cmd).ConfigureAwait(false);
+            await Conn.ExecuteAsync(cmd).ConfigureAwait(false);
 
         }
 
@@ -55,9 +55,9 @@ namespace Oracle.Infractructure.Implementation
             dp.Add(":status", status);
             dp.Add(":error", error);
             dp.Add(":id", id);
-            var cmd = new CommandDefinition(sql, dp, _transaction, cancellationToken: ct);
+            var cmd = new CommandDefinition(sql, dp, Tx, cancellationToken: ct);
 
-            await _connection.ExecuteAsync(cmd).ConfigureAwait(false);
+            await Conn.ExecuteAsync(cmd).ConfigureAwait(false);
         }
 
         public async Task<IReadOnlyList<DocStaging>> TakeReadyForProcessingAsync(int take, CancellationToken ct)
@@ -70,9 +70,9 @@ namespace Oracle.Infractructure.Implementation
 
             var dp = new DynamicParameters();
             dp.Add(":take", take);
-            var cmd = new CommandDefinition(sql, dp, _transaction, cancellationToken: ct);
+            var cmd = new CommandDefinition(sql, dp, Tx, cancellationToken: ct);
 
-            var res = await _connection.QueryAsync<DocStaging>(cmd).ConfigureAwait(false);
+            var res = await Conn.QueryAsync<DocStaging>(cmd).ConfigureAwait(false);
 
             return res.AsList();
         }

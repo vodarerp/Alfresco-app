@@ -119,6 +119,8 @@ namespace Alfresco.App
 
                     services.Configure<MigrationOptions>(context.Configuration.GetSection("Migration"));
 
+                    services.AddScoped<IUnitOfWork>(sp => new OracleUnitOfWork(sp.GetRequiredService<OracleOptions>().ConnectionString));
+
                     services.AddTransient<IFolderReader, FolderReader>();
                     services.AddTransient<IFolderIngestor,FolderIngestor>();
                     services.AddSingleton<IFolderDiscoveryService, FolderDiscoveryService>();

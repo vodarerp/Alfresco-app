@@ -8,6 +8,7 @@ using System.Reflection;
 using System.Runtime.Intrinsics.Arm;
 using System.Threading;
 using Oracle.Infractructure.Helpers;
+using System.Data;
 
 
 
@@ -15,14 +16,21 @@ namespace Oracle.Infractructure.Implementation
 {
     public class OracleRepository<T, TKey> : IRepository<T, TKey>
     {
-        internal readonly OracleConnection _connection;
-        internal readonly OracleTransaction _transaction;
+        //protected readonly OracleConnection _connection;
+        //protected readonly OracleTransaction _transaction;
+        protected readonly IUnitOfWork _unitOfWork;
+        protected IDbConnection Conn => _unitOfWork.Connection;
+        protected IDbTransaction Tx => _unitOfWork.Transaction;
+
+        public OracleRepository(IUnitOfWork uow) => _unitOfWork = uow;
         
-        public OracleRepository(OracleConnection connection, OracleTransaction transaction)
-        {
-            _connection = connection;
-            _transaction = transaction;
-        }
+
+
+        //public OracleRepository(OracleConnection connection, OracleTransaction transaction)
+        //{
+        //    _connection = connection;
+        //    _transaction = transaction;
+        //}
 
         public string TableName => typeof(T).GetCustomAttributes<TableAttribute>()?.FirstOrDefault()?.Name ?? typeof(T).Name;
 
@@ -55,7 +63,7 @@ namespace Oracle.Infractructure.Implementation
             }
             parameters.Add($":outId", dbType: System.Data.DbType.Int64, direction: System.Data.ParameterDirection.Output);
 
-            await _connection.ExecuteAsync(new CommandDefinition(sql, parameters, _transaction, cancellationToken: cancellationToken));
+            await Conn.ExecuteAsync(new CommandDefinition(sql, parameters, Tx, cancellationToken: cancellationToken));
             var outVal = parameters.Get<long>($":outId");
 
 
@@ -74,7 +82,7 @@ namespace Oracle.Infractructure.Implementation
                 var paramNames = string.Join(", ", columns.Select(c => $":{c.Col}"));
                 var idCol = GetColumns().FirstOrDefault(o => o.IsKey).Col ?? "Id";
 
-                string sql = $"INSERT INTO appUser.{TableName} ({colNames}) VALUES ({paramNames})";
+                string sql = $"INSERT INTO {TableName} ({colNames}) VALUES ({paramNames})";
 
                 var batchSize = 1000; // promeni da se cita iz OravleOptions.... OravleOptions dodati kroz DI kontejner
 
@@ -92,8 +100,8 @@ namespace Oracle.Infractructure.Implementation
                             param.Add(c.Col, c.Prop.GetValue(o));
                         }
 
-                        var cmd = new CommandDefinition(sql, param, _transaction, 100, cancellationToken: ct);
-                        toRet = await _connection.ExecuteAsync(cmd).ConfigureAwait(false);
+                        var cmd = new CommandDefinition(sql, param, Tx, 100, cancellationToken: ct);
+                        toRet = await Conn.ExecuteAsync(cmd).ConfigureAwait(false);
 
                         //trans.Commit();
                     }
@@ -120,8 +128,8 @@ namespace Oracle.Infractructure.Implementation
             var dp = new DynamicParameters();
             dp.Add(":id", id);
 
-            var cmd = new CommandDefinition(sql, dp, _transaction, cancellationToken: cancellationToken);
-            await _connection.ExecuteAsync(cmd).ConfigureAwait(false);
+            var cmd = new CommandDefinition(sql, dp, Tx, cancellationToken: cancellationToken);
+            await Conn.ExecuteAsync(cmd).ConfigureAwait(false);
         }
 
         public async Task<T?> GetByIdAsync(long id, CancellationToken cancellationToken = default)
@@ -132,8 +140,8 @@ namespace Oracle.Infractructure.Implementation
 
             var dp = new DynamicParameters();
             dp.Add(":id", id);
-            var cmd = new CommandDefinition(sql, dp, _transaction, cancellationToken: cancellationToken);
-            return await _connection.QueryFirstOrDefaultAsync<T>(cmd).ConfigureAwait(false);
+            var cmd = new CommandDefinition(sql, dp, Tx, cancellationToken: cancellationToken);
+            return await Conn.QueryFirstOrDefaultAsync<T>(cmd).ConfigureAwait(false);
         }
 
         public async Task<IEnumerable<T>> GetListAsync(object? filters = null, int? skip = null, int? take = null, string[]? orderBy = null, CancellationToken ct = default)
@@ -165,8 +173,8 @@ namespace Oracle.Infractructure.Implementation
             //string sql = $"SELECT * FROM {TableName}";
             //var res = await _connection.QueryAsync<T>(new CommandDefinition(sql, cancellationToken: ct));
 
-            var cmd = new CommandDefinition(sql, dp, _transaction, cancellationToken: ct);
-            var res = await _connection.QueryAsync<T>(cmd).ConfigureAwait(false);
+            var cmd = new CommandDefinition(sql, dp, Tx, cancellationToken: ct);
+            var res = await Conn.QueryAsync<T>(cmd).ConfigureAwait(false);
 
             return res;
 
@@ -193,8 +201,8 @@ namespace Oracle.Infractructure.Implementation
                 dp.Add($":{Col}", val);
             }
 
-            var cmd = new CommandDefinition(sql, dp, _transaction, cancellationToken: cancellationToken);
-            await _connection.ExecuteAsync(cmd).ConfigureAwait(false);
+            var cmd = new CommandDefinition(sql, dp, Tx, cancellationToken: cancellationToken);
+            await Conn.ExecuteAsync(cmd).ConfigureAwait(false);
         }
 
 

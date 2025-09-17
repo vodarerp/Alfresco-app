@@ -25,16 +25,12 @@ namespace Migration.Infrastructure.Implementation.Folder
         public async Task<int> InserManyAsync(IReadOnlyList<FolderStaging> items, CancellationToken ct)
         {
             int added = 0;
-
             if (items != null && items.Count > 0)
-            {
-                //var toInsert = items.ToFolderStagingList();
-                //toInsert = items.ToFolderStagingList();
+            {                
                 added = await _folderRepo.InsertManyAsync(items, ct);
             }
-
             return added;
-            //throw new NotImplementedException();
+           
         }
 
         public async Task UpsertAsync(FolderIngestorItem item, CancellationToken ct)

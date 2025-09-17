@@ -21,7 +21,7 @@ namespace Alfresco.Contracts.Oracle.Models
         public string ParentId { get; set; } = string.Empty;
         public string FromPath { get; set; } = string.Empty;
         public string ToPath { get; set; } = string.Empty;
-        public string Status { get; set; } = "READY"; // NEW, DONE, ERR
+        public string Status { get; set; }  // NEW, DONE, ERR
         public int RetryCount { get; set; }
         public string? ErrorMsg { get; set; }
         public DateTime CreatedAt { get; set; }

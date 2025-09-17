@@ -1,6 +1,7 @@
 ﻿using Alfresco.Contracts.Options;
 using Alfresco.Contracts.Oracle.Models;
 using Mapper;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 using Migration.Apstaction.Interfaces;
 using Migration.Apstaction.Interfaces.Wrappers;
@@ -19,7 +20,9 @@ namespace Migration.Infrastructure.Implementation.Services
         private readonly IDocStagingRepository _docRepo;
         private readonly IFolderStagingRepository _folderRepo;
         private readonly IOptions<MigrationOptions> _options;
-        public DocumentDiscoveryService(IDocumentIngestor ingestor, IDocumentReader reader, IDocumentResolver resolver, IDocStagingRepository docRepo, IFolderStagingRepository folderRepo, IOptions<MigrationOptions> options)
+        private readonly IServiceProvider _sp;
+        //private readonly IUnitOfWork _unitOfWork;
+        public DocumentDiscoveryService(IDocumentIngestor ingestor, IDocumentReader reader, IDocumentResolver resolver, IDocStagingRepository docRepo, IFolderStagingRepository folderRepo, IOptions<MigrationOptions> options, IServiceProvider sp, IUnitOfWork unitOfWork)
         {
             _ingestor = ingestor;
             _reader = reader;
@@ -27,13 +30,38 @@ namespace Migration.Infrastructure.Implementation.Services
             _docRepo = docRepo;
             _folderRepo = folderRepo;
             _options = options;
+            _sp = sp;
+           // _unitOfWork = unitOfWork;
         }
         public async Task<DocumentBatchResult> RunBatchAsync(CancellationToken ct)
-        {            
+        {
+            IReadOnlyList<FolderStaging> folders = null;
             int procesed = 0;
             var batch = _options.Value.DocumentDiscovery.BatchSize ?? _options.Value.BatchSize;
             var dop = _options.Value.DocumentDiscovery.MaxDegreeOfParallelism ?? _options.Value.MaxDegreeOfParallelism;
-            var folders = await _folderRepo.TakeReadyForProcessingAsync(batch, ct);
+
+            await using( var scope =  _sp.CreateAsyncScope())
+            {
+                var uow = scope.ServiceProvider.GetRequiredService<IUnitOfWork>();
+                var fr = scope.ServiceProvider.GetRequiredService<IFolderStagingRepository>();
+                await uow.BeginAsync(ct: ct);
+                try
+                {
+                    folders = await fr.TakeReadyForProcessingAsync(batch, ct);
+
+                    foreach (var f in folders)
+                        await fr.SetStatusAsync(f.Id, "IN PROG", null, ct);
+
+
+                    await uow.CommitAsync(ct: ct);
+
+                }
+                catch (Exception ex)
+                {
+                    await uow.RollbackAsync(ct: ct);
+                    throw;
+                }
+            }
 
             if (folders != null && folders.Count > 0)
             {
@@ -49,44 +77,82 @@ namespace Migration.Infrastructure.Implementation.Services
                     {
                         var documents = await _reader.ReadBatchAsync(folder.NodeId, ct);                      
 
-                        if (documents == null || !documents.Any())
-                        {
-                            await _folderRepo.SetStatusAsync(folder.Id, "PROCESSED", null, ct);
-                            Interlocked.Increment(ref procesed); //thread safe folderProcesed++
-                            return;
-                        }
+                        //if (documents == null || !documents.Any())
+                        //{
+
+                        //    await _unitOfWork.BeginAsync(ct: ct);
+                        //    await _folderRepo.SetStatusAsync(folder.Id, "PROCESSED", null, ct);
+                        //    await _unitOfWork.CommitAsync(ct: ct);
+                        //    Interlocked.Increment(ref procesed); //thread safe folderProcesed++
+                        //    return;
+                        //}
 
                         var docBag = new ConcurrentBag<DocStaging>();
 
-                        await Parallel.ForEachAsync(documents, new ParallelOptions
+                        if (documents != null && documents.Count > 0) 
                         {
-                            MaxDegreeOfParallelism = dop,
-                            CancellationToken = ct
-                        },
-                        async (document, token) =>
-                        {
-                            var folderName = document.Entry.Name.NormalizeName();
-                            var newFolderPath = await _resolver.ResolveAsync(_options.Value.RootDestinationFolderId, folderName, ct);
-                            var toInser = document.Entry.ToDocStaging();
-                            toInser.ToPath = newFolderPath;
+                            await Parallel.ForEachAsync(documents, new ParallelOptions
+                            {
+                                MaxDegreeOfParallelism = dop,
+                                CancellationToken = ct
+                            },
+                            async (document, token) =>
+                            {
+                                var folderName = document.Entry.Name.NormalizeName();
+                                var newFolderPath = await _resolver.ResolveAsync(_options.Value.RootDestinationFolderId, folderName, ct);
+                                var toInser = document.Entry.ToDocStaging();
+                                toInser.ToPath = newFolderPath;
 
-                            docBag.Add(toInser);
-                        });
+                                docBag.Add(toInser);
+                            });                            
+                        }
 
                         var listToInsert = docBag.ToList();
 
-                        if (listToInsert != null && listToInsert.Count > 0)
+                        await using var scope = _sp.CreateAsyncScope();
+                        var uow = scope.ServiceProvider.GetRequiredService<IUnitOfWork>();
+                        var fr = scope.ServiceProvider.GetRequiredService<IFolderStagingRepository>();
+                        var dr = scope.ServiceProvider.GetRequiredService<IDocStagingRepository>();
+
+                        await uow.BeginAsync(ct: ct);
+
+                        try
                         {
-                            _ = await _ingestor.InserManyAsync(listToInsert, ct);
+                            if (listToInsert != null && listToInsert.Count > 0)
+                            {
+                                _ = await dr.InsertManyAsync(listToInsert, ct);
+                                //_ = await _ingestor.InserManyAsync(listToInsert, ct);
+                            }
+
+                            await fr.SetStatusAsync(folder.Id, "PROCESSED", null, ct);
+                            await uow.CommitAsync(ct: ct);
                         }
-                        await _folderRepo.SetStatusAsync(folder.Id, "PROCESSED", null, ct);
-                       
+                        catch (Exception exTx)
+                        {
+                            await uow.RollbackAsync(ct: ct);
+                            await  using var failScope = _sp.CreateAsyncScope();
+                            var failUow = failScope.ServiceProvider.GetRequiredService<IUnitOfWork>();
+                            var failFr = failScope.ServiceProvider.GetRequiredService<IFolderStagingRepository>();
+
+                            await failUow.BeginAsync(ct: token);
+                            await failFr.FailAsync(folder.Id, exTx.Message, token);
+                            await failUow.CommitAsync(ct: token);
+                            return;
+                        }
+
                         Interlocked.Increment(ref procesed); //thread safe folderProcesed++
 
                     }
                     catch (Exception ex)
                     {
-                        await _folderRepo.FailAsync(folder.Id, ex.Message, ct);
+                        await using var failScope = _sp.CreateAsyncScope();
+                        var failUow = failScope.ServiceProvider.GetRequiredService<IUnitOfWork>();
+                        var failFr = failScope.ServiceProvider.GetRequiredService<IFolderStagingRepository>();
+
+                        await failUow.BeginAsync(ct: token);
+                        await failFr.FailAsync(folder.Id, ex.Message, token);
+                        await failUow.CommitAsync(ct: token);
+                        //await _folderRepo.FailAsync(folder.Id, ex.Message, ct);
                     }
                    
                 });

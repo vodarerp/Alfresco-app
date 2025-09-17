@@ -7,7 +7,7 @@ namespace Oracle.Infractructure.Implementation
 {
     public class FolderStagingRepository : OracleRepository<FolderStaging, long>, IFolderStagingRepository
     {
-        public FolderStagingRepository(OracleConnection connection, OracleTransaction transaction) : base(connection, transaction)
+        public FolderStagingRepository(IUnitOfWork uow) : base(uow)
         {
         }
 
@@ -27,14 +27,14 @@ namespace Oracle.Infractructure.Implementation
             dp.Add(":error", error);
             dp.Add(":id", id);
 
-            var cmd = new CommandDefinition(sql, dp, _transaction, cancellationToken: ct);
+            var cmd = new CommandDefinition(sql, dp, Tx, cancellationToken: ct);
 
-            await _connection.ExecuteAsync(cmd).ConfigureAwait(false);
+            await Conn.ExecuteAsync(cmd).ConfigureAwait(false);
         }
 
         public async Task SetStatusAsync(long id, string status, string? error, CancellationToken ct)
         {
-            var trans = _connection.BeginTransaction();
+            //var trans = _connection.BeginTransaction();
             try
             {
                 
@@ -48,18 +48,20 @@ namespace Oracle.Infractructure.Implementation
 
                 error = error?.Substring(0, Math.Min(4000, error.Length)); // Oracle VARCHAR2 limit
 
+                if (error == null) error = "";
+
                 dp.Add(":status", status);
                 dp.Add(":error", error);
                 dp.Add(":id", id);
-                var cmd = new CommandDefinition(sql, dp, trans, cancellationToken: ct);
+                var cmd = new CommandDefinition(sql, dp, Tx, cancellationToken: ct);
 
-                await _connection.ExecuteAsync(cmd).ConfigureAwait(false);
+                await Conn.ExecuteAsync(cmd).ConfigureAwait(false);
 
-                trans.Commit();
+                //trans.Commit();
             }
             catch (Exception)
             {
-                trans.Rollback();
+               // trans.Rollback();
                 //throw;
             }
             
@@ -81,14 +83,15 @@ namespace Oracle.Infractructure.Implementation
 
             var sql = @"select * from FolderStaging  
                          where status = 'READY'                           
-                         FETCH FIRST :take ROWS ONLY                          
+                         FETCH FIRST :take ROWS ONLY 
+                         FOR UPDATE SKIP LOCKED
                          ";
 
             var dp = new DynamicParameters();
             dp.Add(":take", take);
-            var cmd = new CommandDefinition(sql, dp, _transaction, cancellationToken: ct);
+            var cmd = new CommandDefinition(sql, dp, Tx, cancellationToken: ct);
 
-            var res = await _connection.QueryAsync<FolderStaging>(cmd).ConfigureAwait(false);
+            var res = await Conn.QueryAsync<FolderStaging>(cmd).ConfigureAwait(false);
 
             return res.AsList();
         }
