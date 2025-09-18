@@ -53,7 +53,7 @@ namespace Migration.Infrastructure.Implementation.Services
             await _unitOfWork.BeginAsync(IsolationLevel.ReadCommitted, ct);
             try
             {
-                var toInsert = page.Items.ToList().ToFolderStagingList();
+                var toInsert = page.Items.ToList().ToFolderStagingListInsert();
 
                 if (toInsert.Count > 0)
                 {

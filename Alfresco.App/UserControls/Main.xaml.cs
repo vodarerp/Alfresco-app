@@ -231,13 +231,13 @@ namespace Alfresco.App.UserControls
         private async void btnFolders_Click(object sender, RoutedEventArgs e)
         {
 
-            for (var x = 0; x < 20; x++)
+            for (var x = 0; x < 2000; x++)
             {
                 var res = await _alfrescoWriteService.CreateFolderAsync("44b0cf97-fc48-43d3-b0cf-97fc48a3d336", $"TestFolder-{x}");
 
                 if (res != "")
                 {
-                    for (var y = 0; y < 3; y++)
+                    for (var y = 0; y < 10; y++)
                     {
                         var fileRes = await _alfrescoWriteService.CreateFileAsync(res, $"TestFile{x}-{y}.txt");
                     }

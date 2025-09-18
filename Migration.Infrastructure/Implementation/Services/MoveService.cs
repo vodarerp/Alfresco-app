@@ -15,7 +15,7 @@ using System.Threading.Tasks;
 
 namespace Migration.Infrastructure.Implementation.Services
 {
-    internal class MoveService : IMoveService
+    public class MoveService : IMoveService
     {
         private readonly IMoveReader _moveReader;
         private readonly IMoveExecutor _moveExecutor;
@@ -56,12 +56,12 @@ namespace Migration.Infrastructure.Implementation.Services
                     documents = await dr.TakeReadyForProcessingAsync(batch, ct);
 
                     foreach (var d in documents)
-                        await dr.SetStatusAsync(d.Id, "INPROG", null, ct);
+                        await dr.SetStatusAsync(d.Id, "IN PROG", null, ct);
 
                     await uow.CommitAsync();
 
                 }
-                catch (Exception)
+                catch (Exception ex)
                 {
                     await uow.RollbackAsync();
                     throw;

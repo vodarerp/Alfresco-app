@@ -23,7 +23,7 @@ namespace Oracle.Infractructure.Implementation
             var sql = @"update DocStaging
                         set status = 'ERROR',
                             RETRYCOUNT = NVL(RETRYCOUNT, 0) + 1,
-                            error = :error,
+                            ERRORMSG = :error,
                             updatedAt = SYSTIMESTAMP
                         where id = :id";
 
@@ -44,12 +44,12 @@ namespace Oracle.Infractructure.Implementation
         {
             var sql = @"update DocStaging
                         set status = :status,
-                            error = :error,
+                            ERRORMSG = :error,
                             updatedAt = SYSTIMESTAMP
                         where id = :id";
 
             var dp = new DynamicParameters();
-
+            if (error == null) error = "";
             error = error?.Substring(0, Math.Min(4000, error.Length)); // Oracle VARCHAR2 limit
 
             dp.Add(":status", status);
@@ -63,10 +63,16 @@ namespace Oracle.Infractructure.Implementation
         public async Task<IReadOnlyList<DocStaging>> TakeReadyForProcessingAsync(int take, CancellationToken ct)
         {            
 
-            var sql = @"select * from DocStaging
-                        where status = 'READY'
-                        and ROWNUM <= :take
-                        FOR UPDATE SKIP LOCKED";
+            //var sql = @"select * from DocStaging
+            //            where status = 'READY'
+            //            and ROWNUM <= :take
+            //            FOR UPDATE SKIP LOCKED";
+
+            var sql = @"select * from DocStaging  
+                         where status = 'READY'                           
+                         FETCH FIRST :take ROWS ONLY 
+                         FOR UPDATE SKIP LOCKED
+                         ";
 
             var dp = new DynamicParameters();
             dp.Add(":take", take);

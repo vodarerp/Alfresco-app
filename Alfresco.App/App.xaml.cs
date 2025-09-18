@@ -17,6 +17,7 @@ using Migration.Apstaction.Interfaces.Services;
 using Migration.Apstaction.Interfaces.Wrappers;
 using Migration.Infrastructure.Implementation.Document;
 using Migration.Infrastructure.Implementation.Folder;
+using Migration.Infrastructure.Implementation.Move;
 using Migration.Infrastructure.Implementation.Services;
 using Migration.Workers;
 using Oracle.Apstaction.Interfaces;
@@ -133,6 +134,14 @@ namespace Alfresco.App
 
                     
                     
+                    services.AddTransient<IMoveReader, MoveReader>();
+                    services.AddTransient<IMoveExecutor, MoveExecutor>();
+                    services.AddSingleton<IMoveService, MoveService>();
+
+                    //
+
+
+
                     if (context.Configuration.GetValue<bool>("EnableFolderWorker"))
                     {
                         services.AddHostedService<FolderDiscoveryWorker>();

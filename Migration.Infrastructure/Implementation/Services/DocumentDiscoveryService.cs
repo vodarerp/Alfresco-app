@@ -39,6 +39,7 @@ namespace Migration.Infrastructure.Implementation.Services
             int procesed = 0;
             var batch = _options.Value.DocumentDiscovery.BatchSize ?? _options.Value.BatchSize;
             var dop = _options.Value.DocumentDiscovery.MaxDegreeOfParallelism ?? _options.Value.MaxDegreeOfParallelism;
+            List<DocStaging> docsToInser = null;
 
             await using( var scope =  _sp.CreateAsyncScope())
             {
@@ -77,6 +78,7 @@ namespace Migration.Infrastructure.Implementation.Services
                     {
                         var documents = await _reader.ReadBatchAsync(folder.NodeId, ct);                      
 
+
                         //if (documents == null || !documents.Any())
                         //{
 
@@ -91,20 +93,31 @@ namespace Migration.Infrastructure.Implementation.Services
 
                         if (documents != null && documents.Count > 0) 
                         {
-                            await Parallel.ForEachAsync(documents, new ParallelOptions
-                            {
-                                MaxDegreeOfParallelism = dop,
-                                CancellationToken = ct
-                            },
-                            async (document, token) =>
-                            {
-                                var folderName = document.Entry.Name.NormalizeName();
-                                var newFolderPath = await _resolver.ResolveAsync(_options.Value.RootDestinationFolderId, folderName, ct);
-                                var toInser = document.Entry.ToDocStaging();
-                                toInser.ToPath = newFolderPath;
+                            var folderName = folder?.Name?.NormalizeName();
+                            var newFolderPath = await _resolver.ResolveAsync(_options.Value.RootDestinationFolderId, folderName, ct);
 
-                                docBag.Add(toInser);
-                            });                            
+
+                            docsToInser = new List<DocStaging>(documents.Count);
+
+                            foreach(var d in documents)
+                            {
+                                var item = d.Entry.ToDocStagingInsert();
+                                item.ToPath = newFolderPath;
+                                docsToInser.Add(item);
+                            }
+                            //izbaciti Parallel ukoliko bude malo dokumenata po folder
+                            //await Parallel.ForEachAsync(documents, new ParallelOptions
+                            //{
+                            //    MaxDegreeOfParallelism = dop,
+                            //    CancellationToken = ct
+                            //},
+                            //async (document, token) =>
+                            //{
+                            //    var toInser = document.Entry.ToDocStagingInsert();
+                            //    toInser.ToPath = newFolderPath;
+                            //    docBag.Add(toInser);
+                            //    await Task.CompletedTask;
+                            //});                            
                         }
 
                         var listToInsert = docBag.ToList();
@@ -118,9 +131,9 @@ namespace Migration.Infrastructure.Implementation.Services
 
                         try
                         {
-                            if (listToInsert != null && listToInsert.Count > 0)
+                            if (docsToInser != null && docsToInser.Count > 0)
                             {
-                                _ = await dr.InsertManyAsync(listToInsert, ct);
+                                _ = await dr.InsertManyAsync(docsToInser, ct);
                                 //_ = await _ingestor.InserManyAsync(listToInsert, ct);
                             }
 
@@ -140,7 +153,7 @@ namespace Migration.Infrastructure.Implementation.Services
                             return;
                         }
 
-                        Interlocked.Increment(ref procesed); //thread safe folderProcesed++
+                        Interlocked.Increment(ref procesed); //thread safe n++
 
                     }
                     catch (Exception ex)

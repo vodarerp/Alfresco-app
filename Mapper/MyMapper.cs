@@ -17,13 +17,37 @@ namespace Mapper
             return inEntry.Select(e => e.Entry.ToFolderStaging()).ToList();
         }
 
+        public static List<FolderStaging> ToFolderStagingListInsert(this List<ListEntry> inEntry)
+        {
+            return inEntry.Select(e => e.Entry.ToFolderStagingInsert()).ToList();
+        }
+
+        public static FolderStaging ToFolderStagingInsert(this Entry inEntryi)
+        {
+            return new FolderStaging
+            {
+                NodeId = inEntryi.Id,
+                ParentId = inEntryi.ParentId,
+                Name = inEntryi.Name,
+                Status = "READY",
+                CreatedAt = DateTime.UtcNow,
+                UpdatedAt = DateTime.UtcNow
+            };
+        }
+
+        public static List<FolderStaging> ToFolderStagingListInsert(this IEnumerable<Entry> inEntries)
+        {
+            return inEntries.Select(e => e.ToFolderStagingInsert()).ToList();
+        }
+
+
         public static FolderStaging ToFolderStaging(this Entry inEntryi)
         {
             return new FolderStaging
             {
                 NodeId = inEntryi.Id,
                 ParentId = inEntryi.ParentId,
-                Name = inEntryi.Name,               
+                Name = inEntryi.Name,                
                 CreatedAt = DateTime.UtcNow,
                 UpdatedAt = DateTime.UtcNow
             };
@@ -34,6 +58,31 @@ namespace Mapper
             return inEntries.Select(e => e.ToFolderStaging()).ToList();
         }
 
+
+        public static DocStaging ToDocStagingInsert(this Entry inEntryi)
+        {
+            return new DocStaging
+            {
+                NodeId = inEntryi.Id,
+                FromPath = string.Empty,
+                ToPath = string.Empty,
+                RetryCount = 0,
+                Status = "READY",
+                ErrorMsg = null,
+                CreatedAt = DateTime.UtcNow,
+                UpdatedAt = DateTime.UtcNow,
+                IsFile = inEntryi.IsFile,
+                IsFolder = inEntryi.IsFolder,
+                Name = inEntryi.Name,
+                NodeType = inEntryi.NodeType,
+                ParentId = inEntryi.ParentId
+            };
+        }
+
+        public static List<DocStaging> ToDocStagingListInsert(this IEnumerable<Entry> inEntries)
+        {
+            return inEntries.Select(e => e.ToDocStagingInsert()).ToList();
+        }
 
         public static DocStaging ToDocStaging(this Entry inEntryi)
         {
