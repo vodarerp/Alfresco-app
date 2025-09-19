@@ -23,6 +23,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Migration.Infrastructure", 
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Migration.Workers", "Migration.Workers\Migration.Workers.csproj", "{BD4A6706-6A7F-4145-8192-F7856AC2302E}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "CA_MockData", "CA_MockData\CA_MockData.csproj", "{02FDAAF8-DB2A-4096-B05E-9E7F8ADCFF74}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -69,6 +71,10 @@ Global
 		{BD4A6706-6A7F-4145-8192-F7856AC2302E}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{BD4A6706-6A7F-4145-8192-F7856AC2302E}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{BD4A6706-6A7F-4145-8192-F7856AC2302E}.Release|Any CPU.Build.0 = Release|Any CPU
+		{02FDAAF8-DB2A-4096-B05E-9E7F8ADCFF74}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{02FDAAF8-DB2A-4096-B05E-9E7F8ADCFF74}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{02FDAAF8-DB2A-4096-B05E-9E7F8ADCFF74}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{02FDAAF8-DB2A-4096-B05E-9E7F8ADCFF74}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

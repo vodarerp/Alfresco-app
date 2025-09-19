@@ -11,6 +11,7 @@ using Dapper;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Migration.Apstaction.Interfaces;
 using Migration.Apstaction.Interfaces.Services;
@@ -44,6 +45,9 @@ namespace Alfresco.App
             AppHost = Host.CreateDefaultBuilder()
                 .ConfigureServices((context, services) =>
                 {
+
+                    
+
                     services.Configure<AlfrescoOptions>(context.Configuration.GetSection("Alfresco"));
 
                     services.AddTransient<BasicAuthHandler>();
@@ -159,7 +163,13 @@ namespace Alfresco.App
 
                     services.AddTransient<MainWindow>();
 
-                }).Build();
+                })
+                .ConfigureLogging((context,logging) =>
+                {
+                    logging.ClearProviders();
+                    logging.AddLog4Net("log4net.config");
+                })
+                .Build();
 
 
             //Dapper.DefaultTypeMap.MatchNamesWithUnderscores = true;

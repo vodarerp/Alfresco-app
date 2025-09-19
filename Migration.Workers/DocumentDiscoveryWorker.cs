@@ -29,12 +29,16 @@ namespace Migration.Workers
         {
             try
             {
+                _logger.LogInformation("Worker starter {time}!", DateTime.Now);
                 await using var scope = _sp.CreateAsyncScope();
                 var svc = scope.ServiceProvider.GetRequiredService<IDocumentDiscoveryService>();
+                _logger.LogInformation("Starting RunLoopAsync....");
+
                 await svc.RunLoopAsync(stoppingToken);
             }
             catch (Exception ex)
             {
+                _logger.LogError("Worker crached {errMsg}!", ex.Message);
 
             }
         }

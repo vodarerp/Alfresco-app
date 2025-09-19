@@ -30,13 +30,15 @@ namespace Migration.Workers
 
             try
             {
+                _logger.LogInformation("Worker starter {time}!", DateTime.Now);
                 using var scope = _sp.CreateScope();
                 var svc = scope.ServiceProvider.GetRequiredService<IFolderDiscoveryService>();
+                _logger.LogInformation("Starting RunLoopAsync ....");
                 await svc.RunLoopAsync(stoppingToken);
             }
             catch (Exception ex)
             {
-
+                _logger.LogError("Worker crashed!! {errMsg}!",ex.Message);
             }
 
             
