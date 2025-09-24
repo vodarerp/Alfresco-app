@@ -27,21 +27,27 @@ namespace Migration.Workers
 
         protected override async Task ExecuteAsync(CancellationToken stoppingToken)
         {
+            var workerId = $"W-FolderDiscoveryWorker";
 
-            try
-            {
-                _logger.LogInformation("Worker starter {time}!", DateTime.Now);
-                using var scope = _sp.CreateScope();
-                var svc = scope.ServiceProvider.GetRequiredService<IFolderDiscoveryService>();
-                _logger.LogInformation("Starting RunLoopAsync ....");
-                await svc.RunLoopAsync(stoppingToken);
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError("Worker crashed!! {errMsg}!",ex.Message);
+            using (_logger.BeginScope(new Dictionary<string, object> { ["WorkerId"] = workerId }))
+            {            
+                try
+                {
+                    _logger.LogInformation("Worker starter {time}!", DateTime.Now);
+                    using var scope = _sp.CreateScope();
+                    var svc = scope.ServiceProvider.GetRequiredService<IFolderDiscoveryService>();
+                    _logger.LogInformation("Starting RunLoopAsync ....");
+                    await svc.RunLoopAsync(stoppingToken);
+                    _logger.LogInformation("Worker finised {time}!", DateTime.Now);
+
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError("Worker crashed!! {errMsg}!",ex.Message);
+                }
             }
 
-            
+
         }
     }
 }

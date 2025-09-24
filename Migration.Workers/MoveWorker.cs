@@ -13,10 +13,10 @@ namespace Migration.Workers
 {
     public class MoveWorker : BackgroundService
     {
-        private readonly ILogger<FolderDiscoveryWorker> _logger;
+        private readonly ILogger<MoveWorker> _logger;
         private readonly IServiceProvider _sp;
 
-        public MoveWorker(ILogger<FolderDiscoveryWorker> logger, IServiceProvider sp)
+        public MoveWorker(ILogger<MoveWorker> logger, IServiceProvider sp)
         {
             _logger = logger;
             _sp = sp;
@@ -24,15 +24,23 @@ namespace Migration.Workers
 
         protected override async Task ExecuteAsync(CancellationToken stoppingToken)
         {
-            try
-            {
-                using var scope = _sp.CreateScope();
-                var svc = scope.ServiceProvider.GetRequiredService<IMoveService>();
-                await svc.RunLoopAsync(stoppingToken);
-            }
-            catch (Exception ex)
-            {
+            var workerId = $"W-MoveWorker";
 
+            using (_logger.BeginScope(new Dictionary<string, object> { ["WorkerId"] = workerId }))
+            {
+                try
+                {
+                    _logger.LogInformation("Worker starter {time}!", DateTime.Now);
+                    using var scope = _sp.CreateScope();
+                    var svc = scope.ServiceProvider.GetRequiredService<IMoveService>();
+                    _logger.LogInformation("Starting RunLoopAsync ....");
+                    await svc.RunLoopAsync(stoppingToken);
+                    _logger.LogInformation("Worker finised {time}!", DateTime.Now);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError("Worker crashed!! {errMsg}!", ex.Message);
+                }
             }
         }
     }

@@ -1,6 +1,7 @@
 ﻿using Alfresco.Contracts.Options;
 using Mapper;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Migration.Apstaction.Interfaces;
 using Migration.Apstaction.Interfaces.Services;
@@ -23,19 +24,23 @@ namespace Migration.Infrastructure.Implementation.Services
         private FolderSeekCursor? _cursor = null;
         private readonly IServiceProvider _sp;
         private readonly IUnitOfWork _unitOfWork;
+        private readonly ILogger<FolderDiscoveryService> _logger;
 
 
-        public FolderDiscoveryService(IFolderIngestor ingestor, IFolderReader reader, IOptions<MigrationOptions> options, IServiceProvider sp, IUnitOfWork unitOfWork)
+        public FolderDiscoveryService(IFolderIngestor ingestor, IFolderReader reader, IOptions<MigrationOptions> options, IServiceProvider sp, IUnitOfWork unitOfWork, ILogger<FolderDiscoveryService> logger)
         {
             _ingestor = ingestor;
             _reader = reader;
             _options = options;
             _sp = sp;
             _unitOfWork = unitOfWork;
+            _logger = logger;
         }
 
         public async Task<FolderBatchResult> RunBatchAsync(CancellationToken ct)
         {
+            _logger.LogInformation("RunBatchAsync Started");
+
             var cnt = 0;
             var batch = _options.Value.DocumentDiscovery.BatchSize ?? _options.Value.BatchSize;
             var dop = _options.Value.DocumentDiscovery.MaxDegreeOfParallelism ?? _options.Value.MaxDegreeOfParallelism;
@@ -44,6 +49,8 @@ namespace Migration.Infrastructure.Implementation.Services
             var folderRequest = new FolderReaderRequest(
                 _options.Value.RootDiscoveryFolderId, _options.Value.FolderDiscovery.NameFilter ?? "-", 0, batch, _cursor
                 );
+
+            _logger.LogInformation("_reader.ReadBatchAsync called");
             var page = await _reader.ReadBatchAsync(folderRequest, ct);            
             
             if(!page.HasMore) return new FolderBatchResult(cnt);
@@ -57,18 +64,24 @@ namespace Migration.Infrastructure.Implementation.Services
 
                 if (toInsert.Count > 0)
                 {
+                    _logger.LogInformation("_ingestor.InserManyAsync called");
+
                     cnt = await _ingestor.InserManyAsync(toInsert, ct);
                 }
                 _cursor = page.Next;
                 await _unitOfWork.CommitAsync();
+                _logger.LogInformation("RunBatchAsync Commited");
                 return new FolderBatchResult(cnt);
             }
             catch (Exception ex)
             {
                 await _unitOfWork.RollbackAsync();
-                throw;
+                _logger.LogInformation("RunBatchAsync Rollback");
+                _logger.LogError("RunBatchAsync crashed!! {errMsg}!", ex.Message);
+                return new FolderBatchResult(0);
+
             }
-                 
+
 
 
 
@@ -76,30 +89,48 @@ namespace Migration.Infrastructure.Implementation.Services
 
         public async Task RunLoopAsync(CancellationToken ct)
         {
+            int BatchCounter = 1, couter = 0;
             var delay = _options.Value.IdleDelayInMs;
+            _logger.LogInformation("Worker Started");
             while (!ct.IsCancellationRequested)
             {
-                try
+                using (_logger.BeginScope(new Dictionary<string, object> { ["BatchCounter"] = BatchCounter }))
                 {
-                    var resRun = await RunBatchAsync(ct);
-                    if (resRun.InsertedCount == 0)
+                    try
                     {
-                       
-                        //_logger.LogInformation("No more documents to process, exiting loop."); TODO
+                        _logger.LogInformation($"Batch Started");
+
+                        var resRun = await RunBatchAsync(ct);
+                            
+                        if (resRun.InsertedCount == 0)
+                        {
+                            _logger.LogInformation($"No more documents to process, exiting loop.");
+                            couter++;
+                            if (couter == _options.Value.BreakEmptyResults)
+                            {
+                                _logger.LogInformation($" Break after {couter} empty results");
+                                break;
+                            }
+                            if (delay > 0)
+                                await Task.Delay(delay, ct);
+                        }
+                        var between = _options.Value.DelayBetweenBatchesInMs;
+                        if (between > 0)
+                            await Task.Delay(between, ct);
+                        _logger.LogInformation($"Batch Done");
+
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogError($"RunLoopAsync Exception: {ex.Message}.");
                         if (delay > 0)
                             await Task.Delay(delay, ct);
                     }
-                    var between = _options.Value.DelayBetweenBatchesInMs;
-                    if (between > 0) 
-                        await Task.Delay(between, ct);
                 }
-                catch (Exception ex)
-                {
-                    //_logger.Error("No more documents to process, exiting loop."); TODO
-                    if (delay > 0)
-                        await Task.Delay(delay, ct);
-                }
+                BatchCounter++;
+                couter = 0;
             }
+            _logger.LogInformation("RunLoopAsync END");
         }
     }
 }

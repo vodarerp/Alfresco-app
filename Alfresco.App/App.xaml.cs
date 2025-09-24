@@ -168,6 +168,10 @@ namespace Alfresco.App
                 {
                     logging.ClearProviders();
                     logging.AddLog4Net("log4net.config");
+                    logging.AddFilter("System.Net.Http.HttpClient", LogLevel.Warning);
+                    logging.AddFilter("Microsoft", LogLevel.Warning);
+                    logging.AddFilter("System", LogLevel.Warning);
+
                 })
                 .Build();
 

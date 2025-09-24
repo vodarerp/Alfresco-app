@@ -13,6 +13,7 @@ namespace Alfresco.Contracts.Options
         public int DelayBetweenBatchesInMs { get; set; } = 0;
 
         public int IdleDelayInMs { get; set; } = 100;
+        public int BreakEmptyResults { get; set; }
 
         public string RootDestinationFolderId { get; set; }
 
