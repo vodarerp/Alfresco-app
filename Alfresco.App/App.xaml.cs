@@ -184,6 +184,9 @@ namespace Alfresco.App
                     logging.AddFilter("Microsoft", LogLevel.Warning);
                     logging.AddFilter("System", LogLevel.Warning);
 
+                    log4net.GlobalContext.Properties["AppInstance"] = $"Service-{Environment.ProcessId}";
+                    ;
+
                 })
                 .Build();
 

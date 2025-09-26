@@ -12,13 +12,16 @@ using System.Linq;
 using System.Runtime.CompilerServices;
 using System.Text;
 using System.Threading.Tasks;
+using log4net;
 using static Migration.Workers.Enum.WorkerEnums;
 
 namespace Migration.Workers
 {
     public class MoveWorker : BackgroundService, IWorkerController, INotifyPropertyChanged
     {
-        private readonly ILogger<MoveWorker> _logger;
+       // private readonly ILogger<MoveWorker> _fileLogger;
+        private readonly ILogger _dbLogger;
+        private readonly ILogger _fileLogger;
         private readonly IServiceProvider _sp;
         private CancellationTokenSource _cts = new(); 
         private readonly object _lockObj = new();       
@@ -94,9 +97,11 @@ namespace Migration.Workers
 
         public Exception? LastError { get; private set; }
 
-        public MoveWorker(ILogger<MoveWorker> logger, IServiceProvider sp)
+        public MoveWorker(ILoggerFactory logger, IServiceProvider sp)
         {
-            _logger = logger;
+            //_fileLogger = logger;
+            _dbLogger = logger.CreateLogger("DbLogger");
+            _fileLogger = logger.CreateLogger("FileLogger");
             _sp = sp;
         }
 
@@ -105,8 +110,9 @@ namespace Migration.Workers
             lock (_lockObj)
             {
                 if (State == WorkerState.Running) return;
-                
-                _logger.LogInformation($"Worker {Key} started");
+
+                _fileLogger.LogInformation($"Worker {Key} started");
+                _dbLogger.LogInformation($"Worker {Key} started");
                 _cts = new CancellationTokenSource();
                 IsEnabled = true;
                 State = WorkerState.Running;
@@ -120,7 +126,7 @@ namespace Migration.Workers
             lock (_lockObj)
             {
                 if (State is WorkerState.Idle or WorkerState.Stopped) return;
-                _logger.LogInformation($"Worker {Key} stoped");
+                _fileLogger.LogInformation($"Worker {Key} stoped");
                 _cts.Cancel();
                 IsEnabled = false;
                 State = WorkerState.Stopped;
@@ -136,7 +142,7 @@ namespace Migration.Workers
 
             var r = RuntimeHelpers.GetHashCode(this);
 
-            using (_logger.BeginScope(new Dictionary<string, object> { ["WorkerId"] = workerId }))
+            using (_dbLogger.BeginScope(new Dictionary<string, object> { ["WorkerId"] = workerId }))
             {
                 while (!stoppingToken.IsCancellationRequested)
                 {
@@ -148,13 +154,13 @@ namespace Migration.Workers
 
                     try
                     {
-                        _logger.LogInformation("Worker starter {time}!", DateTime.Now);
+                        _fileLogger.LogInformation("Worker starter {time}!", DateTime.Now);
                         using var scope = _sp.CreateScope();
                         var svc = scope.ServiceProvider.GetRequiredService<IMoveService>();
-                        _logger.LogInformation("Starting RunLoopAsync ....");
+                        _fileLogger.LogInformation("Starting RunLoopAsync ....");
                         using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken, _cts.Token);
                         await svc.RunLoopAsync(linkedCts.Token);
-                        _logger.LogInformation("Worker finised {time}!", DateTime.Now);
+                        _fileLogger.LogInformation("Worker finised {time}!", DateTime.Now);
                     }
                     catch (OperationCanceledException)
                     {
@@ -169,7 +175,8 @@ namespace Migration.Workers
                     }
                     catch (Exception ex)
                     {
-                        _logger.LogError("Worker crashed!! {errMsg}!", ex.Message);
+                        _fileLogger.LogError("Exception!!! Check db  for details");
+                        _dbLogger.LogError(ex, "Worker crached!!");
                         lock (_lockObj)
                         {
                             LastStopped = DateTimeOffset.Now;
@@ -180,6 +187,12 @@ namespace Migration.Workers
                     } 
                 }
             }
+        }
+
+        public override async Task StopAsync(CancellationToken cancellationToken)
+        {
+            LogManager.Shutdown();
+             await base.StopAsync(cancellationToken);
         }
 
         #region INotifyPropertyChange implementation
