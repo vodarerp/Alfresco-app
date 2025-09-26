@@ -31,7 +31,8 @@ namespace Mapper
                 Name = inEntryi.Name,
                 Status = "READY",
                 CreatedAt = DateTime.UtcNow,
-                UpdatedAt = DateTime.UtcNow
+                UpdatedAt = DateTime.UtcNow,
+                InsertetAtAlfresco = inEntryi.CreatedAt
             };
         }
 

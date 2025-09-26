@@ -1,4 +1,5 @@
-﻿using Alfresco.App.UserControls;
+﻿using Alfresco.App.Helpers;
+using Alfresco.App.UserControls;
 using Alfresco.Apstraction.Interfaces;
 using Alfresco.Apstraction.Models;
 using Alfresco.Client;
@@ -21,6 +22,7 @@ using Migration.Infrastructure.Implementation.Folder;
 using Migration.Infrastructure.Implementation.Move;
 using Migration.Infrastructure.Implementation.Services;
 using Migration.Workers;
+using Migration.Workers.Interfaces;
 using Oracle.Apstaction.Interfaces;
 using Oracle.Infractructure.Helpers;
 using Oracle.Infractructure.Implementation;
@@ -123,6 +125,7 @@ namespace Alfresco.App
 
 
                     services.Configure<MigrationOptions>(context.Configuration.GetSection("Migration"));
+                   // services.Configure<WorkerSetting>(context.Configuration.GetSection("WorkerSetting"));
 
                     services.AddScoped<IUnitOfWork>(sp => new OracleUnitOfWork(sp.GetRequiredService<OracleOptions>().ConnectionString));
 
@@ -146,19 +149,28 @@ namespace Alfresco.App
 
 
 
+
                     if (context.Configuration.GetValue<bool>("EnableFolderWorker"))
                     {
-                        services.AddHostedService<FolderDiscoveryWorker>();
+                        //services.AddHostedService<FolderDiscoveryWorker>();
+                        services.AddSingleton<IWorkerController, FolderDiscoveryWorker>();
+                        services.AddHostedService(sp => (FolderDiscoveryWorker)sp.GetServices<IWorkerController>().First(o => o is FolderDiscoveryWorker));
 
                     }
                     if (context.Configuration.GetValue<bool>("EnableDocumentWorker"))
-                    {                    
-                        services.AddHostedService<DocumentDiscoveryWorker>();
+                    {
+                        //services.AddHostedService<DocumentDiscoveryWorker>();
+                        services.AddSingleton<IWorkerController, DocumentDiscoveryWorker>();
+                        services.AddHostedService(sp => (DocumentDiscoveryWorker)sp.GetServices<IWorkerController>().First(o => o is DocumentDiscoveryWorker));
                     }
                     if (context.Configuration.GetValue<bool>("EnableMoveWorker"))
                     {
-                        services.AddHostedService<MoveWorker>();
+                        //services.AddHostedService<MoveWorker>();
+                        services.AddSingleton<IWorkerController, MoveWorker>();
+                        services.AddHostedService(sp => (MoveWorker)sp.GetServices<IWorkerController>().First(o => o is MoveWorker));
                     }
+                    
+                    
 
 
                     services.AddTransient<MainWindow>();

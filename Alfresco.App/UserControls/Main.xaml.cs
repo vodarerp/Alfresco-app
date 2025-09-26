@@ -5,6 +5,7 @@ using Alfresco.Contracts.Request;
 using Alfresco.Contracts.Response;
 using Mapper;
 using Microsoft.Extensions.DependencyInjection;
+using Migration.Workers.Interfaces;
 using Newtonsoft.Json;
 using Oracle.Apstaction.Interfaces;
 using System;
@@ -42,6 +43,7 @@ namespace Alfresco.App.UserControls
         private readonly IDocStagingRepository _docStagingRepository;
 
         private readonly IFolderStagingRepository _folderStagingRepository;
+
 
 
         //public ObservableCollection<Entry> Entries { get; set; } = new();
@@ -100,6 +102,7 @@ namespace Alfresco.App.UserControls
         public Main()
         {
             DataContext = this;
+
             InitializeComponent();
             Entries = new();
             _alfrescoWriteService = App.AppHost.Services.GetRequiredService<IAlfrescoWriteApi>();

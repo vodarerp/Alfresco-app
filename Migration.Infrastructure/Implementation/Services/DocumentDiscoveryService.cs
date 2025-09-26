@@ -211,7 +211,7 @@ namespace Migration.Infrastructure.Implementation.Services
 
             while (!ct.IsCancellationRequested)
             {
-                using (_logger.BeginScope(new Dictionary<string, object> { ["BatchCounter"] = BatchCounter }))
+                using (_logger.BeginScope(new Dictionary<string, object> { ["BatchCnt"] = BatchCounter }))
                 {
                     try
                     {
