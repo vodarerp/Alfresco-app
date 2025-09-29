@@ -11,6 +11,7 @@ using Alfresco.Contracts.Oracle;
 using Dapper;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Diagnostics.HealthChecks;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -31,6 +32,7 @@ using Polly;
 using Polly.Extensions.Http;
 using System.Configuration;
 using System.Windows;
+using System.Xml.Linq;
 using static Alfresco.App.Helpers.PolicyHelpers;
 
 namespace Alfresco.App
@@ -169,9 +171,18 @@ namespace Alfresco.App
                         services.AddSingleton<IWorkerController, MoveWorker>();
                         services.AddHostedService(sp => (MoveWorker)sp.GetServices<IWorkerController>().First(o => o is MoveWorker));
                     }
-                    
-                    
 
+
+                    services.AddHealthChecks()
+                            .AddOracle(connectionString: context.Configuration["Oracle:ConnectionString"],
+                                       name: "Oracle-db",
+                                       
+                                       failureStatus: HealthStatus.Unhealthy,
+                                       tags: new[] {"db", "oracle"})
+                            .AddUrlGroup(uri: new Uri(context.Configuration["Alfresco:BaseUrl"]!),
+                                         name: "alfresco-api",
+                                         failureStatus: HealthStatus.Unhealthy,
+                                         tags: new[] {"api","alfresco"});                     
 
                     services.AddTransient<MainWindow>();
 
@@ -191,6 +202,7 @@ namespace Alfresco.App
                 .Build();
 
 
+            //AppHost.MapHealthChecks();
             //Dapper.DefaultTypeMap.MatchNamesWithUnderscores = true;
             //OracleHelpers.RegisterFrom<DocStaging>();
         }

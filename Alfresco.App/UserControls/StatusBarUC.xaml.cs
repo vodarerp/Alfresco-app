@@ -1,7 +1,10 @@
-﻿using Alfresco.Apstraction.Interfaces;
+﻿using Alfresco.App.Helpers;
+using Alfresco.Apstraction.Interfaces;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Diagnostics.HealthChecks;
 using System;
 using System.Collections.Generic;
+using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Linq;
 using System.Runtime.CompilerServices;
@@ -26,6 +29,39 @@ namespace Alfresco.App.UserControls
     {
 
         private readonly IAlfrescoReadApi _alfrescoService;
+
+        #region -HealthItems- property
+        private ObservableCollection<HealthItem> _HealthItems = new();
+        public ObservableCollection<HealthItem> HealthItems
+        {
+            get { return _HealthItems; }
+            set
+            {
+                if (_HealthItems != value)
+                {
+                    _HealthItems = value;
+                    NotifyPropertyChanged();
+                }
+            }
+        }
+#endregion
+
+        #region -HealtChecks- property
+        private ObservableCollection<HealthReportEntry> _HealtChecks = new();
+        public ObservableCollection<HealthReportEntry> HealtChecks
+        {
+            get { return _HealtChecks; }
+            set
+            {
+                if (_HealtChecks != value)
+                {
+                    _HealtChecks = value;
+                    NotifyPropertyChanged();
+                }
+            }
+        }
+#endregion
+        //private readonly IServiceProvider _sp;
         #region -Connected- property
         private  bool _Connected;
         public  bool Connected
@@ -51,11 +87,33 @@ namespace Alfresco.App.UserControls
 
             this.Loaded += StatusBarUC_Loaded;
 
+           
+
         }
 
         private async void StatusBarUC_Loaded(object sender, RoutedEventArgs e)
         {
             Connected = await _alfrescoService.PingAsync();
+
+            var healt = App.AppHost.Services.GetRequiredService<HealthCheckService>();
+            var report = await healt.CheckHealthAsync();
+
+            foreach(var entri in report.Entries)
+            {
+                var val = entri.Value;
+                HealthItems.Add(new HealthItem
+                {
+                    Name = entri.Key,
+                    DurationInMs = (int)val.Duration.TotalMilliseconds,
+                    Description = val.Description,
+                    Error = val.Exception?.Message,
+                    Tags = string.Join(", ", val.Tags)
+                });
+            }
+
+
+            //var l = report.Entries.Values.ToList();
+            //HealtChecks = new ObservableCollection<HealthReportEntry>(report.Entries.Values.ToList());
         }
 
         #region INotifyPropertyChange implementation
