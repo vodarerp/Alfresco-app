@@ -2,9 +2,9 @@
 
 using Alfresco.Contracts.Models;
 using Alfresco.Contracts.Oracle.Models;
-using Migration.Apstaction.Models;
+using Migration.Apstraction.Models;
 
-namespace Migration.Apstaction.Interfaces
+namespace Migration.Apstraction.Interfaces
 {
     public interface IFolderIngestor
     {

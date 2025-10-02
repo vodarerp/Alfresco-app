@@ -1,6 +1,6 @@
 ﻿using Alfresco.Contracts.Oracle.Models;
 using Dapper;
-using Oracle.Apstaction.Interfaces;
+using Oracle.Apstraction.Interfaces;
 using Oracle.ManagedDataAccess.Client;
 
 namespace Oracle.Infractructure.Implementation

@@ -1,7 +1,7 @@
 ﻿using Alfresco.Contracts.Oracle.Models;
 
 
-namespace Oracle.Apstaction.Interfaces
+namespace Oracle.Apstraction.Interfaces
 {
     public interface IFolderStagingRepository : IRepository<FolderStaging, long>
     {

@@ -7,7 +7,7 @@ using Mapper;
 using Microsoft.Extensions.DependencyInjection;
 using Migration.Workers.Interfaces;
 using Newtonsoft.Json;
-using Oracle.Apstaction.Interfaces;
+using Oracle.Apstraction.Interfaces;
 using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;

@@ -1,5 +1,5 @@
 ﻿using Dapper;
-using Oracle.Apstaction.Interfaces;
+using Oracle.Apstraction.Interfaces;
 using Oracle.ManagedDataAccess.Client;
 using System.Collections.Generic;
 using System.ComponentModel.DataAnnotations;

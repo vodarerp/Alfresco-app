@@ -5,7 +5,7 @@ using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 
-namespace Oracle.Apstaction.Interfaces
+namespace Oracle.Apstraction.Interfaces
 {
     public interface IUnitOfWork : IAsyncDisposable
     {

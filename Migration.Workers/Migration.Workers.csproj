@@ -12,7 +12,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\Migration.Apstaction\Migration.Apstaction.csproj" />
+    <ProjectReference Include="..\Migration.Apstaction\Migration.Apstraction.csproj" />
   </ItemGroup>
 
 </Project>

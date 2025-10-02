@@ -1,8 +1,8 @@
 ﻿using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
-using Migration.Apstaction.Interfaces.Services;
-using Migration.Apstaction.Interfaces.Wrappers;
+using Migration.Apstraction.Interfaces.Services;
+using Migration.Apstraction.Interfaces.Wrappers;
 using Migration.Workers.Enum;
 using Migration.Workers.Interfaces;
 using System;

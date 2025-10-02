@@ -1,6 +1,6 @@
 ﻿using Alfresco.Apstraction.Interfaces;
 using Alfresco.Contracts.Models;
-using Migration.Apstaction.Interfaces;
+using Migration.Apstraction.Interfaces;
 using System;
 using System.Collections.Generic;
 using System.Linq;

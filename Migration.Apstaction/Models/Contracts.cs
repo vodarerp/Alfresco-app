@@ -1,7 +1,7 @@
 ﻿
 using Alfresco.Contracts.Models;
 
-namespace Migration.Apstaction.Models
+namespace Migration.Apstraction.Models
 {
     public sealed record FolderSource(string id, string name, string nodeID, string fullPath);
     public sealed record ScanRequest(string rootId, string nameFilter, int skip, int take);

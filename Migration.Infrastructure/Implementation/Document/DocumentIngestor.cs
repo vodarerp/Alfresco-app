@@ -1,8 +1,8 @@
 ﻿using Alfresco.Contracts.Models;
 using Alfresco.Contracts.Oracle.Models;
 using Mapper;
-using Migration.Apstaction.Interfaces;
-using Oracle.Apstaction.Interfaces;
+using Migration.Apstraction.Interfaces;
+using Oracle.Apstraction.Interfaces;
 using System;
 using System.Collections.Generic;
 using System.Linq;

@@ -4,13 +4,12 @@ using Mapper;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
-using Migration.Apstaction.Interfaces;
-using Migration.Apstaction.Interfaces.Wrappers;
-using Migration.Apstaction.Models;
+using Migration.Apstraction.Interfaces;
+using Migration.Apstraction.Interfaces.Wrappers;
+using Migration.Apstraction.Models;
 using Migration.Infrastructure.Implementation.Helpers;
-using Oracle.Apstaction.Interfaces;
+using Oracle.Apstraction.Interfaces;
 using System.Collections.Concurrent;
-using System.Numerics;
 
 namespace Migration.Infrastructure.Implementation.Services
 {

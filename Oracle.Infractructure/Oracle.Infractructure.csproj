@@ -12,11 +12,12 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\Oracle.Apstaction\Oracle.Apstaction.csproj" />
+    <Folder Include="Helpers\Generic\" />
   </ItemGroup>
 
   <ItemGroup>
-    <Folder Include="Helpers\Generic\" />
+    <ProjectReference Include="..\Alfresco.Contracts\Alfresco.Contracts.csproj" />
+    <ProjectReference Include="..\Oracle.Apstaction\Oracle.Apstraction.csproj" />
   </ItemGroup>
 
 </Project>

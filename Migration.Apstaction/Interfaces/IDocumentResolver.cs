@@ -4,7 +4,7 @@ using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 
-namespace Migration.Apstaction.Interfaces
+namespace Migration.Apstraction.Interfaces
 {
     public interface IDocumentResolver
     {
