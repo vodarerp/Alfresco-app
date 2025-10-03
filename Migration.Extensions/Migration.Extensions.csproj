@@ -8,16 +8,9 @@
 
   <ItemGroup>
     <PackageReference Include="Dapper" Version="2.1.66" />
-    <PackageReference Include="Oracle.ManagedDataAccess.Core" Version="23.9.1" />
   </ItemGroup>
 
   <ItemGroup>
-    <Folder Include="Helpers\Generic\" />
-  </ItemGroup>
-
-  <ItemGroup>
-    <ProjectReference Include="..\Alfresco.Contracts\Alfresco.Contracts.csproj" />
-    <ProjectReference Include="..\Migration.Extensions\Migration.Extensions.csproj" />
     <ProjectReference Include="..\Oracle.Apstaction\Oracle.Apstraction.csproj" />
   </ItemGroup>
 

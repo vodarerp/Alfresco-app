@@ -16,6 +16,7 @@
     <ProjectReference Include="..\Alfresco.Contracts\Alfresco.Contracts.csproj" />
     <ProjectReference Include="..\Mapper\Mapper.csproj" />
     <ProjectReference Include="..\Migration.Apstaction\Migration.Apstraction.csproj" />
+    <ProjectReference Include="..\Migration.Extensions\Migration.Extensions.csproj" />
     <ProjectReference Include="..\Oracle.Apstaction\Oracle.Apstraction.csproj" />    
   </ItemGroup>
 

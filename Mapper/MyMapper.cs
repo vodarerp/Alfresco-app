@@ -5,6 +5,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
+using Alfresco.Contracts.Enums;
 
 namespace Mapper
 {
@@ -29,7 +30,7 @@ namespace Mapper
                 NodeId = inEntryi.Id,
                 ParentId = inEntryi.ParentId,
                 Name = inEntryi.Name,
-                Status = "READY",
+                Status = MigrationStatus.Ready.ToDbString(),
                 CreatedAt = DateTime.UtcNow,
                 UpdatedAt = DateTime.UtcNow,
                 InsertetAtAlfresco = inEntryi.CreatedAt
@@ -68,7 +69,7 @@ namespace Mapper
                 FromPath = string.Empty,
                 ToPath = string.Empty,
                 RetryCount = 0,
-                Status = "READY",
+                Status = MigrationStatus.Ready.ToDbString(),
                 ErrorMsg = null,
                 CreatedAt = DateTime.UtcNow,
                 UpdatedAt = DateTime.UtcNow,

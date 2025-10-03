@@ -23,7 +23,8 @@
                     <RowDefinition Height="*"></RowDefinition>
                     <RowDefinition Height="*"></RowDefinition>
                 </Grid.RowDefinitions>
-                <DataGrid x:Name="dataGridA" Grid.Row="0"  Margin="10" AutoGenerateColumns="false" ItemsSource="{Binding Folders}" IsReadOnly="True">
+                <Button Grid.Row ="0" Click="Button_Click"> Tes</Button>
+                <!--<DataGrid x:Name="dataGridA" Grid.Row="0"  Margin="10" AutoGenerateColumns="false" ItemsSource="{Binding Folders}" IsReadOnly="True">
                     <DataGrid.Columns>
                         <DataGridTemplateColumn Header="ID" Width="*">
                             <DataGridTemplateColumn.CellTemplate>
@@ -40,8 +41,8 @@
                             </DataGridTemplateColumn.CellTemplate>
                         </DataGridTemplateColumn>
                     </DataGrid.Columns>
-                </DataGrid>
-                <DataGrid x:Name="dataGridOracle" Grid.Row="1"  Margin="10" AutoGenerateColumns="false" ItemsSource="{Binding Documents}" IsReadOnly="True">
+                </DataGrid>-->
+                <DataGrid  x:Name="dataGridOracle" Grid.Row="1"  Margin="10" AutoGenerateColumns="false" ItemsSource="{Binding Documents}" IsReadOnly="True">
                     <DataGrid.Columns>
                         <DataGridTemplateColumn Header="ID" Width="*">
                             <DataGridTemplateColumn.CellTemplate>

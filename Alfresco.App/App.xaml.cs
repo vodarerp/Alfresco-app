@@ -74,7 +74,7 @@ namespace Alfresco.App
 
                     services.AddHttpClient<IAlfrescoReadApi, AlfrescoReadApi>(cli =>
                     {
-                        cli.Timeout = TimeSpan.FromSeconds(30);
+                        cli.Timeout = Timeout.InfiniteTimeSpan; // TimeOut iz polly
                     })
                         .ConfigureHttpClient((sp, cli) =>
                         {
@@ -84,13 +84,20 @@ namespace Alfresco.App
                         })
 
                         .AddHttpMessageHandler<BasicAuthHandler>()
-                        .SetHandlerLifetime(TimeSpan.FromMinutes(5));
+                        .SetHandlerLifetime(TimeSpan.FromMinutes(5))
+                        .AddPolicyHandler((sp, req) =>
+                        {
+                            var logger = sp.GetRequiredService<ILogger<AlfrescoReadApi>>();
+
+                            // Combined policy: Timeout → Retry → Circuit Breaker → Bulkhead
+                            return PolicyHelpers.GetCombinedReadPolicy(logger);
+                        });
                     //.AddPolicyHandler(GetRetryPlicy())
                     //.AddPolicyHandler(GetCircuitBreakerPolicy());
 
                     services.AddHttpClient<IAlfrescoWriteApi, AlfrescoWriteApi>(cli =>
                     {
-                        cli.Timeout = TimeSpan.FromSeconds(30);
+                        cli.Timeout = Timeout.InfiniteTimeSpan; // TimeOut iz polly
                     })
                         .ConfigureHttpClient((sp, cli) =>
                         {
@@ -100,7 +107,14 @@ namespace Alfresco.App
                         })
 
                         .AddHttpMessageHandler<BasicAuthHandler>()
-                        .SetHandlerLifetime(TimeSpan.FromMinutes(5));
+                        .SetHandlerLifetime(TimeSpan.FromMinutes(5))
+                        .AddPolicyHandler((sp, req) =>
+                        {
+                            var logger = sp.GetRequiredService<ILogger<AlfrescoReadApi>>();
+
+                            // Combined policy: Timeout → Retry → Circuit Breaker → Bulkhead
+                            return PolicyHelpers.GetCombinedWritePolicy(logger);
+                        });
                         //.AddPolicyHandler(GetRetryPlicy())
                         //.AddPolicyHandler(GetCircuitBreakerPolicy());
 

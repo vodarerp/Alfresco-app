@@ -1,12 +1,11 @@
-﻿using Polly;
+﻿using Microsoft.Extensions.Logging;     // ← ILogger
+using Polly;                             // ← Policy, AsyncRetryPolicy
+using Polly.CircuitBreaker;              // ← AsyncCircuitBreakerPolicy
 using Polly.Extensions.Http;
-using System;
-using System.Collections.Generic;
-using System.Linq;
+using Polly.Retry;                       // ← AsyncRetryPolicy
+using Polly.Timeout;                     // ← AsyncTimeoutPolicy
 using System.Net;
 using System.Net.Http;
-using System.Text;
-using System.Threading.Tasks;
 
 namespace Alfresco.App.Helpers
 {
@@ -26,6 +25,124 @@ namespace Alfresco.App.Helpers
                 .HandleTransientHttpError()
                 .CircuitBreakerAsync(5, TimeSpan.FromSeconds(30));
         }
+
+        public static AsyncRetryPolicy<HttpResponseMessage> GetRetryPolicy(ILogger? logger = null)
+        {
+            return Policy
+                .HandleResult<HttpResponseMessage>(r =>
+                    r.StatusCode == HttpStatusCode.TooManyRequests ||
+                    r.StatusCode == HttpStatusCode.ServiceUnavailable ||
+                    r.StatusCode == HttpStatusCode.RequestTimeout ||
+                    (int)r.StatusCode >= 500)
+                .Or<HttpRequestException>()
+                .Or<TaskCanceledException>()
+                .WaitAndRetryAsync(
+                    retryCount: 3,
+                    sleepDurationProvider: retryAttempt =>
+                    {
+                        // Exponential backoff: 2s, 4s, 8s
+                        var delay = TimeSpan.FromSeconds(Math.Pow(2, retryAttempt));
+
+                        // Jitter to avoid thundering herd (random 0-500ms)
+                        var jitter = TimeSpan.FromMilliseconds(Random.Shared.Next(0, 500));
+                        return delay + jitter;
+                    },
+                    onRetry: (outcome, timespan, retryCount, context) =>
+                    {
+                        var statusCode = outcome.Result?.StatusCode.ToString() ?? "Exception";
+                        logger?.LogWarning(
+                            "Retry {RetryCount}/3 after {Delay}ms due to {StatusCode}",
+                            retryCount, timespan.TotalMilliseconds, statusCode);
+                    });
+        }
+
+        public static AsyncCircuitBreakerPolicy<HttpResponseMessage> GetCircuitBreakerPolicy(
+            ILogger? logger = null)
+        {
+            return Policy
+                .HandleResult<HttpResponseMessage>(r => (int)r.StatusCode >= 500)
+                .Or<HttpRequestException>()
+                .CircuitBreakerAsync(
+                    handledEventsAllowedBeforeBreaking: 5,
+                    durationOfBreak: TimeSpan.FromSeconds(30),
+                    onBreak: (outcome, duration) =>
+                    {
+                        logger?.LogError(
+                            " Circuit breaker OPENED for {Duration}s due to failures. " +
+                            "All requests will fail immediately until reset.",
+                            duration.TotalSeconds);
+                    },
+                    onReset: () =>
+                    {
+                        logger?.LogInformation(
+                            " Circuit breaker CLOSED - requests will resume normally");
+                    },
+                    onHalfOpen: () =>
+                    {
+                        logger?.LogInformation(
+                            " Circuit breaker HALF-OPEN - testing with next request");
+                    });
+        }
+
+        public static AsyncTimeoutPolicy<HttpResponseMessage> GetTimeoutPolicy(
+            TimeSpan timeout,
+            ILogger? logger = null)
+        {
+            return Policy
+                .TimeoutAsync<HttpResponseMessage>(
+                    timeout,
+                    TimeoutStrategy.Pessimistic,
+                    onTimeoutAsync: (context, timespan, task) =>
+                    {
+                        logger?.LogWarning(
+                            "⏱️ Request timed out after {Timeout}s",
+                            timespan.TotalSeconds);
+                        return Task.CompletedTask;
+                    });
+        }
+
+        public static AsyncPolicy<HttpResponseMessage> GetBulkheadPolicy(
+            int maxParallelization = 10,
+            int maxQueuingActions = 20,
+            ILogger? logger = null)
+        {
+            return Policy
+                .BulkheadAsync<HttpResponseMessage>(
+                    maxParallelization,
+                    maxQueuingActions,
+                    onBulkheadRejectedAsync: context =>
+                    {
+                        logger?.LogWarning(
+                            "🚫 Bulkhead rejected request - too many concurrent calls " +
+                            "(max: {Max}, queued: {Queue})",
+                            maxParallelization, maxQueuingActions);
+                        return Task.CompletedTask;
+                    });
+        }
+
+        public static IAsyncPolicy<HttpResponseMessage> GetCombinedReadPolicy(
+            ILogger? logger = null)
+        {
+            var timeout = GetTimeoutPolicy(TimeSpan.FromSeconds(30), logger);
+            var retry = GetRetryPolicy(logger);
+            var circuitBreaker = GetCircuitBreakerPolicy(logger);
+            var bulkhead = GetBulkheadPolicy(10, 20, logger);
+
+            // Wrap policies - inner to outer execution
+            return Policy.WrapAsync(timeout, retry, circuitBreaker, bulkhead);
+        }
+
+        public static IAsyncPolicy<HttpResponseMessage> GetCombinedWritePolicy(
+           ILogger? logger = null)
+        {
+            var timeout = GetTimeoutPolicy(TimeSpan.FromSeconds(45), logger);
+            var circuitBreaker = GetCircuitBreakerPolicy(logger);
+
+            // Write operations should NOT retry automatically
+            // Only timeout + circuit breaker
+            return Policy.WrapAsync(timeout, circuitBreaker);
+        }
+
 
     }
 }

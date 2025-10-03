@@ -25,6 +25,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Migration.Workers", "Migrat
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "CA_MockData", "CA_MockData\CA_MockData.csproj", "{02FDAAF8-DB2A-4096-B05E-9E7F8ADCFF74}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Migration.Extensions", "Migration.Extensions\Migration.Extensions.csproj", "{D1D13799-2426-4022-BF60-B136A8B7B73E}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -75,6 +77,10 @@ Global
 		{02FDAAF8-DB2A-4096-B05E-9E7F8ADCFF74}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{02FDAAF8-DB2A-4096-B05E-9E7F8ADCFF74}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{02FDAAF8-DB2A-4096-B05E-9E7F8ADCFF74}.Release|Any CPU.Build.0 = Release|Any CPU
+		{D1D13799-2426-4022-BF60-B136A8B7B73E}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{D1D13799-2426-4022-BF60-B136A8B7B73E}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{D1D13799-2426-4022-BF60-B136A8B7B73E}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{D1D13799-2426-4022-BF60-B136A8B7B73E}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

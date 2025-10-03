@@ -1,4 +1,5 @@
-﻿using Alfresco.Contracts.Oracle.Models;
+﻿using Alfresco.Contracts.Enums;
+using Alfresco.Contracts.Oracle.Models;
 using Dapper;
 using Oracle.Apstraction.Interfaces;
 using Oracle.ManagedDataAccess.Client;
@@ -81,8 +82,8 @@ namespace Oracle.Infractructure.Implementation
             //            FETCH FIRST :take ROWS ONLY                        
             //            FOR UPDATE SKIP LOCKED";
 
-            var sql = @"select * from FolderStaging  
-                         where status = 'READY'                           
+            var sql = @$"select * from FolderStaging  
+                         where status = '{MigrationStatus.Ready.ToDbString()}'                           
                          FETCH FIRST :take ROWS ONLY 
                          FOR UPDATE SKIP LOCKED
                          ";

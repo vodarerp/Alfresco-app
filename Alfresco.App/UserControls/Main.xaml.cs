@@ -316,5 +316,22 @@ namespace Alfresco.App.UserControls
                 }
             }
         }
+
+        private async void Button_Click(object sender, RoutedEventArgs e)
+        {
+            try
+            {
+                var readApi = App.AppHost.Services.GetRequiredService<IAlfrescoReadApi>();
+
+                // Test API call - Polly će automatski retry ako fail-uje!
+                var result = await readApi.GetNodeChildrenAsync("e52b3112-77ee-45c1-ab31-1277ee15c1ee", CancellationToken.None);
+
+                MessageBox.Show("Success! Polly is working! ✅");
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Error: {ex.Message}");
+            }
+        }
     }
 }
