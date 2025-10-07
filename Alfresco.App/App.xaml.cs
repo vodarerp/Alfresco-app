@@ -104,10 +104,17 @@ namespace Alfresco.App
                             var options = sp.GetRequiredService<IOptions<AlfrescoOptions>>().Value;
                             cli.BaseAddress = new Uri(options.BaseUrl);
                             cli.DefaultRequestHeaders.Accept.Add(new System.Net.Http.Headers.MediaTypeWithQualityHeaderValue("application/json"));
+                            cli.DefaultRequestHeaders.ConnectionClose = false; // Keep-Alive
                         })
-
+                        .ConfigurePrimaryHttpMessageHandler(() => new System.Net.Http.SocketsHttpHandler
+                        {
+                            PooledConnectionLifetime = TimeSpan.FromMinutes(10),
+                            PooledConnectionIdleTimeout = TimeSpan.FromMinutes(5),
+                            MaxConnectionsPerServer = 100,
+                            EnableMultipleHttp2Connections = true
+                        })
                         .AddHttpMessageHandler<BasicAuthHandler>()
-                        .SetHandlerLifetime(TimeSpan.FromMinutes(5))
+                        .SetHandlerLifetime(TimeSpan.FromMinutes(10))
                         .AddPolicyHandler((sp, req) =>
                         {
                             var logger = sp.GetRequiredService<ILogger<AlfrescoReadApi>>();

@@ -23,7 +23,7 @@ namespace Oracle.Infrastructure.Implementation
 
             var dp = new DynamicParameters();
 
-            error = error.Substring(0, Math.Min(4000, error.Length)); // Oracle VARCHAR2 limit
+            error = error.Length > 4000 ? error[..4000] : error; // Oracle VARCHAR2 limit
 
             dp.Add(":error", error);
             dp.Add(":id", id);
@@ -47,7 +47,7 @@ namespace Oracle.Infrastructure.Implementation
 
                 var dp = new DynamicParameters();
 
-                error = error?.Substring(0, Math.Min(4000, error.Length)); // Oracle VARCHAR2 limit
+                error = error?.Length > 4000 ? error[..4000] : error; // Oracle VARCHAR2 limit
 
                 if (error == null) error = "";
 

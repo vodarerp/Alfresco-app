@@ -101,10 +101,9 @@ namespace Alfresco.Client.Implementation
                 targetParentId = targetFolderId
             };
             var json = JsonConvert.SerializeObject(body,jsonSerializerSettings);
-            
+
             using var content = new StringContent(json,Encoding.UTF8, "application/json");
-            var res = await _client.PostAsync($"/alfresco/api/-default-/public/alfresco/versions/1/nodes/{nodeId}/move", content, ct).ConfigureAwait(false);
-            //using var res = await _client.PostAsync($"/alfresco/api/-default-/public/alfresco/versions/1/nodes/{nodeId}/move", content, ct);
+            using var res = await _client.PostAsync($"/alfresco/api/-default-/public/alfresco/versions/1/nodes/{nodeId}/move", content, ct).ConfigureAwait(false);
 
             return res.IsSuccessStatusCode;
 

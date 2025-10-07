@@ -193,10 +193,18 @@ namespace Migration.Infrastructure.Implementation.Services
             {
                 var folders = await folderRepo.TakeReadyForProcessingAsync(batch, ct).ConfigureAwait(false);
 
-                foreach(var f in folders)
-                {
-                    await folderRepo.SetStatusAsync(f.Id, MigrationStatus.InProgress.ToDbString(), null, ct).ConfigureAwait(false);
-                }
+                // Batch update instead of N individual updates
+                var updates = folders.Select(f => (
+                    f.Id,
+                    MigrationStatus.InProgress.ToDbString(),
+                    (string?)null
+                ));
+
+                await folderRepo.BatchSetFolderStatusAsync_v1(
+                    uow.Connection,
+                    uow.Transaction,
+                    updates,
+                    ct).ConfigureAwait(false);
 
                 await uow.CommitAsync(ct: ct).ConfigureAwait(false);
 
@@ -357,11 +365,11 @@ namespace Migration.Infrastructure.Implementation.Services
                     e.FolderId,
                     MigrationStatus.Error.ToDbString(),
                     e.Error.Message.Length > 4000
-                        ? e.Error.Message.Substring(0, 4000)
+                        ? e.Error.Message[..4000]
                         : e.Error.Message
                 ));
 
-                await folderRepo.BatchSetFolderStatusAsync(
+                await folderRepo.BatchSetFolderStatusAsync_v1(
                     uow.Connection,
                     uow.Transaction,
                     updates,

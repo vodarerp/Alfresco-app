@@ -54,7 +54,11 @@ namespace Alfresco.Client.Implementation
             return toRet;
         }
 
-        public async Task<bool> PingAsync(CancellationToken ct = default) => (await _client.GetAsync("/alfresco/api/-default-/public/alfresco/versions/1/probes/-live-", ct).ConfigureAwait(false)).IsSuccessStatusCode;
+        public async Task<bool> PingAsync(CancellationToken ct = default)
+        {
+            using var response = await _client.GetAsync("/alfresco/api/-default-/public/alfresco/versions/1/probes/-live-", ct).ConfigureAwait(false);
+            return response.IsSuccessStatusCode;
+        }
         //{
         //    using var toRet = await _client.GetAsync("/alfresco/api/-default-/public/alfresco/versions/1/probes/-live-", ct);
 

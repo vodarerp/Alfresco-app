@@ -1,18 +1,51 @@
 ﻿using Alfresco.Contracts.Enums;
 using Dapper;
 using Oracle.Abstraction.Interfaces;
+using Oracle.ManagedDataAccess.Client;
 using System;
 using System.Collections.Generic;
 using System.Data;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
+using static System.Runtime.InteropServices.JavaScript.JSType;
 
 namespace Migration.Extensions.Oracle
 {
     public static class RepositoryExtensions
     {
         #region Document extension
+
+        public static async Task BatchSetDocumentStatusAsync_v1(this IDocStagingRepository repo, IDbConnection conn, IDbTransaction tran, IEnumerable<(long DocId, string Status, string? Error)> values, CancellationToken ct = default)
+        {
+            if (!values.Any()) return;
+
+            var sql = @"update docStaging
+                        SET Status = :status, 
+                            ErrorMsg = :error,
+                            updatedAt = SYSTIMESTAMP
+                        WHERE Id = :id";
+
+            var ids = values.Select(o => o.DocId).ToArray();
+            var statuses = values.Select(o => o.Status).ToArray();
+            var errors = values.Select(o => o.Error).ToArray();
+            var count = values.Count();
+
+            using var cmd = (OracleCommand)conn.CreateCommand();
+            cmd.Transaction = (OracleTransaction)tran;
+            cmd.BindByName = true;
+            cmd.ArrayBindCount = count;
+            cmd.CommandText = sql;
+
+            cmd.Parameters.Add(":status", OracleDbType.Varchar2, statuses, ParameterDirection.Input);
+            cmd.Parameters.Add(":error", OracleDbType.Varchar2, errors, ParameterDirection.Input);
+            cmd.Parameters.Add(":id", OracleDbType.Int64, ids, ParameterDirection.Input);
+
+            var res = await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+
+
+
+        }
         public static async Task BatchSetDocumentStatusAsync(this IDocStagingRepository repo, IDbConnection conn, IDbTransaction tran, IEnumerable<(long DocId, string Status, string? Error)> values, CancellationToken ct = default)
         {
             if (!values.Any()) return;
@@ -72,13 +105,42 @@ namespace Migration.Extensions.Oracle
         #endregion
 
         #region Folder Extensinon
+
+        public static async Task BatchSetFolderStatusAsync_v1(this IFolderStagingRepository repo, IDbConnection conn, IDbTransaction tran, IEnumerable<(long FolderId, string Status, string? Error)> values, CancellationToken ct = default)
+        {
+            if (!values.Any()) return;
+
+            var sql = @"update FolderStaging
+                        SET Status = :status,
+                            Error = :error,
+                            UpdatedAt = SYSTIMESTAMP
+                        WHERE Id = :id";
+
+            var ids = values.Select(o => o.FolderId).ToArray();
+            var statuses = values.Select(o => o.Status).ToArray();
+            var errors = values.Select(o => o.Error).ToArray();
+            var count = values.Count();
+
+            using var cmd = (OracleCommand)conn.CreateCommand();
+            cmd.Transaction = (OracleTransaction)tran;
+            cmd.BindByName = true;
+            cmd.ArrayBindCount = count;
+            cmd.CommandText = sql;
+
+            cmd.Parameters.Add(":status", OracleDbType.Varchar2, statuses, ParameterDirection.Input);
+            cmd.Parameters.Add(":error", OracleDbType.Varchar2, errors, ParameterDirection.Input);
+            cmd.Parameters.Add(":id", OracleDbType.Int64, ids, ParameterDirection.Input);
+
+            await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+        }
+
         public static async Task BatchSetFolderStatusAsync(this IFolderStagingRepository repo, IDbConnection conn, IDbTransaction tran, IEnumerable<(long DocId, string Status, string? Error)> values, CancellationToken ct = default)
         {
             if (!values.Any()) return;
 
             var sql = @"update FolderStaging
-                        SET Status = :status, 
-                            Error = :error
+                        SET Status = :status,
+                            Error = :error,
                             UpdatedAt = SYSTIMESTAMP
                         WHERE Id = :id";
 

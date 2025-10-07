@@ -134,14 +134,16 @@ namespace Alfresco.App.Helpers
         }
 
         public static IAsyncPolicy<HttpResponseMessage> GetCombinedWritePolicy(
-           ILogger? logger = null)
+           ILogger? logger = null, int bulkheadLimit = 100)
         {
-            var timeout = GetTimeoutPolicy(TimeSpan.FromSeconds(10), logger);
+            var timeout = GetTimeoutPolicy(TimeSpan.FromSeconds(30), logger);
+            var retry = GetRetryPolicy(logger);
             var circuitBreaker = GetCircuitBreakerPolicy(logger);
+            var bulkhead = GetBulkheadPolicy(bulkheadLimit, bulkheadLimit * 2, logger);
 
-            // Write operations should NOT retry automatically
-            // Only timeout + circuit breaker
-            return Policy.WrapAsync(timeout, circuitBreaker);
+            // Write operations with retry for transient failures
+            // timeout + retry + circuit breaker + bulkhead for concurrency control
+            return Policy.WrapAsync(timeout, retry, circuitBreaker, bulkhead);
         }
 
 

@@ -1,6 +1,7 @@
 ﻿using Dapper;
 using Oracle.Abstraction.Interfaces;
 using Oracle.ManagedDataAccess.Client;
+using Oracle.ManagedDataAccess.Types;
 using System.Collections.Generic;
 using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
@@ -71,52 +72,62 @@ namespace Oracle.Infrastructure.Implementation
         }
         public async Task<int> InsertManyAsync(IEnumerable<T> entities, CancellationToken ct = default)
         {
-            int toRet = -1;
-            //using var trans = _connection.BeginTransaction();
-            try
+            var listEntities = entities.ToList();
+            if (listEntities.Count == 0) return 0;
+
+            var columns = OracleHelpers<T>.TableProps.Where(o => !o.IsIdentity).ToArray();
+            var colNames = string.Join(", ", columns.Select(c => c.Col));
+            var paramNames = string.Join(", ", columns.Select(c => $":{c.Col}"));
+
+            string sql = $"INSERT INTO {TableName} ({colNames}) VALUES ({paramNames})";
+
+            var batchSize = 1000;
+            int totalInserted = 0;
+
+            for (int offset = 0; offset < listEntities.Count; offset += batchSize)
             {
-                var listEntities = entities.ToList();
-                //var columns = GetColumns().Where(o => !o.IsIdentity).ToArray();
-                var columns = OracleHelpers<T>.TableProps.Where(o => !o.IsIdentity).ToArray();
-                var colNames = string.Join(", ", columns.Select(c => c.Col));
-                var paramNames = string.Join(", ", columns.Select(c => $":{c.Col}"));
-                var idCol = GetColumns().FirstOrDefault(o => o.IsKey).Col ?? "Id";
+                ct.ThrowIfCancellationRequested();
 
-                string sql = $"INSERT INTO {TableName} ({colNames}) VALUES ({paramNames})";
+                var batch = listEntities.Skip(offset).Take(batchSize).ToList();
+                var count = batch.Count;
 
-                var batchSize = 1000; // promeni da se cita iz OravleOptions.... OravleOptions dodati kroz DI kontejner
+                // Use Oracle array binding for bulk insert
+                using var cmd = (OracleCommand)Conn.CreateCommand();
+                cmd.Transaction = (OracleTransaction)Tx;
+                cmd.BindByName = true;
+                cmd.ArrayBindCount = count;
+                cmd.CommandText = sql;
 
-                for (int offset = 0; offset < listEntities.Count(); offset += batchSize)
+                // Prepare arrays for each column
+                foreach (var col in columns)
                 {
-                    var forInsert = listEntities.Skip(offset).Take(batchSize);
-
-                    foreach (var o in forInsert)
-                    {
-                        ct.ThrowIfCancellationRequested();
-
-                        var param = new DynamicParameters();
-                        foreach (var c in columns)
-                        {
-                            param.Add(c.Col, c.Prop.GetValue(o));
-                        }
-
-                        var cmd = new CommandDefinition(sql, param, Tx, 100, cancellationToken: ct);
-                        toRet = await Conn.ExecuteAsync(cmd).ConfigureAwait(false);
-
-                        //trans.Commit();
-                    }
+                    var values = batch.Select(e => col.Prop.GetValue(e)).ToArray();
+                    var oracleType = GetOracleDbType(col.Prop.PropertyType);
+                    cmd.Parameters.Add($":{col.Col}", oracleType, values, ParameterDirection.Input);
                 }
+
+                var inserted = await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+                totalInserted += inserted;
             }
-            catch (Exception ex)
+
+            return totalInserted;
+        }
+
+        private static OracleDbType GetOracleDbType(Type type)
+        {
+            return Type.GetTypeCode(type) switch
             {
-
-                //trans.Rollback();
-                toRet = -1;
-            }
-            
-
-
-            return toRet;
+                TypeCode.Int16 => OracleDbType.Int16,
+                TypeCode.Int32 => OracleDbType.Int32,
+                TypeCode.Int64 => OracleDbType.Int64,
+                TypeCode.Decimal => OracleDbType.Decimal,
+                TypeCode.Double => OracleDbType.Double,
+                TypeCode.Single => OracleDbType.Single,
+                TypeCode.DateTime => OracleDbType.TimeStamp,
+                TypeCode.String => OracleDbType.Varchar2,
+                TypeCode.Boolean => OracleDbType.Byte,
+                _ => OracleDbType.Varchar2
+            };
         }
 
         public async Task DeleteAsync(long id, CancellationToken cancellationToken = default)

@@ -53,20 +53,17 @@ namespace Migration.Infrastructure.Implementation.Services
         public async Task<MoveBatchResult> RunBatchAsync(CancellationToken ct)
         {
             var sw = Stopwatch.StartNew();
+            var acquireTimer = Stopwatch.StartNew();
 
-            //using var batchScope = _fileLogger.BeginScope(new Dictionary<string, object>
-            //{
-            //    ["Service"] = nameof(MoveService),
-            //    ["Operation"] = "RunBatch"
-            //});
-
-            _fileLogger.LogInformation("Move batch started@!!");
+            _fileLogger.LogInformation("Move batch started");
 
             var batch = _options.Value.MoveService.BatchSize ?? _options.Value.BatchSize;
             var dop = _options.Value.MoveService.MaxDegreeOfParallelism ?? _options.Value.MaxDegreeOfParallelism;
 
             // 1. Atomic acquire - preuzmi i zaključaj dokumente u jednoj transakciji
             var documents = await AcquireDocumentsForMoveAsync(batch, ct).ConfigureAwait(false);
+            acquireTimer.Stop();
+            _fileLogger.LogInformation("Acquired {Count} documents in {Ms}ms", documents.Count, acquireTimer.ElapsedMilliseconds);
 
             if (documents.Count == 0)
             {
@@ -74,13 +71,13 @@ namespace Migration.Infrastructure.Implementation.Services
                 return new MoveBatchResult(0, 0);
             }
 
-            _fileLogger.LogInformation("Acquired {Count} documents for move", documents.Count);
-
             // 2. Parallel move dokumenata
+            _fileLogger.LogInformation("Starting parallel move with DOP={Dop}", dop);
+            var moveTimer = Stopwatch.StartNew();
             var doneCount = 0;
             var errors = new ConcurrentBag<(long DocId, Exception Error)>();
             var successfulDocs = new ConcurrentBag<long>();
-            var activeThreads = new ConcurrentDictionary<int, int>();
+
             await Parallel.ForEachAsync(
                 documents,
                 new ParallelOptions
@@ -90,14 +87,14 @@ namespace Migration.Infrastructure.Implementation.Services
                 },
                 async (doc, token) =>
                 {
-                    var threadId = Environment.CurrentManagedThreadId;
-                    activeThreads.TryAdd(threadId, 0);
-                    activeThreads[threadId]++;
+                    //var threadId = Environment.CurrentManagedThreadId;
+                    //activeThreads.TryAdd(threadId, 0);
+                    //activeThreads[threadId]++;
 
-                    // ✅ LOG START SA THREAD INFO
-                    _fileLogger.LogInformation(
-                        "[Thread {ThreadId}] START processing document {DocId}",
-                        threadId, doc.Id);
+                    //// ✅ LOG START SA THREAD INFO
+                    //_fileLogger.LogInformation(
+                    //    "[Thread {ThreadId}] START processing document {DocId}",
+                    //    threadId, doc.Id);
                     try
                     {
                         var res = await MoveSingleDocumentAsync(doc.Id, doc.NodeId, doc.ToPath, token).ConfigureAwait(false);
@@ -122,23 +119,33 @@ namespace Migration.Infrastructure.Implementation.Services
                         errors.Add((doc.Id, ex));
                     }
                 });
+
+            moveTimer.Stop();
+            var avgMoveTime = documents.Count > 0 ? moveTimer.ElapsedMilliseconds / (double)documents.Count : 0;
+            _fileLogger.LogInformation(
+                "Parallel move completed: {Done} succeeded, {Failed} failed in {Ms}ms (avg {Avg:F1}ms/doc)",
+                doneCount, errors.Count, moveTimer.ElapsedMilliseconds, avgMoveTime);
+
+            // 3. Batch update za uspešne - sve u jednoj transakciji
+            var updateTimer = Stopwatch.StartNew();
             if (!successfulDocs.IsEmpty)
             {
                 await MarkDocumentsAsDoneAsync(successfulDocs, ct).ConfigureAwait(false);
-                Interlocked.Add(ref _totalFailed, errors.Count);
             }
-            // 3. Batch update za greške - sve u jednoj transakciji
+            // 4. Batch update za greške - sve u jednoj transakciji
             if (!errors.IsEmpty)
             {
                 await MarkDocumentsAsFailedAsync(errors, ct).ConfigureAwait(false);
                 Interlocked.Add(ref _totalFailed, errors.Count);
             }
+            updateTimer.Stop();
 
             sw.Stop();
             _fileLogger.LogInformation(
-                "Move batch completed: {Done} moved, {Failed} failed in {Elapsed}ms " +
-                "(Total: {TotalMoved} moved, {TotalFailed} failed)",
-                doneCount, errors.Count, sw.ElapsedMilliseconds, _totalMoved, _totalFailed);
+                "Move batch TOTAL: acquire={AcqMs}ms, move={MoveMs}ms, update={UpdMs}ms, total={TotalMs}ms | " +
+                "Success={Done}, Failed={Failed} | Overall: {TotalMoved} moved, {TotalFailed} failed",
+                acquireTimer.ElapsedMilliseconds, moveTimer.ElapsedMilliseconds, updateTimer.ElapsedMilliseconds, sw.ElapsedMilliseconds,
+                doneCount, errors.Count, _totalMoved, _totalFailed);
 
             return new MoveBatchResult(doneCount, errors.Count);
         }
@@ -235,10 +242,23 @@ namespace Migration.Infrastructure.Implementation.Services
             {
                 var documents = await docRepo.TakeReadyForProcessingAsync(batch, ct).ConfigureAwait(false);
 
-                foreach(var doc in documents)
-                {
-                    await docRepo.SetStatusAsync(doc.Id, MigrationStatus.InProgress.ToDbString(), null, ct).ConfigureAwait(false);
-                }
+                // Mark documents as IN PROGRESS (not DONE!)
+                var updates = documents.Select(d => (
+                    d.Id,
+                    MigrationStatus.InProgress.ToDbString(),
+                    (string?)null
+                ));
+
+                await docRepo.BatchSetDocumentStatusAsync_v1(
+                    uow.Connection,
+                    uow.Transaction,
+                    updates,
+                    ct).ConfigureAwait(false);
+
+                //foreach (var doc in documents)
+                //{
+                //    await docRepo.SetStatusAsync(doc.Id, MigrationStatus.InProgress.ToDbString(), null, ct).ConfigureAwait(false);
+                //}
 
                 await uow.CommitAsync().ConfigureAwait(false);
                 return documents;
@@ -314,11 +334,11 @@ namespace Migration.Infrastructure.Implementation.Services
                     e.DocId,
                     MigrationStatus.Error.ToDbString(),
                     e.Error.Message.Length > 4000
-                        ? e.Error.Message.Substring(0, 4000)
+                        ? e.Error.Message[..4000]
                         : e.Error.Message
                 ));
 
-                await docRepo.BatchSetDocumentStatusAsync(
+                await docRepo.BatchSetDocumentStatusAsync_v1(
                     uow.Connection,
                     uow.Transaction,
                     updates,
@@ -353,7 +373,7 @@ namespace Migration.Infrastructure.Implementation.Services
                     (string?)null
                 ));
 
-                await docRepo.BatchSetDocumentStatusAsync(
+                await docRepo.BatchSetDocumentStatusAsync_v1(
                     uow.Connection,
                     uow.Transaction,
                     updates,
