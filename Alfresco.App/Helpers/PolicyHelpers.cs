@@ -41,7 +41,8 @@ namespace Alfresco.App.Helpers
                     sleepDurationProvider: retryAttempt =>
                     {
                         // Exponential backoff: 2s, 4s, 8s
-                        var delay = TimeSpan.FromSeconds(Math.Pow(2, retryAttempt));
+                        //var delay = TimeSpan.FromSeconds(Math.Pow(2, retryAttempt));
+                        var delay = TimeSpan.FromMilliseconds(500 * retryAttempt);
 
                         // Jitter to avoid thundering herd (random 0-500ms)
                         var jitter = TimeSpan.FromMilliseconds(Random.Shared.Next(0, 500));
@@ -102,8 +103,8 @@ namespace Alfresco.App.Helpers
         }
 
         public static AsyncPolicy<HttpResponseMessage> GetBulkheadPolicy(
-            int maxParallelization = 10,
-            int maxQueuingActions = 20,
+            int maxParallelization = 30,
+            int maxQueuingActions = 50,
             ILogger? logger = null)
         {
             return Policy
@@ -121,12 +122,12 @@ namespace Alfresco.App.Helpers
         }
 
         public static IAsyncPolicy<HttpResponseMessage> GetCombinedReadPolicy(
-            ILogger? logger = null)
+            ILogger? logger = null, int bulkheadLimit = 30)
         {
-            var timeout = GetTimeoutPolicy(TimeSpan.FromSeconds(30), logger);
+            var timeout = GetTimeoutPolicy(TimeSpan.FromSeconds(10), logger);
             var retry = GetRetryPolicy(logger);
             var circuitBreaker = GetCircuitBreakerPolicy(logger);
-            var bulkhead = GetBulkheadPolicy(10, 20, logger);
+            var bulkhead = GetBulkheadPolicy(bulkheadLimit, bulkheadLimit*2, logger);
 
             // Wrap policies - inner to outer execution
             return Policy.WrapAsync(timeout, retry, circuitBreaker, bulkhead);
@@ -135,7 +136,7 @@ namespace Alfresco.App.Helpers
         public static IAsyncPolicy<HttpResponseMessage> GetCombinedWritePolicy(
            ILogger? logger = null)
         {
-            var timeout = GetTimeoutPolicy(TimeSpan.FromSeconds(45), logger);
+            var timeout = GetTimeoutPolicy(TimeSpan.FromSeconds(10), logger);
             var circuitBreaker = GetCircuitBreakerPolicy(logger);
 
             // Write operations should NOT retry automatically

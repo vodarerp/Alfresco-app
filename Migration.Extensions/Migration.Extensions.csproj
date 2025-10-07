@@ -11,7 +11,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\Oracle.Apstaction\Oracle.Apstraction.csproj" />
+    <ProjectReference Include="..\Oracle.Abstraction\Oracle.Abstraction.csproj" />
   </ItemGroup>
 
 </Project>

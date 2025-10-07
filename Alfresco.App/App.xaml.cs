@@ -1,7 +1,7 @@
 ﻿using Alfresco.App.Helpers;
 using Alfresco.App.UserControls;
-using Alfresco.Apstraction.Interfaces;
-using Alfresco.Apstraction.Models;
+using Alfresco.Abstraction.Interfaces;
+using Alfresco.Abstraction.Models;
 using Alfresco.Client;
 using Alfresco.Client.Handlers;
 using Alfresco.Client.Helpers;
@@ -15,18 +15,18 @@ using Microsoft.Extensions.Diagnostics.HealthChecks;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
-using Migration.Apstraction.Interfaces;
-using Migration.Apstraction.Interfaces.Services;
-using Migration.Apstraction.Interfaces.Wrappers;
+using Migration.Abstraction.Interfaces;
+using Migration.Abstraction.Interfaces.Services;
+using Migration.Abstraction.Interfaces.Wrappers;
 using Migration.Infrastructure.Implementation.Document;
 using Migration.Infrastructure.Implementation.Folder;
 using Migration.Infrastructure.Implementation.Move;
 using Migration.Infrastructure.Implementation.Services;
 using Migration.Workers;
 using Migration.Workers.Interfaces;
-using Oracle.Apstraction.Interfaces;
-using Oracle.Infractructure.Helpers;
-using Oracle.Infractructure.Implementation;
+using Oracle.Abstraction.Interfaces;
+using Oracle.Infrastructure.Helpers;
+using Oracle.Infrastructure.Implementation;
 using Oracle.ManagedDataAccess.Client;
 using Polly;
 using Polly.Extensions.Http;
@@ -122,19 +122,8 @@ namespace Alfresco.App
 
                     services.AddSingleton(sp => sp.GetRequiredService<IOptions<OracleOptions>>().Value);
 
-                    services.AddTransient<OracleConnection>((sp) =>
-                    {
-                        var options = sp.GetRequiredService<OracleOptions>();
-                        var conn = new OracleConnection(options.ConnectionString);
-                        conn.Open();
-                        return conn;
-                    });
-
-                    services.AddTransient<OracleTransaction>(sp =>
-                    {
-                        var conn = sp.GetRequiredService<OracleConnection>();
-                        return conn.BeginTransaction();  // IsolationLevel.ReadCommitted po defaultu
-                    });
+                    // OracleConnection and OracleTransaction lifecycle is managed by OracleUnitOfWork (Scoped)
+                    // No need to register them separately in DI - they are created lazily on BeginAsync()
 
                     services.AddTransient<IDocStagingRepository, DocStagingRepository>();
                     services.AddTransient<IFolderStagingRepository, FolderStagingRepository>();

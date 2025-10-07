@@ -1,6 +1,6 @@
 ﻿using Alfresco.Contracts.Enums;
 using Dapper;
-using Oracle.Apstraction.Interfaces;
+using Oracle.Abstraction.Interfaces;
 using System;
 using System.Collections.Generic;
 using System.Data;
@@ -17,20 +17,22 @@ namespace Migration.Extensions.Oracle
         {
             if (!values.Any()) return;
 
-            var sql = @"update DocStaging
+            var sql = @"update docStaging
                         SET Status = :status, 
-                            Error = :error
-                            UpdatedAt = SYSTIMESTAMP
+                            ErrorMsg = :error,
+                            updatedAt = SYSTIMESTAMP
                         WHERE Id = :id";
 
             var parameters = values.Select(o => new
             {
-                id = o.DocId,
                 status = o.Status,
-                error = o.Error
+                error = o.Error,
+                id = o.DocId
             }).ToList();
 
             var cmd = new CommandDefinition(sql, parameters, transaction: tran, cancellationToken: ct);
+
+            //var t = await conn.ExecuteAsync(sql, parameters, transaction: tran, commandType: CommandType.Text);
 
             await conn.ExecuteAsync(cmd).ConfigureAwait(false);
 

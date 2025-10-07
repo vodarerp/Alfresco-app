@@ -1,7 +1,7 @@
 ﻿using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
-using Migration.Apstraction.Interfaces.Services;
+using Migration.Abstraction.Interfaces.Services;
 using Migration.Workers.Enum;
 using Migration.Workers.Interfaces;
 using System;
@@ -142,7 +142,7 @@ namespace Migration.Workers
                 {
                     if (!IsEnabled || State != WorkerState.Running)
                     {
-                        await Task.Delay(1000, stoppingToken);
+                        await Task.Delay(1000, stoppingToken).ConfigureAwait(false);
                         continue;
                     }
                     try
@@ -153,7 +153,7 @@ namespace Migration.Workers
                         _logger.LogInformation("Starting RunLoopAsync ....");
                         using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken, _cts.Token);
 
-                        await svc.RunLoopAsync(linkedCts.Token);
+                        await svc.RunLoopAsync(linkedCts.Token).ConfigureAwait(false);
                         _logger.LogInformation("Worker finised {time}!", DateTime.Now);
 
                     }

@@ -1,5 +1,5 @@
 ﻿using Alfresco.App.Helpers;
-using Alfresco.Apstraction.Interfaces;
+using Alfresco.Abstraction.Interfaces;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
 using System;

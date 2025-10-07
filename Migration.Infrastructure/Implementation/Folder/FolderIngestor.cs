@@ -1,9 +1,9 @@
 ﻿using Alfresco.Contracts.Models;
 using Alfresco.Contracts.Oracle.Models;
 using Mapper;
-using Migration.Apstraction.Interfaces;
-using Migration.Apstraction.Models;
-using Oracle.Apstraction.Interfaces;
+using Migration.Abstraction.Interfaces;
+using Migration.Abstraction.Models;
+using Oracle.Abstraction.Interfaces;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -27,7 +27,7 @@ namespace Migration.Infrastructure.Implementation.Folder
             int added = 0;
             if (items != null && items.Count > 0)
             {                
-                added = await _folderRepo.InsertManyAsync(items, ct);
+                added = await _folderRepo.InsertManyAsync(items, ct).ConfigureAwait(false);
             }
             return added;
            
@@ -48,7 +48,7 @@ namespace Migration.Infrastructure.Implementation.Folder
 
             };
 
-            await _folderRepo.AddAsync(row, ct);
+            await _folderRepo.AddAsync(row, ct).ConfigureAwait(false);
         }
     }
 }

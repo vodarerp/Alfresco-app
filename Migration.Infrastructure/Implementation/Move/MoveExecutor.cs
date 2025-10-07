@@ -1,7 +1,7 @@
-﻿using Alfresco.Apstraction.Interfaces;
-using Migration.Apstraction.Interfaces;
-using Migration.Apstraction.Models;
-using Oracle.Apstraction.Interfaces;
+﻿using Alfresco.Abstraction.Interfaces;
+using Migration.Abstraction.Interfaces;
+using Migration.Abstraction.Models;
+using Oracle.Abstraction.Interfaces;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -25,7 +25,7 @@ namespace Migration.Infrastructure.Implementation.Move
         public async Task<bool> MoveAsync(string DocumentId, string DestFolderId, CancellationToken ct)
         {
 
-            var toRet = await _write.MoveDocumentAsync(DocumentId, DestFolderId,null, ct);
+            var toRet = await _write.MoveDocumentAsync(DocumentId, DestFolderId,null, ct).ConfigureAwait(false);
 
             return toRet;
             //throw new NotImplementedException();

@@ -19,8 +19,8 @@ public static class Program
             BaseUrl = "http://localhost:8080/",
             Username =  "admin",
             Password = "admin",
-            RootParentId = "65d83cf6-563b-498f-983c-f6563b698f66",
-            FolderCount = 1000,
+            RootParentId = "17aaeb58-94a8-4785-aaeb-5894a82785b3",
+            FolderCount = 10000,
             DocsPerFolder =3,
             DegreeOfParallelism = 8,
             MaxRetries = 5,
@@ -71,7 +71,7 @@ public static class Program
                 {
                     while (ch.Reader.TryRead(out var i))
                     {
-                        var folderName = $"MockFolder-{i:D6}";
+                        var folderName = $"MockFolders-{i:D6}";
                         try
                         {
                             var folderId = await CreateFolderAsync(http,cfg,cfg.RootParentId, folderName,cts.Token);

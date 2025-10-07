@@ -1,8 +1,8 @@
 ﻿using Alfresco.Contracts.Models;
 using Alfresco.Contracts.Oracle.Models;
 using Mapper;
-using Migration.Apstraction.Interfaces;
-using Oracle.Apstraction.Interfaces;
+using Migration.Abstraction.Interfaces;
+using Oracle.Abstraction.Interfaces;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -27,7 +27,7 @@ namespace Migration.Infrastructure.Implementation.Document
             {
                // var toInsert = items.ToDocStagingList();
                 //toInsert = items.ToFolderStagingList();
-                added = await _documentRepo.InsertManyAsync(items, ct);
+                added = await _documentRepo.InsertManyAsync(items, ct).ConfigureAwait(false);
             }
 
             return added;

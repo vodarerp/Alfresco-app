@@ -1,5 +1,5 @@
-﻿using Alfresco.Apstraction.Interfaces;
-using Alfresco.Apstraction.Models;
+﻿using Alfresco.Abstraction.Interfaces;
+using Alfresco.Abstraction.Models;
 using Alfresco.Contracts.Models;
 using Alfresco.Contracts.Response;
 using Microsoft.Extensions.Options;
@@ -44,10 +44,10 @@ namespace Alfresco.Client.Implementation
 
             //var x = await bodyRequest.ReadAsStringAsync(); http://localhost:8080/alfresco/api/-default-/public/alfresco/versions/1/nodes/67dbe2a3-aaf7-4ef0-9be2-a3aaf73ef0aa/children
 
-            using var r = await _client.PostAsync($"/alfresco/api/-default-/public/alfresco/versions/1/nodes/{parentFolderId}/children", bodyRequest, ct);
+            using var r = await _client.PostAsync($"/alfresco/api/-default-/public/alfresco/versions/1/nodes/{parentFolderId}/children", bodyRequest, ct).ConfigureAwait(false);
 
 
-            var tpRet = await r.Content.ReadAsStringAsync(ct);
+            var tpRet = await r.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
 
             var toRet = JsonConvert.DeserializeObject<ListEntry>(tpRet, jsonSerializerSettings);
 
@@ -74,10 +74,10 @@ namespace Alfresco.Client.Implementation
 
             //var x = await bodyRequest.ReadAsStringAsync(); http://localhost:8080/alfresco/api/-default-/public/alfresco/versions/1/nodes/67dbe2a3-aaf7-4ef0-9be2-a3aaf73ef0aa/children
 
-            using var r = await _client.PostAsync($"/alfresco/api/-default-/public/alfresco/versions/1/nodes/{parentFolderId}/children", bodyRequest, ct);
+            using var r = await _client.PostAsync($"/alfresco/api/-default-/public/alfresco/versions/1/nodes/{parentFolderId}/children", bodyRequest, ct).ConfigureAwait(false);
 
 
-            var tpRet = await r.Content.ReadAsStringAsync(ct);
+            var tpRet = await r.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
 
             var toRet = JsonConvert.DeserializeObject<ListEntry>(tpRet, jsonSerializerSettings);
 
@@ -103,7 +103,7 @@ namespace Alfresco.Client.Implementation
             var json = JsonConvert.SerializeObject(body,jsonSerializerSettings);
             
             using var content = new StringContent(json,Encoding.UTF8, "application/json");
-            using var res = await _client.PostAsync($"/alfresco/api/-default-/public/alfresco/versions/1/nodes/{nodeId}/copy", content, ct);
+            var res = await _client.PostAsync($"/alfresco/api/-default-/public/alfresco/versions/1/nodes/{nodeId}/move", content, ct).ConfigureAwait(false);
             //using var res = await _client.PostAsync($"/alfresco/api/-default-/public/alfresco/versions/1/nodes/{nodeId}/move", content, ct);
 
             return res.IsSuccessStatusCode;

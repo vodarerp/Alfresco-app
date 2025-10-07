@@ -1,6 +1,6 @@
-﻿using Migration.Apstraction.Interfaces;
-using Migration.Apstraction.Models;
-using Oracle.Apstraction.Interfaces;
+﻿using Migration.Abstraction.Interfaces;
+using Migration.Abstraction.Models;
+using Oracle.Abstraction.Interfaces;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -20,7 +20,7 @@ namespace Migration.Infrastructure.Implementation.Move
         public async Task<IReadOnlyList<MoveReaderResponse>> ReadBatchAsync(int take, CancellationToken ct)
         {
 
-            var list = await _doc.TakeReadyForProcessingAsync(take, ct);
+            var list = await _doc.TakeReadyForProcessingAsync(take, ct).ConfigureAwait(false);
 
 
             //var toRet = new List<MoveReaderResponse>(list.Count);

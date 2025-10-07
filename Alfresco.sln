@@ -7,17 +7,17 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Alfresco.App", "Alfresco.Ap
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Alfresco.Client", "Alfresco.Client\Alfresco.Client.csproj", "{B045D8E0-74AE-4ADF-BCEC-648BB0886849}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Alfresco.Apstraction", "Alfresco.Apstraction\Alfresco.Apstraction.csproj", "{1B9398E3-6C0E-4EF9-BBAA-1C7B111038B2}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Alfresco.Abstraction", "Alfresco.Abstraction\Alfresco.Abstraction.csproj", "{1B9398E3-6C0E-4EF9-BBAA-1C7B111038B2}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Alfresco.Contracts", "Alfresco.Contracts\Alfresco.Contracts.csproj", "{0AE84C81-343E-407A-B315-A09E2B0BDBBB}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Oracle.Apstraction", "Oracle.Apstaction\Oracle.Apstraction.csproj", "{51BFA906-E92F-41DB-A103-783CDE9FD29F}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Oracle.Abstraction", "Oracle.Abstraction\Oracle.Abstraction.csproj", "{51BFA906-E92F-41DB-A103-783CDE9FD29F}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Oracle.Infractructure", "Oracle.Infractructure\Oracle.Infractructure.csproj", "{476B27A5-F6DE-4311-9EC5-80F64B5EFAD2}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Oracle.Infrastructure", "Oracle.Infrastructure\Oracle.Infrastructure.csproj", "{476B27A5-F6DE-4311-9EC5-80F64B5EFAD2}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Mapper", "Mapper\Mapper.csproj", "{70094585-26D0-4379-817C-6B4F6EB25ADD}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Migration.Apstraction", "Migration.Apstaction\Migration.Apstraction.csproj", "{34F71BE8-61C3-489E-8909-2A94A197D16D}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Migration.Abstraction", "Migration.Abstraction\Migration.Abstraction.csproj", "{34F71BE8-61C3-489E-8909-2A94A197D16D}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Migration.Infrastructure", "Migration.Infrastructure\Migration.Infrastructure.csproj", "{76374C5A-8EB1-4993-98E9-FA6F12BC79B8}"
 EndProject

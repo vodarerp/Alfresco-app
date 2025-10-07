@@ -5,11 +5,11 @@ using Mapper;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
-using Migration.Apstraction.Interfaces;
-using Migration.Apstraction.Interfaces.Wrappers;
-using Migration.Apstraction.Models;
+using Migration.Abstraction.Interfaces;
+using Migration.Abstraction.Interfaces.Wrappers;
+using Migration.Abstraction.Models;
 using Migration.Infrastructure.Implementation.Helpers;
-using Oracle.Apstraction.Interfaces;
+using Oracle.Abstraction.Interfaces;
 using System.Collections.Concurrent;
 using Migration.Extensions.Oracle;
 using System.Diagnostics;
@@ -62,7 +62,7 @@ namespace Migration.Infrastructure.Implementation.Services
             var batch = _options.Value.DocumentDiscovery.BatchSize ?? _options.Value.BatchSize;
             var dop = _options.Value.DocumentDiscovery.MaxDegreeOfParallelism ?? _options.Value.MaxDegreeOfParallelism;
 
-            var folders = await AcquireFoldersForProcessingAsync(batch, ct);
+            var folders = await AcquireFoldersForProcessingAsync(batch, ct).ConfigureAwait(false);
 
             if (folders.Count == 0)
             {
@@ -83,7 +83,7 @@ namespace Migration.Infrastructure.Implementation.Services
             {
                 try
                 {
-                    await ProcessSingleFolderAsync(folder, ct);
+                    await ProcessSingleFolderAsync(folder, ct).ConfigureAwait(false);
                     Interlocked.Increment(ref processedCount);
                     Interlocked.Increment(ref _totalProcessed);
                 }
@@ -97,7 +97,7 @@ namespace Migration.Infrastructure.Implementation.Services
 
             if (!errors.IsEmpty)
             {
-                await MarkFoldersAsFailedAsync(errors, ct);
+                await MarkFoldersAsFailedAsync(errors, ct).ConfigureAwait(false);
                 Interlocked.Add(ref _totalFailed, errors.Count);
             }
 
@@ -133,7 +133,7 @@ namespace Migration.Infrastructure.Implementation.Services
 
                     _logger.LogDebug("Starting batch {BatchCounter}", batchCounter);
 
-                    var result = await RunBatchAsync(ct);
+                    var result = await RunBatchAsync(ct).ConfigureAwait(false);
 
                     if (result.PlannedCount == 0)
                     {
@@ -148,7 +148,7 @@ namespace Migration.Infrastructure.Implementation.Services
                                 emptyResultCounter);
                             break;
                         }
-                        await Task.Delay(delay,ct);
+                        await Task.Delay(delay,ct).ConfigureAwait(false);
                     }
                     else
                     {
@@ -158,7 +158,7 @@ namespace Migration.Infrastructure.Implementation.Services
 
                         if (betweenDelay > 0)
                         {
-                            await Task.Delay(betweenDelay, ct);
+                            await Task.Delay(betweenDelay, ct).ConfigureAwait(false);
                         }
                     }
                     batchCounter++;
@@ -169,7 +169,7 @@ namespace Migration.Infrastructure.Implementation.Services
                     _logger.LogError(ex, "Error in batch {BatchCounter}", batchCounter);
 
                     // Exponential backoff on error
-                    await Task.Delay(delay * 2, ct);
+                    await Task.Delay(delay * 2, ct).ConfigureAwait(false);
                     batchCounter++;
                 } 
             }
@@ -188,17 +188,17 @@ namespace Migration.Infrastructure.Implementation.Services
             var uow = scope.ServiceProvider.GetRequiredService<IUnitOfWork>();
             var folderRepo = scope.ServiceProvider.GetRequiredService<IFolderStagingRepository>();
 
-            await uow.BeginAsync(ct: ct);
+            await uow.BeginAsync(ct: ct).ConfigureAwait(false);
             try
             {
-                var folders = await folderRepo.TakeReadyForProcessingAsync(batch, ct);
+                var folders = await folderRepo.TakeReadyForProcessingAsync(batch, ct).ConfigureAwait(false);
 
                 foreach(var f in folders)
                 {
-                    await folderRepo.SetStatusAsync(f.Id, MigrationStatus.InProgress.ToDbString(), null, ct);
+                    await folderRepo.SetStatusAsync(f.Id, MigrationStatus.InProgress.ToDbString(), null, ct).ConfigureAwait(false);
                 }
 
-                await uow.CommitAsync(ct: ct);
+                await uow.CommitAsync(ct: ct).ConfigureAwait(false);
 
                 return folders;
 
@@ -206,7 +206,7 @@ namespace Migration.Infrastructure.Implementation.Services
             catch (Exception ex)
             {
 
-                await uow.RollbackAsync(ct);
+                await uow.RollbackAsync(ct).ConfigureAwait(false);
                 throw;
             }
 
@@ -224,17 +224,17 @@ namespace Migration.Infrastructure.Implementation.Services
 
             _logger.LogDebug("Processing folder {FolderId}", folder.Id);
 
-            var documents = await _reader.ReadBatchAsync(folder.NodeId!, ct);
+            var documents = await _reader.ReadBatchAsync(folder.NodeId!, ct).ConfigureAwait(false);
 
             if (documents == null || documents.Count == 0)
             {
                 _logger.LogDebug("No documents found in folder {FolderId}", folder.Id);
-                await MarkFolderAsProcessedAsync(folder.Id, ct);
+                await MarkFolderAsProcessedAsync(folder.Id, ct).ConfigureAwait(false);
                 return;
             }
             _logger.LogDebug("Found {Count} documents in folder {FolderId}", documents.Count, folder.Id);
 
-            var desFolderId = await ResolveDestinationFolder(folder, ct);
+            var desFolderId = await ResolveDestinationFolder(folder, ct).ConfigureAwait(false);
 
             var docsToInsert = new List<DocStaging>(documents.Count);
 
@@ -246,7 +246,7 @@ namespace Migration.Infrastructure.Implementation.Services
                 docsToInsert.Add(item);
             }
 
-            await InsertDocsAndMarkFolderAsync(docsToInsert, folder.Id, ct);
+            await InsertDocsAndMarkFolderAsync(docsToInsert, folder.Id, ct).ConfigureAwait(false);
 
             _logger.LogDebug(
                 "Successfully processed folder {FolderId}: {Count} documents inserted",
@@ -263,23 +263,23 @@ namespace Migration.Infrastructure.Implementation.Services
             var docRepo = scope.ServiceProvider.GetRequiredService<IDocStagingRepository>();
             var folderRepo = scope.ServiceProvider.GetRequiredService<IFolderStagingRepository>();
 
-            await uow.BeginAsync();
+            await uow.BeginAsync().ConfigureAwait(false);
 
             try
             {
                 if (docsToInsert.Count > 0)
                 {
-                    var inserted = await docRepo.InsertManyAsync(docsToInsert, ct); // TODO: izmeniti InsertManyAsync da vrati broj insertovanih
+                    var inserted = await docRepo.InsertManyAsync(docsToInsert, ct).ConfigureAwait(false); // TODO: izmeniti InsertManyAsync da vrati broj insertovanih
                     _logger.LogDebug("Inserted {Count} documents for folder {FolderId}",
                         inserted, folderId);
                 }
 
-                await folderRepo.SetStatusAsync(folderId, MigrationStatus.Processed.ToString(), null, ct);
-                await uow.CommitAsync();
+                await folderRepo.SetStatusAsync(folderId, MigrationStatus.Processed.ToString(), null, ct).ConfigureAwait(false);
+                await uow.CommitAsync().ConfigureAwait(false);
             }
             catch (Exception ex)
             {
-                await uow.RollbackAsync();
+                await uow.RollbackAsync().ConfigureAwait(false);
                 throw;
             }
 
@@ -300,7 +300,7 @@ namespace Migration.Infrastructure.Implementation.Services
 
             _logger.LogDebug("Resolving destination folder for '{Name}'", normalizedName);
 
-            var destFolderId = await _resolver.ResolveAsync(_options.Value.RootDestinationFolderId, normalizedName, ct);
+            var destFolderId = await _resolver.ResolveAsync(_options.Value.RootDestinationFolderId, normalizedName, ct).ConfigureAwait(false);
 
             _resolvedFoldersCache.TryAdd(normalizedName, destFolderId);
 
@@ -323,20 +323,20 @@ namespace Migration.Infrastructure.Implementation.Services
             var uow = scope.ServiceProvider.GetRequiredService<IUnitOfWork>();
             var folderRepo = scope.ServiceProvider.GetRequiredService<IFolderStagingRepository>();
 
-            await uow.BeginAsync(ct: ct);
+            await uow.BeginAsync(ct: ct).ConfigureAwait(false);
             try
             {
                 await folderRepo.SetStatusAsync(
                     id,
                     MigrationStatus.Processed.ToDbString(),
                     null,
-                    ct);
+                    ct).ConfigureAwait(false);
 
-                await uow.CommitAsync(ct: ct);
+                await uow.CommitAsync(ct: ct).ConfigureAwait(false);
             }
             catch
             {
-                await uow.RollbackAsync(ct: ct);
+                await uow.RollbackAsync(ct: ct).ConfigureAwait(false);
                 throw;
             }
         }
@@ -349,7 +349,7 @@ namespace Migration.Infrastructure.Implementation.Services
             var uow = scope.ServiceProvider.GetRequiredService<IUnitOfWork>();
             var folderRepo = scope.ServiceProvider.GetRequiredService<IFolderStagingRepository>();
 
-            await uow.BeginAsync(ct: ct);
+            await uow.BeginAsync(ct: ct).ConfigureAwait(false);
             try
             {
                 // Koristi batch extension method
@@ -365,16 +365,16 @@ namespace Migration.Infrastructure.Implementation.Services
                     uow.Connection,
                     uow.Transaction,
                     updates,
-                    ct);
+                    ct).ConfigureAwait(false);
 
-                await uow.CommitAsync(ct: ct);
+                await uow.CommitAsync(ct: ct).ConfigureAwait(false);
 
                 _logger.LogWarning("Marked {Count} folders as failed", errors.Count);
             }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Failed to mark folders as failed");
-                await uow.RollbackAsync(ct: ct);
+                await uow.RollbackAsync(ct: ct).ConfigureAwait(false);
             }
         }
 

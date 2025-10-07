@@ -1,4 +1,4 @@
-﻿using Alfresco.Apstraction.Interfaces;
+﻿using Alfresco.Abstraction.Interfaces;
 using Microsoft.Extensions.DependencyInjection;
 using System.Text;
 using System.Windows;

@@ -1,6 +1,6 @@
-﻿using Alfresco.Apstraction.Interfaces;
-using Migration.Apstraction.Interfaces;
-using Oracle.Apstraction.Interfaces;
+﻿using Alfresco.Abstraction.Interfaces;
+using Migration.Abstraction.Interfaces;
+using Oracle.Abstraction.Interfaces;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -25,11 +25,11 @@ namespace Migration.Infrastructure.Implementation.Document
         public async Task<string> ResolveAsync(string destinationRootId, string newFolderName, CancellationToken ct)
         {
 
-            var folderID = await _read.GetFolderByRelative(destinationRootId, newFolderName, ct);
+            var folderID = await _read.GetFolderByRelative(destinationRootId, newFolderName, ct).ConfigureAwait(false);
 
             if (string.IsNullOrEmpty(folderID))
             {
-                folderID = await _write.CreateFolderAsync(destinationRootId, newFolderName, ct);
+                folderID = await _write.CreateFolderAsync(destinationRootId, newFolderName, ct).ConfigureAwait(false);
             }
 
             return folderID;

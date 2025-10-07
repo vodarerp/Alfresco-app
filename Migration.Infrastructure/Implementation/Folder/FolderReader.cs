@@ -1,8 +1,8 @@
-﻿using Alfresco.Apstraction.Interfaces;
+﻿using Alfresco.Abstraction.Interfaces;
 using Alfresco.Contracts.Models;
 using Alfresco.Contracts.Request;
-using Migration.Apstraction.Interfaces;
-using Migration.Apstraction.Models;
+using Migration.Abstraction.Interfaces;
+using Migration.Abstraction.Models;
 using System;
 using System.Collections;
 using System.Collections.Generic;
@@ -65,7 +65,7 @@ namespace Migration.Infrastructure.Implementation.Folder
                 Sort = null
             };
 
-            var result = (await _read.SearchAsync(req, ct)).List?.Entries ?? new List<ListEntry>();
+            var result = (await _read.SearchAsync(req, ct).ConfigureAwait(false)).List?.Entries ?? new List<ListEntry>();
 
             FolderSeekCursor? next = null;
 

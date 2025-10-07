@@ -1,15 +1,15 @@
-﻿using Alfresco.Apstraction.Interfaces;
+﻿using Alfresco.Abstraction.Interfaces;
 using Alfresco.Contracts.Enums;
 using Alfresco.Contracts.Options;
 using Alfresco.Contracts.Oracle.Models;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
-using Migration.Apstraction.Interfaces;
-using Migration.Apstraction.Interfaces.Wrappers;
-using Migration.Apstraction.Models;
+using Migration.Abstraction.Interfaces;
+using Migration.Abstraction.Interfaces.Wrappers;
+using Migration.Abstraction.Models;
 using Migration.Extensions.Oracle;
-using Oracle.Apstraction.Interfaces;
+using Oracle.Abstraction.Interfaces;
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
@@ -29,12 +29,15 @@ namespace Migration.Infrastructure.Implementation.Services
         private readonly IAlfrescoWriteApi _write;
         private readonly IOptions<MigrationOptions> _options;
         private readonly IServiceProvider _sp;
-        private readonly ILogger<MoveService> _logger;
+        //private readonly ILogger<MoveService> _fileLogger;
+
+        private readonly ILogger _dbLogger;
+        private readonly ILogger _fileLogger;
 
         private long _totalMoved = 0;
         private long _totalFailed = 0;
 
-        public MoveService(IMoveReader moveService, IMoveExecutor moveExecutor, IDocStagingRepository docRepo, IAlfrescoWriteApi write, IOptions<MigrationOptions> options, IServiceProvider sp, ILogger<MoveService> logger)
+        public MoveService(IMoveReader moveService, IMoveExecutor moveExecutor, IDocStagingRepository docRepo, IAlfrescoWriteApi write, IOptions<MigrationOptions> options, IServiceProvider sp, ILoggerFactory logger)
         {
             _moveReader = moveService;
             _moveExecutor = moveExecutor;
@@ -42,39 +45,42 @@ namespace Migration.Infrastructure.Implementation.Services
             _write = write;
             _options = options;
             _sp = sp;
-            _logger = logger;
+            _dbLogger = logger.CreateLogger("DbLogger");
+            _fileLogger = logger.CreateLogger("FileLogger");
+            //_fileLogger = logger;
         }
 
         public async Task<MoveBatchResult> RunBatchAsync(CancellationToken ct)
         {
             var sw = Stopwatch.StartNew();
 
-            using var batchScope = _logger.BeginScope(new Dictionary<string, object>
-            {
-                ["Service"] = nameof(MoveService),
-                ["Operation"] = "RunBatch"
-            });
+            //using var batchScope = _fileLogger.BeginScope(new Dictionary<string, object>
+            //{
+            //    ["Service"] = nameof(MoveService),
+            //    ["Operation"] = "RunBatch"
+            //});
 
-            _logger.LogInformation("Move batch started");
+            _fileLogger.LogInformation("Move batch started@!!");
 
             var batch = _options.Value.MoveService.BatchSize ?? _options.Value.BatchSize;
             var dop = _options.Value.MoveService.MaxDegreeOfParallelism ?? _options.Value.MaxDegreeOfParallelism;
 
             // 1. Atomic acquire - preuzmi i zaključaj dokumente u jednoj transakciji
-            var documents = await AcquireDocumentsForMoveAsync(batch, ct);
+            var documents = await AcquireDocumentsForMoveAsync(batch, ct).ConfigureAwait(false);
 
             if (documents.Count == 0)
             {
-                _logger.LogInformation("No documents ready for move");
+                _fileLogger.LogInformation("No documents ready for move");
                 return new MoveBatchResult(0, 0);
             }
 
-            _logger.LogInformation("Acquired {Count} documents for move", documents.Count);
+            _fileLogger.LogInformation("Acquired {Count} documents for move", documents.Count);
 
             // 2. Parallel move dokumenata
             var doneCount = 0;
             var errors = new ConcurrentBag<(long DocId, Exception Error)>();
-
+            var successfulDocs = new ConcurrentBag<long>();
+            var activeThreads = new ConcurrentDictionary<int, int>();
             await Parallel.ForEachAsync(
                 documents,
                 new ParallelOptions
@@ -84,30 +90,52 @@ namespace Migration.Infrastructure.Implementation.Services
                 },
                 async (doc, token) =>
                 {
+                    var threadId = Environment.CurrentManagedThreadId;
+                    activeThreads.TryAdd(threadId, 0);
+                    activeThreads[threadId]++;
+
+                    // ✅ LOG START SA THREAD INFO
+                    _fileLogger.LogInformation(
+                        "[Thread {ThreadId}] START processing document {DocId}",
+                        threadId, doc.Id);
                     try
                     {
-                        await MoveSingleDocumentAsync(doc.Id, doc.NodeId, doc.ToPath, token);
-                        Interlocked.Increment(ref doneCount);
-                        Interlocked.Increment(ref _totalMoved);
+                        var res = await MoveSingleDocumentAsync(doc.Id, doc.NodeId, doc.ToPath, token).ConfigureAwait(false);
+                        if (res)
+                        {
+                            successfulDocs.Add(doc.Id);
+                            Interlocked.Increment(ref doneCount);
+                            Interlocked.Increment(ref _totalMoved);
+
+                        }
+                        else
+                        {
+                            errors.Add((doc.Id, new InvalidOperationException("Move returned false")));
+
+                        }
                     }
                     catch (Exception ex)
                     {
-                        _logger.LogError(ex,
+                        _dbLogger.LogError(ex,
                             "Failed to move document {DocId} ({NodeId})",
                             doc.Id, doc.NodeId);
                         errors.Add((doc.Id, ex));
                     }
                 });
-
+            if (!successfulDocs.IsEmpty)
+            {
+                await MarkDocumentsAsDoneAsync(successfulDocs, ct).ConfigureAwait(false);
+                Interlocked.Add(ref _totalFailed, errors.Count);
+            }
             // 3. Batch update za greške - sve u jednoj transakciji
             if (!errors.IsEmpty)
             {
-                await MarkDocumentsAsFailedAsync(errors, ct);
+                await MarkDocumentsAsFailedAsync(errors, ct).ConfigureAwait(false);
                 Interlocked.Add(ref _totalFailed, errors.Count);
             }
 
             sw.Stop();
-            _logger.LogInformation(
+            _fileLogger.LogInformation(
                 "Move batch completed: {Done} moved, {Failed} failed in {Elapsed}ms " +
                 "(Total: {TotalMoved} moved, {TotalFailed} failed)",
                 doneCount, errors.Count, sw.ElapsedMilliseconds, _totalMoved, _totalFailed);
@@ -122,7 +150,7 @@ namespace Migration.Infrastructure.Implementation.Services
             var delay = _options.Value.IdleDelayInMs;
             var maxEmptyResults = _options.Value.BreakEmptyResults;
 
-            _logger.LogInformation("Move worker started");
+            _fileLogger.LogInformation("Move worker started");
 
             // Reset metrics
             _totalMoved = 0;
@@ -130,33 +158,33 @@ namespace Migration.Infrastructure.Implementation.Services
 
             while (!ct.IsCancellationRequested)
             {
-                using var batchScope = _logger.BeginScope(new Dictionary<string, object>
+                using var batchScope = _fileLogger.BeginScope(new Dictionary<string, object>
                 {
                     ["BatchCounter"] = batchCounter
                 });
 
                 try
                 {
-                    _logger.LogDebug("Starting batch {BatchCounter}", batchCounter);
+                    _fileLogger.LogDebug("Starting batch {BatchCounter}", batchCounter);
 
-                    var result = await RunBatchAsync(ct);
+                    var result = await RunBatchAsync(ct).ConfigureAwait(false);
 
                     if (result.Done == 0 && result.Failed == 0)
                     {
                         emptyResultCounter++;
-                        _logger.LogDebug(
+                        _fileLogger.LogDebug(
                             "Empty result ({Counter}/{Max})",
                             emptyResultCounter, maxEmptyResults);
 
                         if (emptyResultCounter >= maxEmptyResults)
                         {
-                            _logger.LogInformation(
+                            _fileLogger.LogInformation(
                                 "Breaking after {Count} consecutive empty results",
                                 emptyResultCounter);
                             break;
                         }
 
-                        await Task.Delay(delay, ct);
+                        await Task.Delay(delay, ct).ConfigureAwait(false);
                     }
                     else
                     {
@@ -167,7 +195,7 @@ namespace Migration.Infrastructure.Implementation.Services
 
                         if (betweenDelay > 0)
                         {
-                            await Task.Delay(betweenDelay, ct);
+                            await Task.Delay(betweenDelay, ct).ConfigureAwait(false);
                         }
                     }
 
@@ -175,20 +203,20 @@ namespace Migration.Infrastructure.Implementation.Services
                 }
                 catch (OperationCanceledException)
                 {
-                    _logger.LogInformation("Move worker cancelled");
+                    _fileLogger.LogInformation("Move worker cancelled");
                     throw;
                 }
                 catch (Exception ex)
                 {
-                    _logger.LogError(ex, "Error in batch {BatchCounter}", batchCounter);
+                    _dbLogger.LogError(ex, "Error in batch {BatchCounter}", batchCounter);
 
                     // Exponential backoff on error
-                    await Task.Delay(delay * 2, ct);
+                    await Task.Delay(delay * 2, ct).ConfigureAwait(false);
                     batchCounter++;
                 }
             }
 
-            _logger.LogInformation(
+            _fileLogger.LogInformation(
                 "Move worker completed after {Count} batches. Total: {Moved} moved, {Failed} failed",
                 batchCounter - 1, _totalMoved, _totalFailed);
         }
@@ -202,39 +230,39 @@ namespace Migration.Infrastructure.Implementation.Services
             var uow = scope.ServiceProvider.GetRequiredService<IUnitOfWork>();
             var docRepo = scope.ServiceProvider.GetRequiredService<IDocStagingRepository>();
 
-            await uow.BeginAsync(ct: ct);
+            await uow.BeginAsync(ct: ct).ConfigureAwait(false);
             try
             {
-                var documents = await docRepo.TakeReadyForProcessingAsync(batch, ct);
+                var documents = await docRepo.TakeReadyForProcessingAsync(batch, ct).ConfigureAwait(false);
 
                 foreach(var doc in documents)
                 {
-                    await docRepo.SetStatusAsync(doc.Id, MigrationStatus.InProgress.ToDbString(), null, ct);
+                    await docRepo.SetStatusAsync(doc.Id, MigrationStatus.InProgress.ToDbString(), null, ct).ConfigureAwait(false);
                 }
 
-                await uow.CommitAsync();
+                await uow.CommitAsync().ConfigureAwait(false);
                 return documents;
             }
             catch (Exception ex)
             {
-                await uow.RollbackAsync();
+                await uow.RollbackAsync().ConfigureAwait(false);
                 throw;
             }
 
         }
 
-        private async Task MoveSingleDocumentAsync(long docId, string nodeId, string destNodeId,CancellationToken ct)
+        private async Task<bool> MoveSingleDocumentAsync(long docId, string nodeId, string destNodeId,CancellationToken ct)
         {
-            using var scope = _logger.BeginScope(new Dictionary<string, object>
+            using var scope = _fileLogger.BeginScope(new Dictionary<string, object>
             {
                 ["DocumentId"] = docId,
                 ["NodeId"] = nodeId,
                 ["DestFolderId"] = destNodeId
             });
 
-            _logger.LogDebug("Moving document {DocId}", docId);
+            _fileLogger.LogDebug("Moving document {DocId}", docId);
 
-            var moved = await _moveExecutor.MoveAsync(nodeId, destNodeId, ct);
+            var moved = await _moveExecutor.MoveAsync(nodeId, destNodeId, ct).ConfigureAwait(false);
 
             if (!moved)
             {
@@ -242,11 +270,13 @@ namespace Migration.Infrastructure.Implementation.Services
                     $"Move operation returned false for document {docId}");
             }
 
-            await UpdateDocumentStatusAsync(
-                docId,
-                MigrationStatus.Done.ToDbString(),
-                null,
-                ct);
+            //await UpdateDocumentStatusAsync(
+            //    docId,
+            //    MigrationStatus.Done.ToDbString(),
+            //    null,
+            //    ct);
+
+            return moved;
         }
 
         private async Task UpdateDocumentStatusAsync(long docId, string status, string? errorMsg, CancellationToken ct)
@@ -255,15 +285,15 @@ namespace Migration.Infrastructure.Implementation.Services
             var uow = scope.ServiceProvider.GetRequiredService<IUnitOfWork>();
             var docRepo = scope.ServiceProvider.GetRequiredService<IDocStagingRepository>();
 
-            await uow.BeginAsync(ct: ct);
+            await uow.BeginAsync(ct: ct).ConfigureAwait(false);
             try
             {
-                await docRepo.SetStatusAsync(docId, status, errorMsg, ct);
-                await uow.CommitAsync(ct: ct);
+                await docRepo.SetStatusAsync(docId, status, errorMsg, ct).ConfigureAwait(false);
+                await uow.CommitAsync(ct: ct).ConfigureAwait(false);
             }
             catch
             {
-                await uow.RollbackAsync(ct: ct);
+                await uow.RollbackAsync(ct: ct).ConfigureAwait(false);
                 throw;
             }
         }
@@ -276,7 +306,7 @@ namespace Migration.Infrastructure.Implementation.Services
             var uow = scope.ServiceProvider.GetRequiredService<IUnitOfWork>();
             var docRepo = scope.ServiceProvider.GetRequiredService<IDocStagingRepository>();
 
-            await uow.BeginAsync(ct: ct);
+            await uow.BeginAsync(ct: ct).ConfigureAwait(false);
             try
             {
                 // Koristi batch extension method umesto pojedinačnih update-a
@@ -292,16 +322,51 @@ namespace Migration.Infrastructure.Implementation.Services
                     uow.Connection,
                     uow.Transaction,
                     updates,
-                    ct);
+                    ct).ConfigureAwait(false);
 
-                await uow.CommitAsync(ct: ct);
+                await uow.CommitAsync(ct: ct).ConfigureAwait(false);
 
-                _logger.LogWarning("Marked {Count} documents as failed", errors.Count);
+                _fileLogger.LogWarning("Marked {Count} documents as failed", errors.Count);
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Failed to mark documents as failed");
-                await uow.RollbackAsync(ct: ct);
+                _dbLogger.LogError(ex, "Failed to mark documents as failed");
+                await uow.RollbackAsync(ct: ct).ConfigureAwait(false);
+            }
+        }
+
+        private async Task MarkDocumentsAsDoneAsync(
+            ConcurrentBag<long> docsIds,
+            CancellationToken ct)
+        {
+            await using var scope = _sp.CreateAsyncScope();
+            var uow = scope.ServiceProvider.GetRequiredService<IUnitOfWork>();
+            var docRepo = scope.ServiceProvider.GetRequiredService<IDocStagingRepository>();
+
+            await uow.BeginAsync(ct: ct).ConfigureAwait(false);
+            try
+            {
+                // Koristi batch extension method umesto pojedinačnih update-a
+                var updates = docsIds.Select(id => (
+                    id,
+                    MigrationStatus.Done.ToDbString(),
+                    (string?)null
+                ));
+
+                await docRepo.BatchSetDocumentStatusAsync(
+                    uow.Connection,
+                    uow.Transaction,
+                    updates,
+                    ct).ConfigureAwait(false);
+
+                await uow.CommitAsync(ct: ct).ConfigureAwait(false);
+
+                _fileLogger.LogWarning("Marked {Count} documents as succesed", docsIds.Count);
+            }
+            catch (Exception ex)
+            {
+                _dbLogger.LogError(ex, "Failed to mark documents as succesed");
+                await uow.RollbackAsync(ct: ct).ConfigureAwait(false);
             }
         }
 
@@ -328,20 +393,20 @@ namespace Migration.Infrastructure.Implementation.Services
 
         //        try
         //        {
-        //            _logger.LogInformation($"TakeReadyForProcessingAsync.");
+        //            _fileLogger.LogInformation($"TakeReadyForProcessingAsync.");
         //            documents = await dr.TakeReadyForProcessingAsync(batch, ct);
-        //            _logger.LogInformation($"TakeReadyForProcessingAsync returned {documents.Count}. Setitng up to status in prog!");
+        //            _fileLogger.LogInformation($"TakeReadyForProcessingAsync returned {documents.Count}. Setitng up to status in prog!");
 
         //            foreach (var d in documents)
         //                await dr.SetStatusAsync(d.Id, "IN PROG", null, ct);
 
         //            await uow.CommitAsync();
-        //            _logger.LogInformation($"Statuses changed. Commit DOne!");
+        //            _fileLogger.LogInformation($"Statuses changed. Commit DOne!");
 
         //        }
         //        catch (Exception ex)
         //        {
-        //            _logger.LogError($"Exception: {ex.Message}!");
+        //            __dbLogger.LogError($"Exception: {ex.Message}!");
 
         //            await uow.RollbackAsync();
         //            throw;
@@ -362,10 +427,10 @@ namespace Migration.Infrastructure.Implementation.Services
         //            await using var scope = _sp.CreateAsyncScope();
         //            var uow = scope.ServiceProvider.GetRequiredService<IUnitOfWork>();
         //            var dr = scope.ServiceProvider.GetRequiredService<IDocStagingRepository>();
-        //            using (_logger.BeginScope(new Dictionary<string, object> { ["DocumentId"] = doc.Id }))
+        //            using (_fileLogger.BeginScope(new Dictionary<string, object> { ["DocumentId"] = doc.Id }))
         //            {
-        //                _logger.LogInformation($"Prepare document {doc.Id} for move.");
-        //                _logger.LogInformation($"DocId: {doc.NodeId} Destination: {doc.ToPath}.");
+        //                _fileLogger.LogInformation($"Prepare document {doc.Id} for move.");
+        //                _fileLogger.LogInformation($"DocId: {doc.NodeId} Destination: {doc.ToPath}.");
 
         //                await uow.BeginAsync();
         //                try
@@ -373,19 +438,19 @@ namespace Migration.Infrastructure.Implementation.Services
 
         //                    if (await _moveExecutor.MoveAsync(doc.NodeId, doc.ToPath, token))
         //                    {
-        //                        _logger.LogInformation($"Document {doc.Id} moved. Changing status.");
+        //                        _fileLogger.LogInformation($"Document {doc.Id} moved. Changing status.");
 
         //                        await dr.SetStatusAsync(doc.Id, "DONE", null, token);
         //                    }
 
         //                    Interlocked.Increment(ref ctnDone);
         //                    await uow.CommitAsync(ct: token);
-        //                    _logger.LogInformation($"Document {doc.Id} commited.");
+        //                    _fileLogger.LogInformation($"Document {doc.Id} commited.");
 
         //                }
         //                catch (Exception ex)
         //                {
-        //                    _logger.LogInformation($"Exception: {ex.Message}.");
+        //                    _fileLogger.LogInformation($"Exception: {ex.Message}.");
 
         //                    await uow.RollbackAsync(ct: token);
         //                    await using var failScope = _sp.CreateAsyncScope();
@@ -451,7 +516,7 @@ namespace Migration.Infrastructure.Implementation.Services
 
 
         //    var delay = _options.Value.DocumentDiscovery.DelayBetweenBatchesInMs ?? _options.Value.DelayBetweenBatchesInMs;
-        //    //_logger.LogInformation("No more documents to process, exiting loop."); TODO
+        //    //_fileLogger.LogInformation("No more documents to process, exiting loop."); TODO
         //    if (delay > 0)
         //        await Task.Delay(delay, ct);
         //    return toRet;
@@ -461,27 +526,27 @@ namespace Migration.Infrastructure.Implementation.Services
         //{
         //    int BatchCounter = 1, counter = 0;
         //    var delay = _options.Value.IdleDelayInMs;
-        //    _logger.LogInformation("Worker Started");
+        //    _fileLogger.LogInformation("Worker Started");
         //    while (!ct.IsCancellationRequested)
         //    {
-        //        using (_logger.BeginScope(new Dictionary<string, object> { ["BatchCnt"] = BatchCounter }))
+        //        using (_fileLogger.BeginScope(new Dictionary<string, object> { ["BatchCnt"] = BatchCounter }))
         //        {
         //            try
         //            {
-        //                _logger.LogInformation($"Batch Started");
+        //                _fileLogger.LogInformation($"Batch Started");
 
         //                var resRun = await RunBatchAsync(ct);
         //                if (resRun.Done == 0 && resRun.Failed == 0)
         //                {
-        //                    _logger.LogInformation($"No more documents to process, exiting loop.");
+        //                    _fileLogger.LogInformation($"No more documents to process, exiting loop.");
         //                    counter++;
         //                    if (counter == _options.Value.BreakEmptyResults)
         //                    {
-        //                        _logger.LogInformation($" Break after {counter} empty results");
+        //                        _fileLogger.LogInformation($" Break after {counter} empty results");
         //                        break;
         //                    }
         //                    //var delay = _options.Value.IdleDelayInMs;
-        //                    //_logger.LogInformation("No more documents to process, exiting loop."); TODO
+        //                    //_fileLogger.LogInformation("No more documents to process, exiting loop."); TODO
         //                    if (delay > 0)
         //                        await Task.Delay(delay, ct);
         //                }
@@ -489,7 +554,7 @@ namespace Migration.Infrastructure.Implementation.Services
         //            }
         //            catch (Exception ex)
         //            {
-        //                _logger.LogError($"RunLoopAsync Exception: {ex.Message}.");
+        //                __dbLogger.LogError($"RunLoopAsync Exception: {ex.Message}.");
         //                if (delay > 0)
         //                    await Task.Delay(delay, ct); ;
         //            }

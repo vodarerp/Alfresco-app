@@ -4,10 +4,10 @@ using Mapper;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
-using Migration.Apstraction.Interfaces;
-using Migration.Apstraction.Interfaces.Services;
-using Migration.Apstraction.Models;
-using Oracle.Apstraction.Interfaces;
+using Migration.Abstraction.Interfaces;
+using Migration.Abstraction.Interfaces.Services;
+using Migration.Abstraction.Models;
+using Oracle.Abstraction.Interfaces;
 using System;
 using System.Collections.Generic;
 using System.Data;
@@ -71,7 +71,7 @@ namespace Migration.Infrastructure.Implementation.Services
                 Take: batch,
                 Cursor: currentCursor);
 
-            var page = await _reader.ReadBatchAsync(folderRequest, ct);
+            var page = await _reader.ReadBatchAsync(folderRequest, ct).ConfigureAwait(false);
 
             if (!page.HasMore || page.Items.Count == 0)
             {
@@ -83,7 +83,7 @@ namespace Migration.Infrastructure.Implementation.Services
 
             var foldersToInsert = page.Items.ToList().ToFolderStagingListInsert();
 
-            var inserted = await InsertFoldersAsync(foldersToInsert, ct);
+            var inserted = await InsertFoldersAsync(foldersToInsert, ct).ConfigureAwait(false);
 
             lock (_cursorLock) 
             {
@@ -123,7 +123,7 @@ namespace Migration.Infrastructure.Implementation.Services
                 {
                     _logger.LogDebug("Starting batch {BatchCounter}", batchCounter);
 
-                    var result = await RunBatchAsync(ct);
+                    var result = await RunBatchAsync(ct).ConfigureAwait(false);
 
                     if (result.InsertedCount == 0)
                     {
@@ -140,7 +140,7 @@ namespace Migration.Infrastructure.Implementation.Services
                             break;
                         }
 
-                        await Task.Delay(delay, ct);
+                        await Task.Delay(delay, ct).ConfigureAwait(false);
                     }
                     else
                     {
@@ -151,7 +151,7 @@ namespace Migration.Infrastructure.Implementation.Services
 
                         if (betweenDelay > 0)
                         {
-                            await Task.Delay(betweenDelay, ct);
+                            await Task.Delay(betweenDelay, ct).ConfigureAwait(false);
                         }
                     }
 
@@ -167,7 +167,7 @@ namespace Migration.Infrastructure.Implementation.Services
                     _logger.LogError(ex, "Error in batch {BatchCounter}", batchCounter);
 
                     // Exponential backoff on error
-                    await Task.Delay(delay * 2, ct);
+                    await Task.Delay(delay * 2, ct).ConfigureAwait(false);
                     batchCounter++;
                 }
             }
@@ -194,11 +194,11 @@ namespace Migration.Infrastructure.Implementation.Services
             var uow = scope.ServiceProvider.GetRequiredService<IUnitOfWork>();
             var folderRepo = scope.ServiceProvider.GetRequiredService<IFolderStagingRepository>();
 
-            await uow.BeginAsync(IsolationLevel.ReadCommitted, ct);
+            await uow.BeginAsync(IsolationLevel.ReadCommitted, ct).ConfigureAwait(false);
             try
             {
-                var inserted = await folderRepo.InsertManyAsync(folders, ct);
-                await uow.CommitAsync(ct: ct);
+                var inserted = await folderRepo.InsertManyAsync(folders, ct).ConfigureAwait(false);
+                await uow.CommitAsync(ct: ct).ConfigureAwait(false);
 
                 _logger.LogDebug("Successfully inserted {Count} folders", inserted);
                 return inserted;
@@ -206,7 +206,7 @@ namespace Migration.Infrastructure.Implementation.Services
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Failed to insert {Count} folders", folders.Count);
-                await uow.RollbackAsync(ct: ct);
+                await uow.RollbackAsync(ct: ct).ConfigureAwait(false);
                 throw;
             }
         }

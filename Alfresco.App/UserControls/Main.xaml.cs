@@ -1,4 +1,4 @@
-﻿using Alfresco.Apstraction.Interfaces;
+﻿using Alfresco.Abstraction.Interfaces;
 using Alfresco.Contracts.Models;
 using Alfresco.Contracts.Oracle.Models;
 using Alfresco.Contracts.Request;
@@ -7,7 +7,7 @@ using Mapper;
 using Microsoft.Extensions.DependencyInjection;
 using Migration.Workers.Interfaces;
 using Newtonsoft.Json;
-using Oracle.Apstraction.Interfaces;
+using Oracle.Abstraction.Interfaces;
 using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;

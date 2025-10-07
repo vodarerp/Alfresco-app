@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(dotnet build:*)",
+      "Bash(git mv:*)",
+      "Bash(powershell:*)",
+      "Bash(dotnet clean:*)",
+      "Bash(robocopy:*)",
+      "Bash(xcopy:*)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}
