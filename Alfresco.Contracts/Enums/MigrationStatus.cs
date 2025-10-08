@@ -49,7 +49,7 @@ namespace Alfresco.Contracts.Enums
                 {
                     MigrationStatus.New => "NEW",
                     MigrationStatus.Ready => "READY",
-                    MigrationStatus.InProgress => "IN PROG",
+                    MigrationStatus.InProgress => "IN PROGRESS",
                     MigrationStatus.Done => "DONE",
                     MigrationStatus.Processed => "PROCESSED",
                     MigrationStatus.Error => "ERROR",
@@ -66,7 +66,7 @@ namespace Alfresco.Contracts.Enums
                 {
                     "NEW" => MigrationStatus.New,
                     "READY" => MigrationStatus.Ready,
-                    "IN PROG" => MigrationStatus.InProgress,
+                    "IN PROGRESS" => MigrationStatus.InProgress,
                     "DONE" => MigrationStatus.Done,
                     "PROCESSED" => MigrationStatus.Processed,
                     "ERROR" => MigrationStatus.Error,

@@ -26,6 +26,6 @@ namespace Alfresco.Contracts.Oracle.Models
 
         public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
 
-        public DateTimeOffset InsertetAtAlfresco {  get; set; }
+        //public DateTimeOffset InsertedAtAlfresco {  get; set; }
     }
 }

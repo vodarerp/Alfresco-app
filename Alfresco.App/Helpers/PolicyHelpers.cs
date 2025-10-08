@@ -92,7 +92,7 @@ namespace Alfresco.App.Helpers
             return Policy
                 .TimeoutAsync<HttpResponseMessage>(
                     timeout,
-                    TimeoutStrategy.Pessimistic,
+                    TimeoutStrategy.Optimistic, // Changed to Optimistic for better cancellation handling
                     onTimeoutAsync: (context, timespan, task) =>
                     {
                         logger?.LogWarning(
@@ -136,7 +136,8 @@ namespace Alfresco.App.Helpers
         public static IAsyncPolicy<HttpResponseMessage> GetCombinedWritePolicy(
            ILogger? logger = null, int bulkheadLimit = 100)
         {
-            var timeout = GetTimeoutPolicy(TimeSpan.FromSeconds(30), logger);
+            // Increased timeout for write operations (move can be slow)
+            var timeout = GetTimeoutPolicy(TimeSpan.FromSeconds(120), logger);
             var retry = GetRetryPolicy(logger);
             var circuitBreaker = GetCircuitBreakerPolicy(logger);
             var bulkhead = GetBulkheadPolicy(bulkheadLimit, bulkheadLimit * 2, logger);

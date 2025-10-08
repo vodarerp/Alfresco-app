@@ -141,6 +141,7 @@ namespace Alfresco.App
 
                     services.AddTransient<IDocStagingRepository, DocStagingRepository>();
                     services.AddTransient<IFolderStagingRepository, FolderStagingRepository>();
+                    services.AddTransient<IMigrationCheckpointRepository, MigrationCheckpointRepository>();
 
 
                     services.Configure<MigrationOptions>(context.Configuration.GetSection("Migration"));

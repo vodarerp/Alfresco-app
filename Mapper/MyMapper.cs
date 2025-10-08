@@ -32,8 +32,8 @@ namespace Mapper
                 Name = inEntryi.Name,
                 Status = MigrationStatus.Ready.ToDbString(),
                 CreatedAt = DateTime.UtcNow,
-                UpdatedAt = DateTime.UtcNow,
-                InsertetAtAlfresco = inEntryi.CreatedAt
+                UpdatedAt = DateTime.UtcNow
+                //InsertedAtAlfresco = inEntryi.CreatedAt
             };
         }
 

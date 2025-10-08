@@ -13,6 +13,7 @@ using Oracle.Abstraction.Interfaces;
 using System.Collections.Concurrent;
 using Migration.Extensions.Oracle;
 using System.Diagnostics;
+using System.Text.Json;
 
 
 namespace Migration.Infrastructure.Implementation.Services
@@ -33,6 +34,9 @@ namespace Migration.Infrastructure.Implementation.Services
         private readonly ConcurrentDictionary<string, string> _resolvedFoldersCache = new();
         private long _totalProcessed = 0;
         private long _totalFailed = 0;
+        private int _batchCounter = 0;
+
+        private const string ServiceName = "DocumentDiscovery";
 
         public DocumentDiscoveryService(IDocumentIngestor ingestor, IDocumentReader reader, IDocumentResolver resolver, IDocStagingRepository docRepo, IFolderStagingRepository folderRepo, IOptions<MigrationOptions> options, IServiceProvider sp, IUnitOfWork unitOfWork, ILogger<DocumentDiscoveryService> logger)
         {
@@ -101,6 +105,10 @@ namespace Migration.Infrastructure.Implementation.Services
                 Interlocked.Add(ref _totalFailed, errors.Count);
             }
 
+            // Save checkpoint after successful batch
+            Interlocked.Increment(ref _batchCounter);
+            await SaveCheckpointAsync(ct).ConfigureAwait(false);
+
             sw.Stop();
             _logger.LogInformation(
                 "DocumentDiscovery batch completed: {Processed} processed, {Failed} failed in {Elapsed}ms " +
@@ -114,12 +122,18 @@ namespace Migration.Infrastructure.Implementation.Services
 
         public async Task RunLoopAsync(CancellationToken ct)
         {
-            var batchCounter = 1;
             var emptyResultCounter = 0;
             var delay = _options.Value.IdleDelayInMs;
             var maxEmptyResults = _options.Value.BreakEmptyResults;
-            _totalProcessed = 0;
-            _totalFailed = 0;
+
+            // Reset stuck folders from previous crashed run
+            await ResetStuckItemsAsync(ct).ConfigureAwait(false);
+
+            // Load checkpoint to resume from last position
+            await LoadCheckpointAsync(ct).ConfigureAwait(false);
+
+            // Start from next batch after checkpoint
+            var batchCounter = _batchCounter + 1;
 
             while (!ct.IsCancellationRequested)
             {
@@ -181,6 +195,134 @@ namespace Migration.Infrastructure.Implementation.Services
         }
 
         #region Private metods
+
+        private async Task ResetStuckItemsAsync(CancellationToken ct)
+        {
+            try
+            {
+                var timeout = TimeSpan.FromMinutes(_options.Value.StuckItemsTimeoutMinutes);
+
+                await using var scope = _sp.CreateAsyncScope();
+                var uow = scope.ServiceProvider.GetRequiredService<IUnitOfWork>();
+                var folderRepo = scope.ServiceProvider.GetRequiredService<IFolderStagingRepository>();
+
+                await uow.BeginAsync(ct: ct).ConfigureAwait(false);
+                try
+                {
+                    var resetCount = await folderRepo.ResetStuckFolderAsync(
+                        uow.Connection,
+                        uow.Transaction,
+                        timeout,
+                        ct).ConfigureAwait(false);
+
+                    await uow.CommitAsync(ct: ct).ConfigureAwait(false);
+
+                    if (resetCount > 0)
+                    {
+                        _logger.LogWarning(
+                            "Reset {Count} stuck folders that were IN PROGRESS for more than {Minutes} minutes",
+                            resetCount, _options.Value.StuckItemsTimeoutMinutes);
+                    }
+                    else
+                    {
+                        _logger.LogInformation("No stuck folders found");
+                    }
+                }
+                catch
+                {
+                    await uow.RollbackAsync(ct: ct).ConfigureAwait(false);
+                    throw;
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to reset stuck folders");
+            }
+        }
+
+        private async Task LoadCheckpointAsync(CancellationToken ct)
+        {
+            try
+            {
+                await using var scope = _sp.CreateAsyncScope();
+                var uow = scope.ServiceProvider.GetRequiredService<IUnitOfWork>();
+                var checkpointRepo = scope.ServiceProvider.GetRequiredService<IMigrationCheckpointRepository>();
+
+                await uow.BeginAsync(ct: ct).ConfigureAwait(false);
+                try
+                {
+                    var checkpoint = await checkpointRepo.GetByServiceNameAsync(ServiceName, ct).ConfigureAwait(false);
+                    await uow.CommitAsync(ct: ct).ConfigureAwait(false);
+
+                    if (checkpoint != null)
+                    {
+                        _totalProcessed = checkpoint.TotalProcessed;
+                        _totalFailed = checkpoint.TotalFailed;
+                        _batchCounter = checkpoint.BatchCounter;
+
+                        _logger.LogInformation(
+                            "Checkpoint loaded: {TotalProcessed} processed, {TotalFailed} failed, batch {BatchCounter}",
+                            _totalProcessed, _totalFailed, _batchCounter);
+                    }
+                    else
+                    {
+                        _logger.LogInformation("No checkpoint found, starting fresh");
+                        _totalProcessed = 0;
+                        _totalFailed = 0;
+                        _batchCounter = 0;
+                    }
+                }
+                catch
+                {
+                    await uow.RollbackAsync(ct: ct).ConfigureAwait(false);
+                    throw;
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to load checkpoint, starting fresh");
+                _totalProcessed = 0;
+                _totalFailed = 0;
+                _batchCounter = 0;
+            }
+        }
+
+        private async Task SaveCheckpointAsync(CancellationToken ct)
+        {
+            try
+            {
+                await using var scope = _sp.CreateAsyncScope();
+                var uow = scope.ServiceProvider.GetRequiredService<IUnitOfWork>();
+                var checkpointRepo = scope.ServiceProvider.GetRequiredService<IMigrationCheckpointRepository>();
+
+                await uow.BeginAsync(ct: ct).ConfigureAwait(false);
+                try
+                {
+                    var checkpoint = new MigrationCheckpoint
+                    {
+                        ServiceName = ServiceName,
+                        TotalProcessed = _totalProcessed,
+                        TotalFailed = _totalFailed,
+                        BatchCounter = _batchCounter
+                    };
+
+                    await checkpointRepo.UpsertAsync(checkpoint, ct).ConfigureAwait(false);
+                    await uow.CommitAsync(ct: ct).ConfigureAwait(false);
+
+                    _logger.LogDebug("Checkpoint saved: {TotalProcessed} processed, {TotalFailed} failed, batch {BatchCounter}",
+                        _totalProcessed, _totalFailed, _batchCounter);
+                }
+                catch
+                {
+                    await uow.RollbackAsync(ct: ct).ConfigureAwait(false);
+                    throw;
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to save checkpoint");
+            }
+        }
 
         private async Task<IReadOnlyList<FolderStaging>> AcquireFoldersForProcessingAsync(int batch, CancellationToken ct)
         {

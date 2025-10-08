@@ -14,6 +14,7 @@ using System.Data;
 using System.Diagnostics;
 using System.Linq;
 using System.Text;
+using System.Text.Json;
 using System.Threading.Tasks;
 
 namespace Migration.Infrastructure.Implementation.Services
@@ -33,6 +34,8 @@ namespace Migration.Infrastructure.Implementation.Services
 
         // Metrics tracking
         private long _totalInserted = 0;
+
+        private const string ServiceName = "FolderDiscovery";
 
         public FolderDiscoveryService(IFolderIngestor ingestor, IFolderReader reader, IOptions<MigrationOptions> options, IServiceProvider sp, IUnitOfWork unitOfWork, ILogger<FolderDiscoveryService> logger)
         {
@@ -92,6 +95,9 @@ namespace Migration.Infrastructure.Implementation.Services
 
             Interlocked.Add(ref _totalInserted, inserted);
 
+            // Save checkpoint after successful batch
+            await SaveCheckpointAsync(ct).ConfigureAwait(false);
+
             sw.Stop();
             _logger.LogInformation(
                 "FolderDiscovery batch completed: {Count} folders inserted in {Elapsed}ms (Total: {Total} inserted)",
@@ -109,8 +115,18 @@ namespace Migration.Infrastructure.Implementation.Services
 
             _logger.LogInformation("FolderDiscovery worker started");
 
-            // Reset metrics
-            _totalInserted = 0;
+            // Note: FolderDiscovery doesn't have IN PROGRESS state issues
+            // because it doesn't mark folders as IN PROGRESS during processing
+            // It inserts directly to staging tables
+
+            // Load checkpoint to resume from last position
+            await LoadCheckpointAsync(ct).ConfigureAwait(false);
+
+            // Reset metrics if starting fresh
+            if (_cursor == null)
+            {
+                _totalInserted = 0;
+            }
 
             while (!ct.IsCancellationRequested)
             {
@@ -180,6 +196,102 @@ namespace Migration.Infrastructure.Implementation.Services
 
 
         #region private methods
+
+        private async Task LoadCheckpointAsync(CancellationToken ct)
+        {
+            try
+            {
+                await using var scope = _sp.CreateAsyncScope();
+                var uow = scope.ServiceProvider.GetRequiredService<IUnitOfWork>();
+                var checkpointRepo = scope.ServiceProvider.GetRequiredService<IMigrationCheckpointRepository>();
+
+                await uow.BeginAsync(ct: ct).ConfigureAwait(false);
+                try
+                {
+                    var checkpoint = await checkpointRepo.GetByServiceNameAsync(ServiceName, ct).ConfigureAwait(false);
+                    await uow.CommitAsync(ct: ct).ConfigureAwait(false);
+
+                    if (checkpoint != null)
+                    {
+                        _totalInserted = checkpoint.TotalProcessed;
+
+                        if (!string.IsNullOrEmpty(checkpoint.CheckpointData))
+                        {
+                            var cursor = JsonSerializer.Deserialize<FolderSeekCursor>(checkpoint.CheckpointData);
+                            lock (_cursorLock)
+                            {
+                                _cursor = cursor;
+                            }
+
+                            _logger.LogInformation(
+                                "Checkpoint loaded: {TotalProcessed} processed, cursor at {LastId} ({LastDate})",
+                                _totalInserted, cursor?.LastObjectId, cursor?.LastObjectCreated);
+                        }
+                        else
+                        {
+                            _logger.LogInformation("Checkpoint loaded: {TotalProcessed} processed (no cursor)", _totalInserted);
+                        }
+                    }
+                    else
+                    {
+                        _logger.LogInformation("No checkpoint found, starting fresh");
+                    }
+                }
+                catch
+                {
+                    await uow.RollbackAsync(ct: ct).ConfigureAwait(false);
+                    throw;
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to load checkpoint, starting fresh");
+            }
+        }
+
+        private async Task SaveCheckpointAsync(CancellationToken ct)
+        {
+            try
+            {
+                FolderSeekCursor? currentCursor;
+                lock (_cursorLock)
+                {
+                    currentCursor = _cursor;
+                }
+
+                await using var scope = _sp.CreateAsyncScope();
+                var uow = scope.ServiceProvider.GetRequiredService<IUnitOfWork>();
+                var checkpointRepo = scope.ServiceProvider.GetRequiredService<IMigrationCheckpointRepository>();
+
+                await uow.BeginAsync(ct: ct).ConfigureAwait(false);
+                try
+                {
+                    var checkpoint = new MigrationCheckpoint
+                    {
+                        ServiceName = ServiceName,
+                        CheckpointData = currentCursor != null ? JsonSerializer.Serialize(currentCursor) : null,
+                        LastProcessedId = currentCursor?.LastObjectId,
+                        LastProcessedAt = currentCursor?.LastObjectCreated.UtcDateTime,
+                        TotalProcessed = _totalInserted,
+                        TotalFailed = 0
+                    };
+
+                    await checkpointRepo.UpsertAsync(checkpoint, ct).ConfigureAwait(false);
+                    await uow.CommitAsync(ct: ct).ConfigureAwait(false);
+
+                    _logger.LogDebug("Checkpoint saved: {TotalProcessed} processed", _totalInserted);
+                }
+                catch
+                {
+                    await uow.RollbackAsync(ct: ct).ConfigureAwait(false);
+                    throw;
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to save checkpoint");
+            }
+        }
 
         private async Task<int> InsertFoldersAsync(
             List<FolderStaging> folders,

@@ -17,6 +17,7 @@ using System.Diagnostics;
 using System.Diagnostics.Metrics;
 using System.Linq;
 using System.Text;
+using System.Text.Json;
 using System.Threading.Tasks;
 
 namespace Migration.Infrastructure.Implementation.Services
@@ -36,6 +37,9 @@ namespace Migration.Infrastructure.Implementation.Services
 
         private long _totalMoved = 0;
         private long _totalFailed = 0;
+        private int _batchCounter = 0;
+
+        private const string ServiceName = "Move";
 
         public MoveService(IMoveReader moveService, IMoveExecutor moveExecutor, IDocStagingRepository docRepo, IAlfrescoWriteApi write, IOptions<MigrationOptions> options, IServiceProvider sp, ILoggerFactory logger)
         {
@@ -140,6 +144,10 @@ namespace Migration.Infrastructure.Implementation.Services
             }
             updateTimer.Stop();
 
+            // Save checkpoint after successful batch
+            Interlocked.Increment(ref _batchCounter);
+            await SaveCheckpointAsync(ct).ConfigureAwait(false);
+
             sw.Stop();
             _fileLogger.LogInformation(
                 "Move batch TOTAL: acquire={AcqMs}ms, move={MoveMs}ms, update={UpdMs}ms, total={TotalMs}ms | " +
@@ -152,16 +160,20 @@ namespace Migration.Infrastructure.Implementation.Services
 
         public async Task RunLoopAsync(CancellationToken ct)
         {
-            var batchCounter = 1;
             var emptyResultCounter = 0;
             var delay = _options.Value.IdleDelayInMs;
             var maxEmptyResults = _options.Value.BreakEmptyResults;
 
             _fileLogger.LogInformation("Move worker started");
 
-            // Reset metrics
-            _totalMoved = 0;
-            _totalFailed = 0;
+            // Reset stuck documents from previous crashed run
+            await ResetStuckItemsAsync(ct).ConfigureAwait(false);
+
+            // Load checkpoint to resume from last position
+            await LoadCheckpointAsync(ct).ConfigureAwait(false);
+
+            // Start from next batch after checkpoint
+            var batchCounter = _batchCounter + 1;
 
             while (!ct.IsCancellationRequested)
             {
@@ -229,6 +241,134 @@ namespace Migration.Infrastructure.Implementation.Services
         }
 
         #region privates
+
+        private async Task ResetStuckItemsAsync(CancellationToken ct)
+        {
+            try
+            {
+                var timeout = TimeSpan.FromMinutes(_options.Value.StuckItemsTimeoutMinutes);
+
+                await using var scope = _sp.CreateAsyncScope();
+                var uow = scope.ServiceProvider.GetRequiredService<IUnitOfWork>();
+                var docRepo = scope.ServiceProvider.GetRequiredService<IDocStagingRepository>();
+
+                await uow.BeginAsync(ct: ct).ConfigureAwait(false);
+                try
+                {
+                    var resetCount = await docRepo.ResetStuckDocumentsAsync(
+                        uow.Connection,
+                        uow.Transaction,
+                        timeout,
+                        ct).ConfigureAwait(false);
+
+                    await uow.CommitAsync(ct: ct).ConfigureAwait(false);
+
+                    if (resetCount > 0)
+                    {
+                        _fileLogger.LogWarning(
+                            "Reset {Count} stuck documents that were IN PROGRESS for more than {Minutes} minutes",
+                            resetCount, _options.Value.StuckItemsTimeoutMinutes);
+                    }
+                    else
+                    {
+                        _fileLogger.LogInformation("No stuck documents found");
+                    }
+                }
+                catch
+                {
+                    await uow.RollbackAsync(ct: ct).ConfigureAwait(false);
+                    throw;
+                }
+            }
+            catch (Exception ex)
+            {
+                _fileLogger.LogWarning(ex, "Failed to reset stuck documents");
+            }
+        }
+
+        private async Task LoadCheckpointAsync(CancellationToken ct)
+        {
+            try
+            {
+                await using var scope = _sp.CreateAsyncScope();
+                var uow = scope.ServiceProvider.GetRequiredService<IUnitOfWork>();
+                var checkpointRepo = scope.ServiceProvider.GetRequiredService<IMigrationCheckpointRepository>();
+
+                await uow.BeginAsync(ct: ct).ConfigureAwait(false);
+                try
+                {
+                    var checkpoint = await checkpointRepo.GetByServiceNameAsync(ServiceName, ct).ConfigureAwait(false);
+                    await uow.CommitAsync(ct: ct).ConfigureAwait(false);
+
+                    if (checkpoint != null)
+                    {
+                        _totalMoved = checkpoint.TotalProcessed;
+                        _totalFailed = checkpoint.TotalFailed;
+                        _batchCounter = checkpoint.BatchCounter;
+
+                        _fileLogger.LogInformation(
+                            "Checkpoint loaded: {TotalMoved} moved, {TotalFailed} failed, batch {BatchCounter}",
+                            _totalMoved, _totalFailed, _batchCounter);
+                    }
+                    else
+                    {
+                        _fileLogger.LogInformation("No checkpoint found, starting fresh");
+                        _totalMoved = 0;
+                        _totalFailed = 0;
+                        _batchCounter = 0;
+                    }
+                }
+                catch
+                {
+                    await uow.RollbackAsync(ct: ct).ConfigureAwait(false);
+                    throw;
+                }
+            }
+            catch (Exception ex)
+            {
+                _fileLogger.LogWarning(ex, "Failed to load checkpoint, starting fresh");
+                _totalMoved = 0;
+                _totalFailed = 0;
+                _batchCounter = 0;
+            }
+        }
+
+        private async Task SaveCheckpointAsync(CancellationToken ct)
+        {
+            try
+            {
+                await using var scope = _sp.CreateAsyncScope();
+                var uow = scope.ServiceProvider.GetRequiredService<IUnitOfWork>();
+                var checkpointRepo = scope.ServiceProvider.GetRequiredService<IMigrationCheckpointRepository>();
+
+                await uow.BeginAsync(ct: ct).ConfigureAwait(false);
+                try
+                {
+                    var checkpoint = new MigrationCheckpoint
+                    {
+                        ServiceName = ServiceName,
+                        TotalProcessed = _totalMoved,
+                        TotalFailed = _totalFailed,
+                        BatchCounter = _batchCounter
+                    };
+
+                    await checkpointRepo.UpsertAsync(checkpoint, ct).ConfigureAwait(false);
+                    await uow.CommitAsync(ct: ct).ConfigureAwait(false);
+
+                    _fileLogger.LogDebug("Checkpoint saved: {TotalMoved} moved, {TotalFailed} failed, batch {BatchCounter}",
+                        _totalMoved, _totalFailed, _batchCounter);
+                }
+                catch
+                {
+                    await uow.RollbackAsync(ct: ct).ConfigureAwait(false);
+                    throw;
+                }
+            }
+            catch (Exception ex)
+            {
+                _fileLogger.LogWarning(ex, "Failed to save checkpoint");
+            }
+        }
 
         private async Task<IReadOnlyList<DocStaging>> AcquireDocumentsForMoveAsync(int batch, CancellationToken ct)
         {

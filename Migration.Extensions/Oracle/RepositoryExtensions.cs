@@ -86,19 +86,18 @@ namespace Migration.Extensions.Oracle
 
         public static async Task<int> ResetStuckDocumentsAsync(this IDocStagingRepository repo, IDbConnection conn, IDbTransaction tran, TimeSpan timeSpan, CancellationToken ct = default)
         {
+            var totalMinutes = (int)timeSpan.TotalMinutes;
 
-            var sql = @$"Update DocStaging
-                        Set Status = '{MigrationStatus.Ready}',
-                            Error = 'Reset from stuck state',
+            // Oracle syntax: SYSTIMESTAMP - INTERVAL 'n' MINUTE
+            var sql = $@"UPDATE DocStaging
+                        SET Status = '{MigrationStatus.Ready.ToDbString()}',
+                            ErrorMsg = 'Reset from stuck IN PROGRESS state',
                             RetryCount = NVL(RetryCount, 0) + 1,
                             UpdatedAt = SYSTIMESTAMP
-                        Where Status = '{MigrationStatus.InProgress}' 
-                          and UpdatedAt < SYSTIMESTAMP - INTERVAL ':timespan' SECOND";
-            var parameters = new
-            {
-                timespan = (int)timeSpan.TotalMinutes
-            };
-            var cmd = new CommandDefinition(sql, parameters, transaction: tran, cancellationToken: ct);
+                        WHERE Status = '{MigrationStatus.InProgress.ToDbString()}'
+                          AND UpdatedAt < SYSTIMESTAMP - INTERVAL '{totalMinutes}' MINUTE";
+
+            var cmd = new CommandDefinition(sql, transaction: tran, cancellationToken: ct);
             return await conn.ExecuteAsync(cmd).ConfigureAwait(false);
         }
 
@@ -172,19 +171,18 @@ namespace Migration.Extensions.Oracle
 
         public static async Task<int> ResetStuckFolderAsync(this IFolderStagingRepository repo, IDbConnection conn, IDbTransaction tran, TimeSpan timeSpan, CancellationToken ct = default)
         {
+            var totalMinutes = (int)timeSpan.TotalMinutes;
 
-            var sql = @$"Update FolderStaging
-                        Set Status = '{MigrationStatus.Ready}',
-                            Error = 'Reset from stuck state',
+            // Oracle syntax: SYSTIMESTAMP - INTERVAL 'n' MINUTE
+            var sql = $@"UPDATE FolderStaging
+                        SET Status = '{MigrationStatus.Ready.ToDbString()}',
+                            Error = 'Reset from stuck IN PROGRESS state',
                             RetryCount = NVL(RetryCount, 0) + 1,
                             UpdatedAt = SYSTIMESTAMP
-                        Where Status = '{MigrationStatus.InProgress}' 
-                          and UpdatedAt < SYSTIMESTAMP - INTERVAL ':timespan' SECOND";
-            var parameters = new
-            {
-                timespan = (int)timeSpan.TotalMinutes
-            };
-            var cmd = new CommandDefinition(sql, parameters, transaction: tran, cancellationToken: ct);
+                        WHERE Status = '{MigrationStatus.InProgress.ToDbString()}'
+                          AND UpdatedAt < SYSTIMESTAMP - INTERVAL '{totalMinutes}' MINUTE";
+
+            var cmd = new CommandDefinition(sql, transaction: tran, cancellationToken: ct);
             return await conn.ExecuteAsync(cmd).ConfigureAwait(false);
         }
         #endregion
