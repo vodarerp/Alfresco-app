@@ -122,9 +122,9 @@ namespace Alfresco.App.Helpers
         }
 
         public static IAsyncPolicy<HttpResponseMessage> GetCombinedReadPolicy(
-            ILogger? logger = null, int bulkheadLimit = 30)
+            ILogger? logger = null, int bulkheadLimit = 50)
         {
-            var timeout = GetTimeoutPolicy(TimeSpan.FromSeconds(10), logger);
+            var timeout = GetTimeoutPolicy(TimeSpan.FromSeconds(30), logger);
             var retry = GetRetryPolicy(logger);
             var circuitBreaker = GetCircuitBreakerPolicy(logger);
             var bulkhead = GetBulkheadPolicy(bulkheadLimit, bulkheadLimit*2, logger);
