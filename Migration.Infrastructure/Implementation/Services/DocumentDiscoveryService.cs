@@ -27,9 +27,10 @@ namespace Migration.Infrastructure.Implementation.Services
         private readonly IDocumentResolver _resolver;
         private readonly IOptions<MigrationOptions> _options;
         private readonly IServiceProvider _sp;
-        private readonly ILogger<DocumentDiscoveryService> _logger;
+        //private readonly ILogger<DocumentDiscoveryService> _logger;
         //private readonly IUnitOfWork _unitOfWork;
-
+        private readonly ILogger _dbLogger;
+        private readonly ILogger _fileLogger;
 
         private readonly ConcurrentDictionary<string, string> _resolvedFoldersCache = new();
         private long _totalProcessed = 0;
@@ -38,7 +39,7 @@ namespace Migration.Infrastructure.Implementation.Services
 
         private const string ServiceName = "DocumentDiscovery";
 
-        public DocumentDiscoveryService(IDocumentIngestor ingestor, IDocumentReader reader, IDocumentResolver resolver, IDocStagingRepository docRepo, IFolderStagingRepository folderRepo, IOptions<MigrationOptions> options, IServiceProvider sp, IUnitOfWork unitOfWork, ILogger<DocumentDiscoveryService> logger)
+        public DocumentDiscoveryService(IDocumentIngestor ingestor, IDocumentReader reader, IDocumentResolver resolver, IDocStagingRepository docRepo, IFolderStagingRepository folderRepo, IOptions<MigrationOptions> options, IServiceProvider sp, IUnitOfWork unitOfWork,ILoggerFactory logger)
         {
             _ingestor = ingestor;
             _reader = reader;
@@ -47,7 +48,9 @@ namespace Migration.Infrastructure.Implementation.Services
             _folderRepo = folderRepo;
             _options = options;
             _sp = sp;
-            _logger = logger;
+            _dbLogger = logger.CreateLogger("DbLogger");
+            _fileLogger = logger.CreateLogger("FileLogger");
+           // _logger = logger;
             // _unitOfWork = unitOfWork;
         }
 
@@ -55,13 +58,13 @@ namespace Migration.Infrastructure.Implementation.Services
         {
             var sw = Stopwatch.StartNew();
 
-            using var batchScope = _logger.BeginScope(new Dictionary<string, object>
+            using var batchScope = _fileLogger.BeginScope(new Dictionary<string, object>
             {
                 ["Service"] = nameof(DocumentDiscoveryService),
                 ["Operation"] = "RunBatch"
             });
 
-            _logger.LogInformation("DocumentDiscovery batch started");
+            _fileLogger.LogInformation("DocumentDiscovery batch started");
 
             var batch = _options.Value.DocumentDiscovery.BatchSize ?? _options.Value.BatchSize;
             var dop = _options.Value.DocumentDiscovery.MaxDegreeOfParallelism ?? _options.Value.MaxDegreeOfParallelism;
@@ -70,7 +73,7 @@ namespace Migration.Infrastructure.Implementation.Services
 
             if (folders.Count == 0)
             {
-                _logger.LogInformation("No folders ready for processing");
+                _fileLogger.LogInformation("No folders ready for processing");
                 return new DocumentBatchResult(0);
             }
 
@@ -93,7 +96,7 @@ namespace Migration.Infrastructure.Implementation.Services
                 }
                 catch (Exception ex)
                 {
-                    _logger.LogError(ex, "Failed to process folder {FolderId} ({Name})",
+                    _dbLogger.LogError(ex, "Failed to process folder {FolderId} ({Name})",
                            folder.Id, folder.Name);
                     errors.Add((folder.Id, ex));
                 }
@@ -110,7 +113,7 @@ namespace Migration.Infrastructure.Implementation.Services
             await SaveCheckpointAsync(ct).ConfigureAwait(false);
 
             sw.Stop();
-            _logger.LogInformation(
+            _fileLogger.LogInformation(
                 "DocumentDiscovery batch completed: {Processed} processed, {Failed} failed in {Elapsed}ms " +
                 "(Total: {TotalProcessed} processed, {TotalFailed} failed)",
                 processedCount, errors.Count, sw.ElapsedMilliseconds, _totalProcessed, _totalFailed);
@@ -137,7 +140,7 @@ namespace Migration.Infrastructure.Implementation.Services
 
             while (!ct.IsCancellationRequested)
             {
-                using var batchScope = _logger.BeginScope(new Dictionary<string, object>
+                using var batchScope = _fileLogger.BeginScope(new Dictionary<string, object>
                 {
                     ["BatchCounter"] = batchCounter
                 });
@@ -145,19 +148,19 @@ namespace Migration.Infrastructure.Implementation.Services
                 try
                 {
 
-                    _logger.LogDebug("Starting batch {BatchCounter}", batchCounter);
+                    _fileLogger.LogDebug("Starting batch {BatchCounter}", batchCounter);
 
                     var result = await RunBatchAsync(ct).ConfigureAwait(false);
 
                     if (result.PlannedCount == 0)
                     {
                         emptyResultCounter++;
-                        _logger.LogDebug(
+                        _fileLogger.LogDebug(
                                 "Empty result ({Counter}/{Max})",
                                 emptyResultCounter, maxEmptyResults);
                         if (emptyResultCounter >= maxEmptyResults)
                         {
-                            _logger.LogInformation(
+                            _fileLogger.LogInformation(
                                 "Breaking after {Count} consecutive empty results",
                                 emptyResultCounter);
                             break;
@@ -180,14 +183,18 @@ namespace Migration.Infrastructure.Implementation.Services
                 catch (Exception ex)
                 {
 
-                    _logger.LogError(ex, "Error in batch {BatchCounter}", batchCounter);
+                    _dbLogger.LogError(ex, "Error in batch {BatchCounter}", batchCounter);
 
                     // Exponential backoff on error
                     await Task.Delay(delay * 2, ct).ConfigureAwait(false);
                     batchCounter++;
                 } 
             }
-            _logger.LogInformation(
+            _fileLogger.LogInformation(
+                "DocumentDiscovery worker completed after {Count} batches. " +
+                "Total: {Processed} processed, {Failed} failed",
+                batchCounter - 1, _totalProcessed, _totalFailed);
+            _dbLogger.LogInformation(
                 "DocumentDiscovery worker completed after {Count} batches. " +
                 "Total: {Processed} processed, {Failed} failed",
                 batchCounter - 1, _totalProcessed, _totalFailed);
@@ -219,13 +226,13 @@ namespace Migration.Infrastructure.Implementation.Services
 
                     if (resetCount > 0)
                     {
-                        _logger.LogWarning(
+                        _fileLogger.LogWarning(
                             "Reset {Count} stuck folders that were IN PROGRESS for more than {Minutes} minutes",
                             resetCount, _options.Value.StuckItemsTimeoutMinutes);
                     }
                     else
                     {
-                        _logger.LogInformation("No stuck folders found");
+                        _fileLogger.LogInformation("No stuck folders found");
                     }
                 }
                 catch
@@ -236,7 +243,7 @@ namespace Migration.Infrastructure.Implementation.Services
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Failed to reset stuck folders");
+                _dbLogger.LogError(ex, "Failed to reset stuck folders");
             }
         }
 
@@ -260,13 +267,13 @@ namespace Migration.Infrastructure.Implementation.Services
                         _totalFailed = checkpoint.TotalFailed;
                         _batchCounter = checkpoint.BatchCounter;
 
-                        _logger.LogInformation(
+                        _fileLogger.LogInformation(
                             "Checkpoint loaded: {TotalProcessed} processed, {TotalFailed} failed, batch {BatchCounter}",
                             _totalProcessed, _totalFailed, _batchCounter);
                     }
                     else
                     {
-                        _logger.LogInformation("No checkpoint found, starting fresh");
+                        _fileLogger.LogInformation("No checkpoint found, starting fresh");
                         _totalProcessed = 0;
                         _totalFailed = 0;
                         _batchCounter = 0;
@@ -280,7 +287,8 @@ namespace Migration.Infrastructure.Implementation.Services
             }
             catch (Exception ex)
             {
-                _logger.LogWarning(ex, "Failed to load checkpoint, starting fresh");
+                _fileLogger.LogWarning(ex, "Failed to load checkpoint, starting fresh");
+                _dbLogger.LogError(ex, "Failed to load checkpoint, starting fresh");
                 _totalProcessed = 0;
                 _totalFailed = 0;
                 _batchCounter = 0;
@@ -309,7 +317,7 @@ namespace Migration.Infrastructure.Implementation.Services
                     await checkpointRepo.UpsertAsync(checkpoint, ct).ConfigureAwait(false);
                     await uow.CommitAsync(ct: ct).ConfigureAwait(false);
 
-                    _logger.LogDebug("Checkpoint saved: {TotalProcessed} processed, {TotalFailed} failed, batch {BatchCounter}",
+                    _fileLogger.LogDebug("Checkpoint saved: {TotalProcessed} processed, {TotalFailed} failed, batch {BatchCounter}",
                         _totalProcessed, _totalFailed, _batchCounter);
                 }
                 catch
@@ -320,7 +328,7 @@ namespace Migration.Infrastructure.Implementation.Services
             }
             catch (Exception ex)
             {
-                _logger.LogWarning(ex, "Failed to save checkpoint");
+                _dbLogger.LogWarning(ex, "Failed to save checkpoint");
             }
         }
 
@@ -355,6 +363,7 @@ namespace Migration.Infrastructure.Implementation.Services
             }
             catch (Exception ex)
             {
+                _dbLogger.LogWarning(ex, "Failed AcquireFoldersForProcessingAsync");
 
                 await uow.RollbackAsync(ct).ConfigureAwait(false);
                 throw;
@@ -364,27 +373,32 @@ namespace Migration.Infrastructure.Implementation.Services
 
         private async Task ProcessSingleFolderAsync(FolderStaging folder, CancellationToken ct)
         {
-            using var logScope = _logger.BeginScope(new Dictionary<string, object> 
-            { 
+            using var logScope = _fileLogger.BeginScope(new Dictionary<string, object>
+            {
                 ["FolderId"] = folder.Id ,
                 ["FolderName"] = folder.Name ?? "unknown",
                 ["NodeId"] = folder.NodeId ?? "unknown"
             });
 
 
-            _logger.LogDebug("Processing folder {FolderId}", folder.Id);
+            _fileLogger.LogDebug("Processing folder {FolderId} ({Name}, NodeId: {NodeId})",
+                folder.Id, folder.Name, folder.NodeId);
 
             var documents = await _reader.ReadBatchAsync(folder.NodeId!, ct).ConfigureAwait(false);
 
             if (documents == null || documents.Count == 0)
             {
-                _logger.LogDebug("No documents found in folder {FolderId}", folder.Id);
+                _fileLogger.LogInformation(
+                    "No documents found in folder {FolderId} ({Name}, NodeId: {NodeId}) - marking as PROCESSED",
+                    folder.Id, folder.Name, folder.NodeId);
                 await MarkFolderAsProcessedAsync(folder.Id, ct).ConfigureAwait(false);
                 return;
             }
-            _logger.LogDebug("Found {Count} documents in folder {FolderId}", documents.Count, folder.Id);
+            _fileLogger.LogInformation("Found {Count} documents in folder {FolderId} ({Name})",
+                documents.Count, folder.Id, folder.Name);
 
             var desFolderId = await ResolveDestinationFolder(folder, ct).ConfigureAwait(false);
+            _fileLogger.LogDebug("Resolved destination folder: {DestFolderId}", desFolderId);
 
             var docsToInsert = new List<DocStaging>(documents.Count);
 
@@ -396,11 +410,15 @@ namespace Migration.Infrastructure.Implementation.Services
                 docsToInsert.Add(item);
             }
 
+            _fileLogger.LogInformation(
+                "Prepared {Count} documents for insertion (folder {FolderId})",
+                docsToInsert.Count, folder.Id);
+
             await InsertDocsAndMarkFolderAsync(docsToInsert, folder.Id, ct).ConfigureAwait(false);
 
-            _logger.LogDebug(
-                "Successfully processed folder {FolderId}: {Count} documents inserted",
-                folder.Id, docsToInsert.Count);
+            _fileLogger.LogInformation(
+                "Successfully processed folder {FolderId} ({Name}): {Count} documents inserted",
+                folder.Id, folder.Name, docsToInsert.Count);
 
 
         }
@@ -417,18 +435,38 @@ namespace Migration.Infrastructure.Implementation.Services
 
             try
             {
+                int inserted = 0;
                 if (docsToInsert.Count > 0)
                 {
-                    var inserted = await docRepo.InsertManyAsync(docsToInsert, ct).ConfigureAwait(false); // TODO: izmeniti InsertManyAsync da vrati broj insertovanih
-                    _logger.LogDebug("Inserted {Count} documents for folder {FolderId}",
-                        inserted, folderId);
+                    _fileLogger.LogDebug("Inserting {Count} documents for folder {FolderId}",
+                        docsToInsert.Count, folderId);
+
+                    inserted = await docRepo.InsertManyAsync(docsToInsert, ct).ConfigureAwait(false);
+
+                    _fileLogger.LogInformation(
+                        "Successfully inserted {Inserted}/{Total} documents for folder {FolderId}",
+                        inserted, docsToInsert.Count, folderId);
+                }
+                else
+                {
+                    _fileLogger.LogWarning(
+                        "docsToInsert is empty for folder {FolderId} - this should have been caught earlier!",
+                        folderId);
                 }
 
-                await folderRepo.SetStatusAsync(folderId, MigrationStatus.Processed.ToString(), null, ct).ConfigureAwait(false);
+                await folderRepo.SetStatusAsync(folderId, MigrationStatus.Processed.ToDbString(), null, ct).ConfigureAwait(false);
+                _fileLogger.LogDebug("Marked folder {FolderId} as PROCESSED", folderId);
+
                 await uow.CommitAsync().ConfigureAwait(false);
+                _fileLogger.LogDebug("Transaction committed for folder {FolderId}", folderId);
             }
             catch (Exception ex)
             {
+                _dbLogger.LogError(ex,
+                    "Failed to insert documents and mark folder {FolderId} as PROCESSED. " +
+                    "Attempted to insert {Count} documents. Rolling back transaction.",
+                    folderId, docsToInsert.Count);
+
                 await uow.RollbackAsync().ConfigureAwait(false);
                 throw;
             }
@@ -443,24 +481,24 @@ namespace Migration.Infrastructure.Implementation.Services
 
             if(_resolvedFoldersCache.TryGetValue(normalizedName, out var cachedId))
             {
-                _logger.LogDebug("Using cached destination folder ID for folder {FolderId}", folder.Id);
+                _fileLogger.LogDebug("Using cached destination folder ID for folder {FolderId}", folder.Id);
                 return cachedId;
             }
 
 
-            _logger.LogDebug("Resolving destination folder for '{Name}'", normalizedName);
+            _fileLogger.LogDebug("Resolving destination folder for '{Name}'", normalizedName);
 
             var destFolderId = await _resolver.ResolveAsync(_options.Value.RootDestinationFolderId, normalizedName, ct).ConfigureAwait(false);
 
             _resolvedFoldersCache.TryAdd(normalizedName, destFolderId);
 
-            _logger.LogDebug("Resolved and cached destination folder '{Name}' -> {Id}",
+            _fileLogger.LogDebug("Resolved and cached destination folder '{Name}' -> {Id}",
                 normalizedName, destFolderId);
 
             if (_resolvedFoldersCache.Count > 10000)
             {
                 _resolvedFoldersCache.Clear();
-                _logger.LogWarning("Cache cleared due to size limit (10000 entries)");
+                _fileLogger.LogWarning("Cache cleared due to size limit (10000 entries)");
             }
 
 
@@ -519,11 +557,11 @@ namespace Migration.Infrastructure.Implementation.Services
 
                 await uow.CommitAsync(ct: ct).ConfigureAwait(false);
 
-                _logger.LogWarning("Marked {Count} folders as failed", errors.Count);
+                _fileLogger.LogWarning("Marked {Count} folders as failed", errors.Count);
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Failed to mark folders as failed");
+                _dbLogger.LogError(ex, "Failed to mark folders as failed");
                 await uow.RollbackAsync(ct: ct).ConfigureAwait(false);
             }
         }

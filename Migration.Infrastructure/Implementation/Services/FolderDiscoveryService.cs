@@ -27,7 +27,9 @@ namespace Migration.Infrastructure.Implementation.Services
         private FolderSeekCursor? _cursor = null;
         private readonly IServiceProvider _sp;
         private readonly IUnitOfWork _unitOfWork;
-        private readonly ILogger<FolderDiscoveryService> _logger;
+        private readonly ILogger _dbLogger;
+        private readonly ILogger _fileLogger;
+        //private readonly ILogger<FolderDiscoveryService> _logger;
 
         // private FolderSeekCursor? _cursor = null;
         private readonly object _cursorLock = new();
@@ -37,21 +39,23 @@ namespace Migration.Infrastructure.Implementation.Services
 
         private const string ServiceName = "FolderDiscovery";
 
-        public FolderDiscoveryService(IFolderIngestor ingestor, IFolderReader reader, IOptions<MigrationOptions> options, IServiceProvider sp, IUnitOfWork unitOfWork, ILogger<FolderDiscoveryService> logger)
+        public FolderDiscoveryService(IFolderIngestor ingestor, IFolderReader reader, IOptions<MigrationOptions> options, IServiceProvider sp, IUnitOfWork unitOfWork, ILoggerFactory logger)
         {
             _ingestor = ingestor;
             _reader = reader;
             _options = options;
             _sp = sp;
             _unitOfWork = unitOfWork;
-            _logger = logger;
+            //_logger = logger;
+            _dbLogger = logger.CreateLogger("DbLogger");
+            _fileLogger = logger.CreateLogger("FileLogger");
         }
 
         public async Task<FolderBatchResult> RunBatchAsync(CancellationToken ct)
         {
             var sw = Stopwatch.StartNew();
 
-            using var batchScope = _logger.BeginScope(new Dictionary<string, object>
+            using var batchScope = _fileLogger.BeginScope(new Dictionary<string, object>
             {
                 ["Service"] = nameof(FolderDiscoveryService),
                 ["Operation"] = "RunBatch"
@@ -78,11 +82,11 @@ namespace Migration.Infrastructure.Implementation.Services
 
             if (!page.HasMore || page.Items.Count == 0)
             {
-                _logger.LogInformation("No more folders to process");
+                _fileLogger.LogInformation("No more folders to process");
                 return new FolderBatchResult(0);
             }
 
-            _logger.LogInformation("Read {Count} folders from Alfresco", page.Items.Count);
+            _fileLogger.LogInformation("Read {Count} folders from Alfresco", page.Items.Count);
 
             var foldersToInsert = page.Items.ToList().ToFolderStagingListInsert();
 
@@ -99,7 +103,10 @@ namespace Migration.Infrastructure.Implementation.Services
             await SaveCheckpointAsync(ct).ConfigureAwait(false);
 
             sw.Stop();
-            _logger.LogInformation(
+            _fileLogger.LogInformation(
+                "FolderDiscovery batch completed: {Count} folders inserted in {Elapsed}ms (Total: {Total} inserted)",
+                inserted, sw.ElapsedMilliseconds, _totalInserted);
+            _dbLogger.LogInformation(
                 "FolderDiscovery batch completed: {Count} folders inserted in {Elapsed}ms (Total: {Total} inserted)",
                 inserted, sw.ElapsedMilliseconds, _totalInserted);
 
@@ -113,7 +120,7 @@ namespace Migration.Infrastructure.Implementation.Services
             var delay = _options.Value.IdleDelayInMs;
             var maxEmptyResults = _options.Value.BreakEmptyResults;
 
-            _logger.LogInformation("FolderDiscovery worker started");
+            _fileLogger.LogInformation("FolderDiscovery worker started");
 
             // Note: FolderDiscovery doesn't have IN PROGRESS state issues
             // because it doesn't mark folders as IN PROGRESS during processing
@@ -130,27 +137,30 @@ namespace Migration.Infrastructure.Implementation.Services
 
             while (!ct.IsCancellationRequested)
             {
-                using var batchScope = _logger.BeginScope(new Dictionary<string, object>
+                using var batchScope = _fileLogger.BeginScope(new Dictionary<string, object>
                 {
                     ["BatchCounter"] = batchCounter
                 });
 
                 try
                 {
-                    _logger.LogDebug("Starting batch {BatchCounter}", batchCounter);
+                    _fileLogger.LogDebug("Starting batch {BatchCounter}", batchCounter);
 
                     var result = await RunBatchAsync(ct).ConfigureAwait(false);
 
                     if (result.InsertedCount == 0)
                     {
                         emptyResultCounter++;
-                        _logger.LogDebug(
+                        _fileLogger.LogDebug(
                             "Empty result ({Counter}/{Max})",
                             emptyResultCounter, maxEmptyResults);
 
                         if (emptyResultCounter >= maxEmptyResults)
                         {
-                            _logger.LogInformation(
+                            _fileLogger.LogInformation(
+                                "Breaking after {Count} consecutive empty results",
+                                emptyResultCounter);
+                            _dbLogger.LogInformation(
                                 "Breaking after {Count} consecutive empty results",
                                 emptyResultCounter);
                             break;
@@ -175,12 +185,12 @@ namespace Migration.Infrastructure.Implementation.Services
                 }
                 catch (OperationCanceledException)
                 {
-                    _logger.LogInformation("FolderDiscovery worker cancelled");
+                    _dbLogger.LogInformation("FolderDiscovery worker cancelled");
                     throw;
                 }
                 catch (Exception ex)
                 {
-                    _logger.LogError(ex, "Error in batch {BatchCounter}", batchCounter);
+                    _dbLogger.LogError(ex, "Error in batch {BatchCounter}", batchCounter);
 
                     // Exponential backoff on error
                     await Task.Delay(delay * 2, ct).ConfigureAwait(false);
@@ -188,7 +198,7 @@ namespace Migration.Infrastructure.Implementation.Services
                 }
             }
 
-            _logger.LogInformation(
+            _fileLogger.LogInformation(
                 "FolderDiscovery worker completed after {Count} batches. Total: {Total} folders inserted",
                 batchCounter - 1, _totalInserted);
         }
@@ -223,18 +233,18 @@ namespace Migration.Infrastructure.Implementation.Services
                                 _cursor = cursor;
                             }
 
-                            _logger.LogInformation(
+                            _fileLogger.LogInformation(
                                 "Checkpoint loaded: {TotalProcessed} processed, cursor at {LastId} ({LastDate})",
                                 _totalInserted, cursor?.LastObjectId, cursor?.LastObjectCreated);
                         }
                         else
                         {
-                            _logger.LogInformation("Checkpoint loaded: {TotalProcessed} processed (no cursor)", _totalInserted);
+                            _fileLogger.LogInformation("Checkpoint loaded: {TotalProcessed} processed (no cursor)", _totalInserted);
                         }
                     }
                     else
                     {
-                        _logger.LogInformation("No checkpoint found, starting fresh");
+                        _fileLogger.LogInformation("No checkpoint found, starting fresh");
                     }
                 }
                 catch
@@ -245,7 +255,7 @@ namespace Migration.Infrastructure.Implementation.Services
             }
             catch (Exception ex)
             {
-                _logger.LogWarning(ex, "Failed to load checkpoint, starting fresh");
+                _dbLogger.LogWarning(ex, "Failed to load checkpoint, starting fresh");
             }
         }
 
@@ -279,7 +289,7 @@ namespace Migration.Infrastructure.Implementation.Services
                     await checkpointRepo.UpsertAsync(checkpoint, ct).ConfigureAwait(false);
                     await uow.CommitAsync(ct: ct).ConfigureAwait(false);
 
-                    _logger.LogDebug("Checkpoint saved: {TotalProcessed} processed", _totalInserted);
+                    _fileLogger.LogDebug("Checkpoint saved: {TotalProcessed} processed", _totalInserted);
                 }
                 catch
                 {
@@ -289,7 +299,7 @@ namespace Migration.Infrastructure.Implementation.Services
             }
             catch (Exception ex)
             {
-                _logger.LogWarning(ex, "Failed to save checkpoint");
+                _dbLogger.LogWarning(ex, "Failed to save checkpoint");
             }
         }
 
@@ -312,12 +322,12 @@ namespace Migration.Infrastructure.Implementation.Services
                 var inserted = await folderRepo.InsertManyAsync(folders, ct).ConfigureAwait(false);
                 await uow.CommitAsync(ct: ct).ConfigureAwait(false);
 
-                _logger.LogDebug("Successfully inserted {Count} folders", inserted);
+                _fileLogger.LogDebug("Successfully inserted {Count} folders", inserted);
                 return inserted;
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Failed to insert {Count} folders", folders.Count);
+                _dbLogger.LogError(ex, "Failed to insert {Count} folders", folders.Count);
                 await uow.RollbackAsync(ct: ct).ConfigureAwait(false);
                 throw;
             }
