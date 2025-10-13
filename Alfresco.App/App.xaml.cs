@@ -1,4 +1,5 @@
 ﻿using Alfresco.App.Helpers;
+using Alfresco.App.Logging;
 using Alfresco.App.UserControls;
 using Alfresco.Abstraction.Interfaces;
 using Alfresco.Abstraction.Models;
@@ -46,9 +47,13 @@ namespace Alfresco.App
     public partial class App : Application
     {
         public static IHost AppHost { get; private set; } = null!;
+        public static LiveLogViewer LogViewer { get; private set; } = null!;
 
         public App()
         {
+            // Create global LiveLogViewer instance for UI monitoring
+            LogViewer = new LiveLogViewer();
+
             AppHost = Host.CreateDefaultBuilder()
                 .ConfigureServices((context, services) =>
                 {
@@ -312,8 +317,13 @@ namespace Alfresco.App
                     logging.AddFilter("Microsoft", LogLevel.Warning);
                     logging.AddFilter("System", LogLevel.Warning);
 
+                    // Add LiveLogViewer provider - ONLY for UiLogger
+                    logging.AddProvider(new SelectiveLiveLoggerProvider(
+                        LogViewer,
+                        "UiLogger"  // Only UiLogger appears in LiveLogViewer UI
+                    ));
+
                     log4net.GlobalContext.Properties["AppInstance"] = $"Service-{Environment.ProcessId}";
-                    ;
 
                 })
                 .Build();
