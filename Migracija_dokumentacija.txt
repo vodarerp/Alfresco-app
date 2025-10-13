@@ -1,0 +1,202 @@
+Migracija Retail klijenata (Division PUG) sa “starog” Alfresco-a na novi Alfresco 
+Potrebno je migrirati sva dokumenta koja se nalaze u “starom” Dosijeu klijenta fizičkog lica ili Dosijeu 
+klijenta pravnog lica (npr. “PI10227858”, dakle bez crtice između slovne i numeričke oznake). 
+Za source Heimdall, migraciju je potrebno uraditi na sledeći način: - 
+Sva dokumenta koja su smeštena u ovim tzv “starim” dosijeima gde je source Heimdall treba 
+migrirati u novi Alfresco u neki od sledecih dosijea: dosije kiljenta FL, dosije klijenta PL, dosije 
+paket racuna ili dosije ostalo.  Parametri za migraciju se odredjuju prema dostavljenom mappingu 
+u excel tabeli Analiza_za_migr_novo – mapiranje v3, bez obzira da li je dokument digitalno 
+potpisan u branchu ili putem mbanking aplikacije.  
+analiza_za_migr_no
+ vo - mapiranje v4.xlsx- - - - - - - - - 
+Napomena u vezi insertovane tabele: Imajući u vidu da tabela sadrži polje “description”, a ne polje 
+“document name”, kako bismo izbegli svaku vrstu (eventualne) greške, u koloni Tip dosijea je 
+uneta vrednost Dosije klijenta FL / PL, a očekivanje je da će CT na osnovu dodatnih atributa (na 
+osnovu CoreID i segmenta klijenta će imati podatak o tipu klijenta) dokument pohraniti u 
+odgovarajući Dosije fizičkog lica ili Dosije pravnog lica.  
+Mapiranje koje je prilozeno nije finalno, potrebno je da se izmapiraju i dokumenta koja su se 
+smestala u period oktobar 2023 – jun 2024. Takođe, u insertovanoj tabeli postoji red gde od 
+podataka imamo samo vrednost “null null”, potrebno je više detalja, kojih je ovo 12 dokumenata 
+sa oznakom "null null". 
+U tabeli je definisano na osnovu naziva dokumenta u koji dosije treba migrirati dokument, sa kojim 
+tipom proizvoda (opcioni podatak relevantan samo za dosije ostalo) I koji treba da bude tip 
+dokumenta.U excel tabeli u koloni C (sifra dokumenta) je sifra tipa dokumenta koja se trenutno 
+koristi na Alfrescou za odredjeni document iz Heimdall-a, a u koloni G se nalazi sifra tipa 
+dokumenta koja treba da se koristi za migraciju. Ove dve sifre tipa dokumenta se razlikuju ukoliko 
+je politika cuvanja “nova verzija” pa je zbog toga za potrebe migracije otvoren novi tip dokumenta.  
+Ukoliko u novom Alfresco-u ne postoji kreiran adekvatan dosije, potrebno je najpre kreirati 
+odgovarajući dosije klijenta. Klijentske podatke na dosijeu (atributi dosijea) popuniti pozivom 
+ClienatAPI-a. 
+Zajedno sa dokumentom potrebno je migrirati i njegove podatke/atribute iz starog Alfresco-a. 
+Za sva dokumenta koja imaju politiku čuvanja “nova verzija” za potrebe migracije Banka će otvoriti 
+nove tipove dokumenata koji će imati sufiks “migracija” I gde ce politika cuvanja biti novi 
+dokument, a zatim dokumenta sa starog Alfresco-a migrirati na ove novootvorene tipove (prema 
+dostavljenom mappingu u excel tabeli Analiza_za_migr_novo – mapiranje v3).  
+Treba migrirati sve verzije.  
+Neaktivna dokumenta takođe treba da budu migrirana (s tim da je očekivanje Biznisa da su sva 
+dokumenta aktivna, jer ne postoji frontend da bi ih neko učinio neaktivnim). 
+Nakon sto se zavrsi migracija novootvoreni tipovi (sa sufiksom “migracija”) treba da se oznace da 
+nisu aktivni (što bi značilo da ubuduće, nakon što krene produkcija, ne mogu biti izabrani od strane 
+korisnika).  
+Dokumenta 00099 KDP za fizička lica i 00824 KDP za fizicka lica - migracija 
+1) Prilikom migracije dokumenta “Specimen card” iz starog Dosijea klijenta u novi, tip 
+dokumenta treba da bude “00824 – KDP za fizicka lica – migracija”, za koji je politika 
+cuvanja novi document. Document treba da se migrira kao neaktivan. 
+2) Status dokumenta 00099 KDP za fizička lica koji je u novom Alfresco-u (posle 4.6.2024. 
+godine), a kojem je politika cuvanja “nova verzija”, takodje treba da se oznaci da je 
+neaktivan (bilo da postoji jedan ili više ovih dokumenata).   
+Nakon sto se uradi kompletna migracija iz svih izvora (uključujući I stari DMS (SRC)), za ove tipove 
+dokumenata, uraditi azuriranje finalnog statusa na sledeci nacin: 
+1) Ukoliko postoji skeniran KDP za fizička lica u sekciji Depo kartoni, deo KDP - Valid cards, 
+a koji u startu treba označiti kao aktivan, sve druge KDP-ove za fizička lica iz svih drugih 
+izvora ostaviti kao neaktivne. 
+ Ovo se provera tako sto se proveri da li postoji aktivan document sa tipom 
+00824 za koji je izvor “Depo kartoni_Validan” 
+2) Ukoliko NE postoji skeniran KDP u sekciji Depo kartoni, deo KDP - Valid cards, po klijentu 
+I tipu dokumenta (jedan ili više koji se odnose suštinski na isti dokument) oznaci samo 
+poslednji dokument (dokument sa najvecim datumom kreiranja) da je aktivan, dok za 
+ostala dokumenta status aktivnosti treba da ostane onakav kakav je definisan prilikom 
+migracije (dakle, ostali treba da ostanu neaktivni).  
+Napomena: CT treba da dostavi banci spisak klijenata koji nisu u grupi 1) tj. nemaju aktivan 
+document tipa 00824 za koji je izvor “Depo kartoni_Validan” (vec su im svi dokumenti tipa 
+00824 I 00099 neaktivni) za koje ce banka oznaciti koji treba da budu izuzeti iz pravila 2) tj. za 
+njih svi dokumenti treba da ostanu neaktivni kako su I migrirani. Banka ce selekciju ko treba 
+da bude izuzet uraditi tako sto ce da identifikuje klijente koji imaju  nivo ovlašćenja po računu 
+3 Zastupnik maloletnog lica ili 4 Zastupnik po rešenju.  
+3) Za dokument koji prema parametrima ostane kao aktivan, bilo pod 1) ili 2), ukoliko nosi 
+naziv 00824 KDP za fizička lica - migracija potrebno je da CT izmeni tip dokument u 
+00099, što će rezultirati i izmenom naziva u KDP za fizička lica i izmenom politike čuvanja 
+u nova verzija, a sve kako bi prvim narednim arhiviranjem dokumenta pod ovim tipom, 
+prethodni dokument se sačuvao kao prethodna verzija, bez potrebe za bilo kakvom 
+aktivnosti od strane korisnika. Kod određivanja najvećeg datuma uzeti u obzir oba tipa 
+00824 I 00099. 
+Dokumenta 00101 KDP za ovlašćena lica (za fizička lica) i 00825 KDP za ovlašćena lica (za fizička 
+lica) – migracija 
+1) Prilikom migracije dokumenta “Specimen Card for Authorized Person” iz starog Dosijea 
+klijenta u novi, tip dokumenta treba da bude “00825 – KDP za ovlašćena lica (za fizička 
+lica) - migracija”, za koji je politika cuvanja novi document. Document treba da se migrira 
+kao neaktivan. 
+2) Status dokumenta 00101 KDP za ovlašćena lica (za fizička lica) koji je u novom Alfresco-u 
+(posle 4.6.2024. godine), a kojem je politika cuvanja “novi dokument”, takodje treba da 
+se oznaci da je neaktivan (bilo da postoji jedan ili više ovih dokumenata).    
+Dokumenta 00100 KDP za pravna lica_iz aplikacije i 00827 KDP za pravna lica - migracija) 
+1) Prilikom migracije dokumenta “Specimen card for LE” iz starog Dosijea klijenta u novi, tip 
+dokumenta treba da bude “00827 – KDP za pravna lica - migracija”, za koji je politika 
+cuvanja novi document. Document treba da se migrira kao neaktivan. 
+2) Status dokumenta 00100 KDP za pravna lica_iz aplikacije koji je u novom Alfresco-u (posle 
+4.6.2024. godine), a kojem je politika cuvanja “nova verzija”, takodje treba da se oznaci 
+da je neaktivan (bilo da postoji jedan ili više ovih dokumenata).   
+Dokument 00702 Ovlascenje licima za donosenje instrumenata PP-a u Banku  
+Napomena: Ovaj dokument ne postoji u starom Alfresco-u (već samo u starom DMS-u (SRC)) te 
+se iz tog razloga ne pominje u ovoj specifikaciji (biće detaljno pojašnjeno u specifikaciji koja se 
+odnosi na migraciju sa starog DMS-a (SRC)). 
+Ostala dokumenta čija je politika čuvanja „nova verzija“, pa je za potrebe migracije otvoren novi 
+tip koji ima sufiks migracija 
+1) Status dokumenta koji ima sufiks migracija, a kojem je politika cuvanja “novi 
+dokument”, prilikom migracije iz starog Dosijea klijenta u novi, treba da bude da je 
+neaktivan.  
+2) Status dokumenta koji je u novom Alfresco-u (posle 4.6.2024. godine), a kojem je 
+politika cuvanja “novi dokument”, takodje treba da se oznaci da je neaktivan.   
+Nakon sto se uradi kompletna migracija iz svih izvora (uključujući i stari DMS (SRC)), za ove tipove 
+dokumenata, uraditi azuriranje finalnog statusa na sledeci nacin: 
+po klijentu I tipu dokumenta (jedan ili više koji se odnose suštinski na isti dokument) oznaci samo 
+poslednji dokument (dokument sa najvecim datumom kreiranja) da je aktivan, dok za ostala 
+dokumenta status aktivnosti treba da ostane onakav kakav je definisan prilikom migracije (dakle, 
+ostali treba da ostanu neaktivni).   
+Za dokument koji prema parametrima ostane kao aktivan, ukoliko nosi naziv sa sufiksom  
+migracija (npr 00841 KYC upitnik - migracija), potrebno je da CT izmeni tip dokument koji ne 
+sadrži sufiks migracija (u konkretnoj situaciji 00130 KYC upitnik), što će rezultirati i izmenom 
+naziva i izmenom politike čuvanja u nova verzija, a sve kako bi prvim narednim arhiviranjem 
+dokumenta pod ovim tipom, prethodni dokument se sačuvao kao prethodna verzija, bez potrebe 
+za bilo kakvom aktivnosti od strane korisnika. Kod određivanja najvećeg datuma uzeti u obzir oba 
+tipa suštinski jednog istog dokumenta. 
+Ostala dokumenta čija je politika čuvanja „novi dokument“, dakle bez sufiksa migracija  
+Status ovih dokumenata, kojima je politika čuvanja “novi dokument”, nakon migracije treba da 
+bude aktivan ukoliko je document bio aktivan u starom Dosijeu. 
+Izvor odnosno Source ne treba menjati, odnosno treba da ostane Heimdall.  - - - 
+Dokumenta treba smestiti u odgovarajuće kategorije prema poslednje ažurnom šifarniku. 
+Na kraju, nakon završene migracije, svi otvoreni dosijei u starom formatu npr. “PI10227858” treba 
+da budu obrisani ili uklonjeni odnosno nedostupni krajnjim korisnicima (jer će ova dosijea nakon 
+migracije biti prazna I u njih više ne treba da se bilo šta smešta).  
+Za tipove dokumenata koji se odnose na KDP vlasnika za FL  (tipovi 00824 I 00099), potrebno je 
+nakon migracije iz svih izvora, za dokumenta koja zadovoljavaju gore navedene uslove da budu 
+progalašena aktivnim, koja nemaju popunjen broj racuna, popuniti  listu racuna koji su sada 
+aktivni a bili su otvoreni na dan kreiranja dokumenta. CT treba banci da eksportuje listu (u excel 
+formatu ili tabelu u bazi) koja sadzi referencu dosijea, klijentski broj, referencu dokumenta, tip 
+dokumenta (jedan od ova dva) i datum kreiranja dokumenta, za dokumenta koja su aktivna I tip 
+im je 00824 ili 00099, a nemaju popunjen broj racuna. Banka dopunjuje listu sa listom racuna 
+(racuni su odvojeni zarezom) koji su bili otvoreni na dan kreiranja dokumenta I nisu zatvoreni. CT 
+radi upis liste racuna u atribut na dokumentu docAccountNumbers. 
+Za source mcash nije potrebna migracija jer se od starta dokumentacija upisuje u novi dosije plasmana 
+Dosije depozita- migracija sa starog Alfresco na novi Alfresco  
+Potrebno je migrirati svu dokumentaciju koja se nalazi u Dosijeu fizička lica i Dosijeu pravna lica a koja se 
+odnosi na oročene depozite I gde je izvor stari Alfresco- DUT aplikacija I to za period do 04.06.2024. godine 
+kada se prešlo na novu verziju Alfresco-a.  
+Vendor treba da dostavi pregled svih dokumenata koji su arhivirani na starom Alfresco-u period do 
+04/06/2024. Godine. 
+Parametri za migraciju su definisani u skladu sa maping tabelom pod nazivom: 
+Dosije depozita-maping migracije stari_novi Alfresco v1  
+Copy of Dosije 
+depozita- maping migracije stari_novi Alfresco v1.xlsx
+ Iz baze koja će se migrirati neophodno je za konkretnog klijenta kreirati Dosije depozita ukoliko u novom 
+Alfresco-u ne postoji kreiran adekvatan dosije. Klijentske podatke na dosijeu (atributi dosijea) popuniti 
+pozivom ClienatAPI-a najsvežijim podacima. 
+Za kreiranje Dosijea depozita ukoliko za konkretnog klijenta ne postoji kreiran dosije, nephodni su sledeci 
+podaci: - - - - 
+Core id (na osnovu ClientAPI popuniti  klijentske podatke MBR/JMBG klijenta, naziv klijenta,tip 
+klijenta, podtip klijenta itd) 
+Tip proizvoda ( Fizicka lica – Depozitni proizvodi I SB- Depozitni proizvodi) 
+Broj Ugovora  
+Partija-opciono (ukoliko postoji u Aflfresco podataka o broju partije, migrirati navedeno kao 
+atribut u dosijeu depozita) 
+Sva dokumenta koja se odnose na oročene depozite koja su smeštena u starom Alfresco u Dosije fizičkog 
+lica i Dosijeu pravnog lica neophodno je migrirati u Dosije depozita. Za konkretnog klijenta u okviru dosijea 
+depozita moze postojati vise podfoldera (Jedinstveni identifikator dosijea), u zavisnosti od broja oročenih 
+depozita odnosno Ugovora.  
+Referenca jedinsvenog identifikatora dosijeadosijea depozita treba da bude: DE-<CoreId>
+<SifraTipaProizvoda>-<brojUgovora>.  
+U okviru Dosije depozita se za svako orocenje koje se migrira, krera se podfolder Jedinstveni identifkator 
+dosijea (koji se sastoji od CORE id klijenta, Oznake tipa proizvoda I broja Ugovora orocenog depozita) 
+koji u formatu primer:        
+DE-10194302-00008-10104302_20241105154459 
+Format jedinstevenog identifikatora dosijea CORE id klijenta, Oznake tipa proizvoda (00008 za fizicka lica 
+I 00010 za pravna lica) I broja Ugovora orocenog depozita: -Broj ugovra orocenog depozita -20241105154459 
+Prilikom migracije dokumenta neophodno je migrirati I podatke/attribute konkrentnog orocenog 
+depozita.  
+U starom Alfresco su pohranjene i nepotpisane verzija ugovorne dokumentacije kao I potpisana verzija 
+ugovorne dokumentacije.  
+Prilikom migracije neophodno je migrirati nepotpisanu verziju dokumentacije kao verziju 1.1, dok je 
+potpisana verzija dokumentacije treba da bude verzija 1.2 u Alfresco.  Neopohodno je migracija svih verzija 
+konkretnog dokumenta za konkretno orocenje, ne samo zadnju verziju dokumenta.  
+Migraciju je potrebno sprovoditi samo za dokumentaciju koja u OfferBO tabeli DUT aplikaciji ima status 
+Booked.  
+Kako u ovom trenutku nije vidljiva dokumentacija u DUT aplikaciji dokumenta koja je kreirana pre prelaska 
+na novi Alfresco, ocekivanje je da se nakon migracije navedena dokumenta moci da se reprodukuju I budu 
+vidljiva u DUT aplikaciji, kao sto je setovano za proces na novom Alfresco-u.  
+Za dokumenta u okviru Dosijea depozita politika cuvanja depozita je “nova verzija” za sva dokumenta koja 
+se mogu digitalno potpisati, nije kreiran novi dokument u mapingu, vec se koristi postojeci sifarnik iz 
+mapinga sa politikom cuvana as is. U okviru jedinstvenog identifikatora dosijea depozita moze biti samo 
+jedno orocenje koje treba da sadrzi minimum sledeca dokumenta: 
+Fizicka lica – Depozitni proizvodi (00008) -Ugovor o orocenom depozitu -Ponuda  -Plan isplate depozita -Obavezni elementi Ugovora  
+SB- Depozitni proizvodi (00010) 
+Ugovor o orocenom depozitu 
+Ponuda 
+Plan isplate depozita 
+Obavezni elementi Ugovora  
+Status migrirane dokumentacije treba da bude Aktivan. 
+Migriran dosije depozita treba da sadrzi sledece podatke: 
+(Tip klijenta, Kreator, Jedinstveni identifikator dosijea, Barclex, Saradnik, MBR/JMBG, Core id, Naziv 
+klijenta, partiju, podtip klijenta, Staff, OPU korisnika, OPU/ID realizacije, tip proizvoda, Broj ugovora, 
+datum kreiranja koji ne treba da bude jedan datumu kada je migrirana dokumentacija, vec datumu kada 
+je orocen depozit procesuiran, rezidentnost, izvor, status, datum ahiviranja).  
+Konkretan dokument u okviru jedinstvenog identifikatora dosija treba da sadrzi sledece podatke: 
+Naziv kategorije, oznaku tipa, tip, naziv, oznaku kategorije, datum kreiranja (datum kreiranja ne treba da 
+bude datum kada je migracija sprovedena, nego datum kada je dokument arhiviran u starom alfresco), 
+status. 
+Ukoliko u Alfresco nema podatak o broju Ugovora, neophodno je na osnovu podataka u OfferBo tabeli 
+upariti podatke na osnovu CORE ID, datuma orocenja I broja ugovora dokumentacije koja je smestena u 
+stari Alfresco I to samo ako je klijent za konkretan datum imao jedno orocenje. 
+Ukoliko je klijent imao vise orocenja za jedan datum, neophodno je iz OfferBo tabele za konkretnog 
+klijenta dostaviti sledece podatke: -Broj Ugovora -Iznos -Valutu -Datum orocenja 
+Podaci za klijente koji imaju vise orocenja za konkretan datum, neophodno je da budu upareni po broju 
+Ugovoru.  

@@ -18,6 +18,9 @@ using Microsoft.Extensions.Options;
 using Migration.Abstraction.Interfaces;
 using Migration.Abstraction.Interfaces.Services;
 using Migration.Abstraction.Interfaces.Wrappers;
+// TODO: Uncomment when external APIs are available
+// using Migration.Abstraction.Models;
+// using Migration.Infrastructure.Implementation;
 using Migration.Infrastructure.Implementation.Document;
 using Migration.Infrastructure.Implementation.Folder;
 using Migration.Infrastructure.Implementation.Move;
@@ -135,6 +138,102 @@ namespace Alfresco.App
                     services.Configure<OracleOptions>(context.Configuration.GetSection("Oracle"));
 
                     services.AddSingleton(sp => sp.GetRequiredService<IOptions<OracleOptions>>().Value);
+
+                    // =====================================================================================
+                    // EXTERNAL API CLIENTS AND MIGRATION SERVICES
+                    // =====================================================================================
+                    // TODO: Uncomment when ClientAPI and DUT API become available
+                    // Per INTEGRATION_INSTRUCTIONS.md - these services are ready but need API access
+
+                    /*
+                    // Configure ClientAPI Options
+                    services.Configure<ClientApiOptions>(
+                        context.Configuration.GetSection(ClientApiOptions.SectionName));
+
+                    // Configure DUT API Options
+                    services.Configure<DutApiOptions>(
+                        context.Configuration.GetSection(DutApiOptions.SectionName));
+
+                    // ClientAPI HttpClient with Polly policies
+                    services.AddHttpClient<IClientApi, ClientApi>(cli =>
+                    {
+                        cli.Timeout = TimeSpan.FromSeconds(
+                            context.Configuration.GetValue<int>("ClientApi:TimeoutSeconds", 30));
+                    })
+                        .ConfigureHttpClient((sp, cli) =>
+                        {
+                            var options = sp.GetRequiredService<IOptions<ClientApiOptions>>().Value;
+                            cli.BaseAddress = new Uri(options.BaseUrl);
+                            cli.DefaultRequestHeaders.Accept.Add(
+                                new System.Net.Http.Headers.MediaTypeWithQualityHeaderValue("application/json"));
+
+                            // Add API key header if configured
+                            if (!string.IsNullOrEmpty(options.ApiKey))
+                            {
+                                cli.DefaultRequestHeaders.Add("X-API-Key", options.ApiKey);
+                            }
+                        })
+                        .ConfigurePrimaryHttpMessageHandler(() => new System.Net.Http.SocketsHttpHandler
+                        {
+                            PooledConnectionLifetime = TimeSpan.FromMinutes(5),
+                            PooledConnectionIdleTimeout = TimeSpan.FromMinutes(2),
+                            MaxConnectionsPerServer = 50
+                        })
+                        .SetHandlerLifetime(TimeSpan.FromMinutes(5))
+                        .AddPolicyHandler(GetRetryPlicy())
+                        .AddPolicyHandler(GetCircuitBreakerPolicy());
+
+                    // DUT API HttpClient with Polly policies
+                    services.AddHttpClient<IDutApi, DutApi>(cli =>
+                    {
+                        cli.Timeout = TimeSpan.FromSeconds(
+                            context.Configuration.GetValue<int>("DutApi:TimeoutSeconds", 30));
+                    })
+                        .ConfigureHttpClient((sp, cli) =>
+                        {
+                            var options = sp.GetRequiredService<IOptions<DutApiOptions>>().Value;
+                            cli.BaseAddress = new Uri(options.BaseUrl);
+                            cli.DefaultRequestHeaders.Accept.Add(
+                                new System.Net.Http.Headers.MediaTypeWithQualityHeaderValue("application/json"));
+
+                            // Add API key header if configured
+                            if (!string.IsNullOrEmpty(options.ApiKey))
+                            {
+                                cli.DefaultRequestHeaders.Add("X-API-Key", options.ApiKey);
+                            }
+                        })
+                        .ConfigurePrimaryHttpMessageHandler(() => new System.Net.Http.SocketsHttpHandler
+                        {
+                            PooledConnectionLifetime = TimeSpan.FromMinutes(5),
+                            PooledConnectionIdleTimeout = TimeSpan.FromMinutes(2),
+                            MaxConnectionsPerServer = 50
+                        })
+                        .SetHandlerLifetime(TimeSpan.FromMinutes(5))
+                        .AddPolicyHandler(GetRetryPlicy())
+                        .AddPolicyHandler(GetCircuitBreakerPolicy());
+
+                    // Migration Services
+                    services.AddScoped<IClientEnrichmentService, ClientEnrichmentService>();
+                    services.AddScoped<IDocumentTypeTransformationService, DocumentTypeTransformationService>();
+                    services.AddScoped<IUniqueFolderIdentifierService, UniqueFolderIdentifierService>();
+
+                    // Health checks for external APIs (optional)
+                    // services.AddHealthChecks()
+                    //     .AddUrlGroup(
+                    //         uri: new Uri(context.Configuration["ClientApi:BaseUrl"]!),
+                    //         name: "clientapi",
+                    //         failureStatus: HealthStatus.Degraded,
+                    //         tags: new[] {"api", "external"})
+                    //     .AddUrlGroup(
+                    //         uri: new Uri(context.Configuration["DutApi:BaseUrl"]!),
+                    //         name: "dutapi",
+                    //         failureStatus: HealthStatus.Degraded,
+                    //         tags: new[] {"api", "external"});
+                    */
+
+                    // =====================================================================================
+                    // END OF EXTERNAL API CONFIGURATION
+                    // =====================================================================================
 
                     // OracleConnection and OracleTransaction lifecycle is managed by OracleUnitOfWork (Scoped)
                     // No need to register them separately in DI - they are created lazily on BeginAsync()

@@ -6,7 +6,9 @@
       "Bash(powershell:*)",
       "Bash(dotnet clean:*)",
       "Bash(robocopy:*)",
-      "Bash(xcopy:*)"
+      "Bash(xcopy:*)",
+      "Bash(awk:*)",
+      "Read(//c/**)"
     ],
     "deny": [],
     "ask": []
