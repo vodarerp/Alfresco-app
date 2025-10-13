@@ -4,7 +4,7 @@
              xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006" 
              xmlns:d="http://schemas.microsoft.com/expression/blend/2008" 
              xmlns:local="clr-namespace:Alfresco.App.UserControls" xmlns:workerstate="clr-namespace:Alfresco.App.UserControls.WorkerState"
-             mc:Ignorable="d" 
+             mc:Ignorable="d"  Background="#161b20"
              d:DesignHeight="550" d:DesignWidth="800"
             
              >
@@ -20,10 +20,10 @@
             </Grid.ColumnDefinitions>
             <Grid Grid.Column="1">
                 <Grid.RowDefinitions>
-                    <RowDefinition Height="*"></RowDefinition>
-                    <RowDefinition Height="*"></RowDefinition>
+                    <RowDefinition Height="auto"></RowDefinition>
+                    <RowDefinition Height="2*"></RowDefinition>
                 </Grid.RowDefinitions>
-                <Button Grid.Row ="0" Click="Button_Click"> Tes</Button>
+                <local:UsageHeader Grid.Row ="0" />
                 <!--<DataGrid x:Name="dataGridA" Grid.Row="0"  Margin="10" AutoGenerateColumns="false" ItemsSource="{Binding Folders}" IsReadOnly="True">
                     <DataGrid.Columns>
                         <DataGridTemplateColumn Header="ID" Width="*">
@@ -42,7 +42,7 @@
                         </DataGridTemplateColumn>
                     </DataGrid.Columns>
                 </DataGrid>-->
-                <DataGrid  x:Name="dataGridOracle" Grid.Row="1"  Margin="10" AutoGenerateColumns="false" ItemsSource="{Binding Documents}" IsReadOnly="True">
+                <DataGrid  x:Name="dataGridOracle" Grid.Row="1"  Margin="0" AutoGenerateColumns="false" ItemsSource="{Binding Documents}" IsReadOnly="True">
                     <DataGrid.Columns>
                         <DataGridTemplateColumn Header="ID" Width="*">
                             <DataGridTemplateColumn.CellTemplate>

@@ -93,8 +93,16 @@ namespace Alfresco.App.UserControls
 
         private async void StatusBarUC_Loaded(object sender, RoutedEventArgs e)
         {
-            Connected = await _alfrescoService.PingAsync();
+            try
+            {
 
+                Connected = await _alfrescoService.PingAsync();
+
+            }
+            catch (Exception ex)
+            {
+                Connected = false;
+            }
             var healt = App.AppHost.Services.GetRequiredService<HealthCheckService>();
             var report = await healt.CheckHealthAsync();
 
