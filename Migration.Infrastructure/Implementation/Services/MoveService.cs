@@ -131,22 +131,26 @@ namespace Migration.Infrastructure.Implementation.Services
                 doneCount, errors.Count, moveTimer.ElapsedMilliseconds, avgMoveTime);
 
             // 3. Batch update za uspešne - sve u jednoj transakciji
+            // Skip DB commit if cancellation requested to reduce freeze time
             var updateTimer = Stopwatch.StartNew();
-            if (!successfulDocs.IsEmpty)
+            if (!ct.IsCancellationRequested && !successfulDocs.IsEmpty)
             {
                 await MarkDocumentsAsDoneAsync(successfulDocs, ct).ConfigureAwait(false);
             }
             // 4. Batch update za greške - sve u jednoj transakciji
-            if (!errors.IsEmpty)
+            if (!ct.IsCancellationRequested && !errors.IsEmpty)
             {
                 await MarkDocumentsAsFailedAsync(errors, ct).ConfigureAwait(false);
                 Interlocked.Add(ref _totalFailed, errors.Count);
             }
             updateTimer.Stop();
 
-            // Save checkpoint after successful batch
-            Interlocked.Increment(ref _batchCounter);
-            await SaveCheckpointAsync(ct).ConfigureAwait(false);
+            // Save checkpoint after successful batch (skip on cancellation)
+            if (!ct.IsCancellationRequested)
+            {
+                Interlocked.Increment(ref _batchCounter);
+                await SaveCheckpointAsync(ct).ConfigureAwait(false);
+            }
 
             sw.Stop();
             _fileLogger.LogInformation(

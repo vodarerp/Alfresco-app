@@ -115,7 +115,11 @@
                      ScrollViewer.VerticalScrollBarVisibility="Auto"
                      ItemContainerStyle="{StaticResource LogItemStyle}"
                      Background="#FAFAFA"
-                     SelectionMode="Extended">
+                     SelectionMode="Extended"
+                     VirtualizingPanel.IsVirtualizing="True"
+                     VirtualizingPanel.VirtualizationMode="Recycling"
+                     VirtualizingPanel.CacheLength="20,20"
+                     VirtualizingPanel.CacheLengthUnit="Item">
                 <ListBox.ItemTemplate>
                     <DataTemplate>
                         <Grid Margin="0,2">

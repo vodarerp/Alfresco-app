@@ -20,10 +20,14 @@ namespace Alfresco.App.UserControls
         private readonly ObservableCollection<LogEntry> _allLogs;
         private readonly ObservableCollection<LogEntry> _filteredLogs;
         private readonly DispatcherTimer _updateTimer;
+        private readonly Queue<LogEntry> _pendingLogs;
+        private readonly object _queueLock = new object();
+
         private LogLevel _currentFilter = LogLevel.Trace; // All levels
         private string _searchText = string.Empty;
         private bool _isPaused = false;
         private const int MaxBufferSize = 1000;
+        private const int BatchSize = 50; // Process max 50 logs per batch
 
         // Statistics
         private int _debugCount = 0;
@@ -37,67 +41,46 @@ namespace Alfresco.App.UserControls
 
             _allLogs = new ObservableCollection<LogEntry>();
             _filteredLogs = new ObservableCollection<LogEntry>();
+            _pendingLogs = new Queue<LogEntry>();
             LogListBox.ItemsSource = _filteredLogs;
 
-            // Setup timer for periodic updates (in case of batch logging)
-            _updateTimer = new DispatcherTimer
+            // Setup timer for batch processing logs (optimized for performance)
+            _updateTimer = new DispatcherTimer(DispatcherPriority.Background)
             {
-                Interval = TimeSpan.FromMilliseconds(500)
+                Interval = TimeSpan.FromMilliseconds(250) // Process logs every 250ms
             };
             _updateTimer.Tick += UpdateTimer_Tick;
             _updateTimer.Start();
 
-            // Subscribe to custom log event (if using custom logger)
-            // CustomLogger.LogReceived += OnLogReceived;
+            // Cleanup timer when control is unloaded to prevent memory leak
+            Loaded += (_, __) => _updateTimer.Start();
+            Unloaded += (_, __) => _updateTimer.Stop();
         }
 
         /// <summary>
         /// Add a log entry (call this from your logging infrastructure)
+        /// OPTIMIZED: Queues log for batch processing instead of immediate UI update
         /// </summary>
         public void AddLog(LogLevel level, string message, string loggerName = "")
         {
             if (_isPaused)
                 return;
 
-            Dispatcher.InvokeAsync(() =>
+            // Create log entry on background thread (no UI marshalling yet)
+            var logEntry = new LogEntry
             {
-                var logEntry = new LogEntry
-                {
-                    Timestamp = DateTime.Now,
-                    Level = level.ToString().ToUpper(),
-                    Message = message,
-                    LoggerName = loggerName,
-                    LevelColor = GetColorForLevel(level)
-                };
+                Timestamp = DateTime.Now,
+                Level = level.ToString().ToUpper(),
+                Message = message,
+                LoggerName = loggerName,
+                LevelColor = GetColorForLevel(level)
+            };
 
-                // Add to all logs
-                _allLogs.Add(logEntry);
-
-                // Update statistics
-                UpdateStatistics(level, 1);
-
-                // Enforce buffer limit
-                if (_allLogs.Count > MaxBufferSize)
-                {
-                    var toRemove = _allLogs.First();
-                    _allLogs.RemoveAt(0);
-                    UpdateStatistics(Enum.Parse<LogLevel>(toRemove.Level, true), -1);
-                }
-
-                // Apply filter
-                if (ShouldShowLog(logEntry))
-                {
-                    _filteredLogs.Add(logEntry);
-
-                    // Auto-scroll if enabled
-                    if (ChkAutoScroll.IsChecked == true && _filteredLogs.Count > 0)
-                    {
-                        LogListBox.ScrollIntoView(_filteredLogs.Last());
-                    }
-                }
-
-                UpdateFooter();
-            });
+            // Queue the log for batch processing (thread-safe)
+            lock (_queueLock)
+            {
+                _pendingLogs.Enqueue(logEntry);
+            }
         }
 
         /// <summary>
@@ -114,8 +97,68 @@ namespace Alfresco.App.UserControls
 
         private void UpdateTimer_Tick(object sender, EventArgs e)
         {
-            // Placeholder for any periodic updates
-            // Could be used to fetch logs from a queue or external source
+            // Batch process pending logs for better UI performance
+            ProcessPendingLogs();
+        }
+
+        /// <summary>
+        /// Batch processes queued logs to avoid UI thread saturation
+        /// </summary>
+        private void ProcessPendingLogs()
+        {
+            List<LogEntry> logsToProcess;
+
+            // Dequeue batch of logs (thread-safe)
+            lock (_queueLock)
+            {
+                if (_pendingLogs.Count == 0)
+                    return;
+
+                // Take up to BatchSize logs
+                var count = Math.Min(_pendingLogs.Count, BatchSize);
+                logsToProcess = new List<LogEntry>(count);
+
+                for (int i = 0; i < count; i++)
+                {
+                    logsToProcess.Add(_pendingLogs.Dequeue());
+                }
+            }
+
+            // Process batch on UI thread (single Dispatcher call for entire batch)
+            bool needsScroll = false;
+
+            foreach (var logEntry in logsToProcess)
+            {
+                // Add to all logs
+                _allLogs.Add(logEntry);
+
+                // Update statistics
+                UpdateStatistics(Enum.Parse<LogLevel>(logEntry.Level, true), 1);
+
+                // Enforce buffer limit
+                if (_allLogs.Count > MaxBufferSize)
+                {
+                    var toRemove = _allLogs.First();
+                    _allLogs.RemoveAt(0);
+                    UpdateStatistics(Enum.Parse<LogLevel>(toRemove.Level, true), -1);
+                }
+
+                // Apply filter
+                if (ShouldShowLog(logEntry))
+                {
+                    _filteredLogs.Add(logEntry);
+                    needsScroll = true;
+                }
+            }
+
+            // Update footer once per batch (instead of per log)
+            UpdateFooter();
+
+            // Scroll once per batch (instead of per log) - HUGE performance gain
+            if (needsScroll && ChkAutoScroll.IsChecked == true && _filteredLogs.Count > 0)
+            {
+                LogListBox.ScrollIntoView(_filteredLogs.Last());
+            }
         }
 
         private bool ShouldShowLog(LogEntry logEntry)
@@ -176,12 +219,20 @@ namespace Alfresco.App.UserControls
 
         private void UpdateFooter()
         {
+            int pendingCount;
+            lock (_queueLock)
+            {
+                pendingCount = _pendingLogs.Count;
+            }
+
             TxtTotalLogs.Text = $"Total: {_allLogs.Count}";
             TxtDebugCount.Text = $"🔍 DEBUG: {_debugCount}";
             TxtInfoCount.Text = $"ℹ️ INFO: {_infoCount}";
             TxtWarnCount.Text = $"⚠️ WARN: {_warnCount}";
             TxtErrorCount.Text = $"❌ ERROR: {_errorCount}";
-            TxtBufferInfo.Text = $"Buffer: {_allLogs.Count} / {MaxBufferSize}";
+            TxtBufferInfo.Text = pendingCount > 0
+                ? $"Buffer: {_allLogs.Count} / {MaxBufferSize} | Queued: {pendingCount}"
+                : $"Buffer: {_allLogs.Count} / {MaxBufferSize}";
         }
 
         private Brush GetColorForLevel(LogLevel level)

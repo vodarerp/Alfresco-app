@@ -31,6 +31,7 @@ namespace Migration.Infrastructure.Implementation.Services
         //private readonly IUnitOfWork _unitOfWork;
         private readonly ILogger _dbLogger;
         private readonly ILogger _fileLogger;
+        private readonly ILogger _uiLogger;
 
         private readonly ConcurrentDictionary<string, string> _resolvedFoldersCache = new();
         private long _totalProcessed = 0;
@@ -50,6 +51,7 @@ namespace Migration.Infrastructure.Implementation.Services
             _sp = sp;
             _dbLogger = logger.CreateLogger("DbLogger");
             _fileLogger = logger.CreateLogger("FileLogger");
+            _uiLogger = logger.CreateLogger("UiLogger");
            // _logger = logger;
             // _unitOfWork = unitOfWork;
         }
@@ -102,15 +104,18 @@ namespace Migration.Infrastructure.Implementation.Services
                 }
             });
 
-            if (!errors.IsEmpty)
+            if (!ct.IsCancellationRequested && !errors.IsEmpty)
             {
                 await MarkFoldersAsFailedAsync(errors, ct).ConfigureAwait(false);
                 Interlocked.Add(ref _totalFailed, errors.Count);
             }
 
             // Save checkpoint after successful batch
-            Interlocked.Increment(ref _batchCounter);
-            await SaveCheckpointAsync(ct).ConfigureAwait(false);
+            if (!ct.IsCancellationRequested)
+            {
+                Interlocked.Increment(ref _batchCounter);
+                await SaveCheckpointAsync(ct).ConfigureAwait(false);
+            }
 
             sw.Stop();
             _fileLogger.LogInformation(

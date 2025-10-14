@@ -22,6 +22,7 @@ namespace Migration.Workers
        // private readonly ILogger<MoveWorker> _fileLogger;
         private readonly ILogger _dbLogger;
         private readonly ILogger _fileLogger;
+        private readonly ILogger _uiLogger;
         private readonly IServiceProvider _sp;
         private CancellationTokenSource _cts = new(); 
         private readonly object _lockObj = new();       
@@ -102,37 +103,55 @@ namespace Migration.Workers
             //_fileLogger = logger;
             _dbLogger = logger.CreateLogger("DbLogger");
             _fileLogger = logger.CreateLogger("FileLogger");
+            _uiLogger = logger.CreateLogger("UiLogger");
             _sp = sp;
         }
 
         public void StartService()
         {
+            bool shouldStart = false;
+
             lock (_lockObj)
             {
                 if (State == WorkerState.Running) return;
 
-                _fileLogger.LogInformation($"Worker {Key} started");
-                _dbLogger.LogInformation($"Worker {Key} started");
+                shouldStart = true;
                 _cts = new CancellationTokenSource();
                 IsEnabled = true;
                 State = WorkerState.Running;
                 LastStarted = DateTimeOffset.UtcNow;
                 LastError = null;
-                
+            }
+
+            // Log AFTER releasing lock to avoid deadlock with UI thread
+            if (shouldStart)
+            {
+                _fileLogger.LogInformation($"Worker {Key} started");
+                _dbLogger.LogInformation($"Worker {Key} started");
+                _uiLogger.LogInformation($"Worker {Key} started");
             }
         }
         public void StopService()
         {
+            bool shouldStop = false;
+
             lock (_lockObj)
             {
                 if (State is WorkerState.Idle or WorkerState.Stopped) return;
-                _fileLogger.LogInformation($"Worker {Key} stoped");
+
+                shouldStop = true;
+                State = WorkerState.Stopping;  // Show "Stopping..." immediately
                 _cts.Cancel();
                 IsEnabled = false;
-                State = WorkerState.Stopped;
                 //LastStopped = DateTimeOffset.UtcNow;
-                //LastError = null;
+                //LastError = null
+            }
 
+            // Log AFTER releasing lock to avoid deadlock with UI thread
+            if (shouldStop)
+            {
+                _fileLogger.LogInformation($"Worker {Key} stopping...");
+                _uiLogger.LogInformation($"Worker {Key} stopping...");
             }
         }      
 
@@ -148,6 +167,7 @@ namespace Migration.Workers
                 {
                     if (!IsEnabled || State != WorkerState.Running)
                     {
+
                         await Task.Delay(1000,stoppingToken).ConfigureAwait(false);
                         continue;
                     }

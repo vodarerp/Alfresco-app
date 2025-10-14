@@ -79,7 +79,7 @@ namespace Alfresco.App.UserControls.TableMetrics
 
         private void Button_Click(object sender, RoutedEventArgs e)
         {
-            var x = _service.GetFolderStatisticAsync()
+            //var x = _service.GetFolderStatisticAsync();
         }
     }
 }

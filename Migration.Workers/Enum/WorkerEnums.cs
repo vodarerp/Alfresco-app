@@ -8,6 +8,6 @@ namespace Migration.Workers.Enum
 {
     public class WorkerEnums
     {
-        public enum WorkerState { Idle, Running, Stopped, Failed }
+        public enum WorkerState { Idle, Running, Stopping, Stopped, Failed }
     }
 }

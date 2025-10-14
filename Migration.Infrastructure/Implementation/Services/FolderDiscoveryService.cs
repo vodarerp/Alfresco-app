@@ -29,6 +29,7 @@ namespace Migration.Infrastructure.Implementation.Services
         private readonly IUnitOfWork _unitOfWork;
         private readonly ILogger _dbLogger;
         private readonly ILogger _fileLogger;
+        private readonly ILogger _uiLogger;
         //private readonly ILogger<FolderDiscoveryService> _logger;
 
         // private FolderSeekCursor? _cursor = null;
@@ -49,6 +50,7 @@ namespace Migration.Infrastructure.Implementation.Services
             //_logger = logger;
             _dbLogger = logger.CreateLogger("DbLogger");
             _fileLogger = logger.CreateLogger("FileLogger");
+            _uiLogger = logger.CreateLogger("UiLogger");
         }
 
         public async Task<FolderBatchResult> RunBatchAsync(CancellationToken ct)
@@ -100,7 +102,10 @@ namespace Migration.Infrastructure.Implementation.Services
             Interlocked.Add(ref _totalInserted, inserted);
 
             // Save checkpoint after successful batch
-            await SaveCheckpointAsync(ct).ConfigureAwait(false);
+            if (!ct.IsCancellationRequested)
+            {
+                await SaveCheckpointAsync(ct).ConfigureAwait(false);
+            }
 
             sw.Stop();
             _fileLogger.LogInformation(

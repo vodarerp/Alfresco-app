@@ -19,7 +19,9 @@ namespace Migration.Workers
     {
 
         private readonly IFolderDiscoveryService _svc;
-        private readonly ILogger<FolderDiscoveryWorker> _logger;
+        private readonly ILogger _dbLogger;
+        private readonly ILogger _fileLogger;
+        private readonly ILogger _uiLogger;
         private readonly IServiceProvider _sp;
         private CancellationTokenSource _cts = new();
         private readonly object _lockObj = new();
@@ -95,39 +97,57 @@ namespace Migration.Workers
         //public Exception? LastError => throw new NotImplementedException();
         public Exception? LastError { get; private set; }
 
-        public FolderDiscoveryWorker(IFolderDiscoveryService svc, ILogger<FolderDiscoveryWorker> logger, IServiceProvider sp)
+        public FolderDiscoveryWorker(IFolderDiscoveryService svc, ILoggerFactory logger, IServiceProvider sp)
         {
             _svc = svc;
-            _logger = logger;
+            _dbLogger = logger.CreateLogger("DbLogger");
+            _fileLogger = logger.CreateLogger("FileLogger");
+            _uiLogger = logger.CreateLogger("UiLogger");
             _sp = sp;
         }
         public void StartService()
         {
+            bool shouldStart = false;
+
             lock (_lockObj)
             {
                 if (State == WorkerState.Running) return;
 
-                _logger.LogInformation($"Worker {Key} started");
+                shouldStart = true;
                 _cts = new CancellationTokenSource();
                 IsEnabled = true;
                 State = WorkerState.Running;
                 LastStarted = DateTimeOffset.UtcNow;
                 LastError = null;
+            }
 
+            // Log AFTER releasing lock to avoid deadlock with UI thread
+            if (shouldStart)
+            {
+                _fileLogger.LogInformation($"Worker {Key} started");
+                _dbLogger.LogInformation($"Worker {Key} started");
+                _uiLogger.LogInformation($"Worker {Key} started");
             }
         }
         public void StopService()
         {
+            bool shouldStop = false;
+
             lock (_lockObj)
             {
                 if (State is WorkerState.Idle or WorkerState.Stopped) return;
-                _logger.LogInformation($"Worker {Key} stoped");
+
+                shouldStop = true;
+                State = WorkerState.Stopping;  // Show "Stopping..." immediately
                 _cts.Cancel();
                 IsEnabled = false;
-                State = WorkerState.Stopped;
-                //LastStopped = DateTimeOffset.UtcNow;
-                //LastError = null;
+            }
 
+            // Log AFTER releasing lock to avoid deadlock with UI thread
+            if (shouldStop)
+            {
+                _fileLogger.LogInformation($"Worker {Key} stopping...");
+                _uiLogger.LogInformation($"Worker {Key} stopping...");
             }
         }
 
@@ -135,7 +155,7 @@ namespace Migration.Workers
         {
             var workerId = $"W-FolderDiscoveryWorker";
 
-            using (_logger.BeginScope(new Dictionary<string, object> { ["WorkerId"] = workerId }))
+            using (_dbLogger.BeginScope(new Dictionary<string, object> { ["WorkerId"] = workerId }))
             {
 
                 while (!stoppingToken.IsCancellationRequested)
@@ -147,14 +167,14 @@ namespace Migration.Workers
                     }
                     try
                     {
-                        _logger.LogInformation("Worker starter {time}!", DateTime.Now);
+                        _fileLogger.LogInformation("Worker starter {time}!", DateTime.Now);
                         using var scope = _sp.CreateScope();
                         var svc = scope.ServiceProvider.GetRequiredService<IFolderDiscoveryService>();
-                        _logger.LogInformation("Starting RunLoopAsync ....");
+                        _fileLogger.LogInformation("Starting RunLoopAsync ....");
                         using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken, _cts.Token);
 
                         await svc.RunLoopAsync(linkedCts.Token).ConfigureAwait(false);
-                        _logger.LogInformation("Worker finised {time}!", DateTime.Now);
+                        _fileLogger.LogInformation("Worker finised {time}!", DateTime.Now);
 
                     }
                     catch (OperationCanceledException)
@@ -170,7 +190,8 @@ namespace Migration.Workers
                     }
                     catch (Exception ex)
                     {
-                        _logger.LogError("Worker crashed!! {errMsg}!", ex.Message);
+                        _fileLogger.LogError("Exception!!! Check db for details");
+                        _dbLogger.LogError(ex, "Worker crashed!!");
                         lock (_lockObj)
                         {
                             LastStopped = DateTimeOffset.Now;

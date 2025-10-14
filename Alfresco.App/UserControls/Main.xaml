@@ -3,70 +3,80 @@
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006" 
              xmlns:d="http://schemas.microsoft.com/expression/blend/2008" 
-             xmlns:local="clr-namespace:Alfresco.App.UserControls" xmlns:workerstate="clr-namespace:Alfresco.App.UserControls.WorkerState"
-             mc:Ignorable="d"  Background="#161b20"
-             d:DesignHeight="550" d:DesignWidth="800"
-            
+             xmlns:local="clr-namespace:Alfresco.App.UserControls"
+             xmlns:workerstate="clr-namespace:Alfresco.App.UserControls.WorkerState"
+             xmlns:app="clr-namespace:Alfresco.App"
+             mc:Ignorable="d"  
+             d:DesignHeight="550" d:DesignWidth="800"            
              >
     <Grid Margin="10">
         <Grid.RowDefinitions>
             <RowDefinition Height="*"></RowDefinition>
             <RowDefinition Height="Auto"></RowDefinition>
         </Grid.RowDefinitions>
-        <Grid x:Name="MainGrid" Grid.Row="0">
-            <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="Auto"></ColumnDefinition>
-                <ColumnDefinition Width="*"></ColumnDefinition>
-            </Grid.ColumnDefinitions>
-            <Grid Grid.Column="1">
-                <Grid.RowDefinitions>
-                    <RowDefinition Height="auto"></RowDefinition>
-                    <RowDefinition Height="2*"></RowDefinition>
-                </Grid.RowDefinitions>
-                <local:UsageHeader Grid.Row ="0" />
-                <!--<DataGrid x:Name="dataGridA" Grid.Row="0"  Margin="10" AutoGenerateColumns="false" ItemsSource="{Binding Folders}" IsReadOnly="True">
-                    <DataGrid.Columns>
-                        <DataGridTemplateColumn Header="ID" Width="*">
-                            <DataGridTemplateColumn.CellTemplate>
-                                <DataTemplate>
-                                    <TextBlock Text="{Binding Id}" TextWrapping="Wrap"/>
-                                </DataTemplate>
-                            </DataGridTemplateColumn.CellTemplate>
-                        </DataGridTemplateColumn>
-                        <DataGridTemplateColumn Header="Name" Width="*">
-                            <DataGridTemplateColumn.CellTemplate>
-                                <DataTemplate>
-                                    <TextBlock Text="{Binding Name}" TextWrapping="Wrap"/>
-                                </DataTemplate>
-                            </DataGridTemplateColumn.CellTemplate>
-                        </DataGridTemplateColumn>
-                    </DataGrid.Columns>
-                </DataGrid>-->
-                <DataGrid  x:Name="dataGridOracle" Grid.Row="1"  Margin="0" AutoGenerateColumns="false" ItemsSource="{Binding Documents}" IsReadOnly="True">
-                    <DataGrid.Columns>
-                        <DataGridTemplateColumn Header="ID" Width="*">
-                            <DataGridTemplateColumn.CellTemplate>
-                                <DataTemplate>
-                                    <TextBlock Text="{Binding Id}" TextWrapping="Wrap"/>
-                                </DataTemplate>
-                            </DataGridTemplateColumn.CellTemplate>
-                        </DataGridTemplateColumn>
-                        <DataGridTemplateColumn Header="NodeId" Width="*">
-                            <DataGridTemplateColumn.CellTemplate>
-                                <DataTemplate>
-                                    <TextBlock Text="{Binding NodeId}" TextWrapping="Wrap"/>
-                                </DataTemplate>
-                            </DataGridTemplateColumn.CellTemplate>
-                        </DataGridTemplateColumn>
-                    </DataGrid.Columns>
-                </DataGrid>
-            </Grid>            
-            <Grid Grid.Column="0"> 
-                <Grid Grid.Row="1">
-                    <workerstate:WorkerStateWrapper/>
+        <TabControl Grid.Row="0" SelectedIndex="0" >
+            <TabItem Header="Dashboard">
+                <Grid x:Name="MainGrid" Grid.Row="0">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto"></ColumnDefinition>
+                        <ColumnDefinition Width="*"></ColumnDefinition>
+                    </Grid.ColumnDefinitions>
+                    <Grid Grid.Column="1">
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="auto"></RowDefinition>
+                            <RowDefinition Height="2*"></RowDefinition>
+                        </Grid.RowDefinitions>
+                        <local:UsageHeader Grid.Row ="0" />
+                        <!--<DataGrid x:Name="dataGridA" Grid.Row="0"  Margin="10" AutoGenerateColumns="false" ItemsSource="{Binding Folders}" IsReadOnly="True">
+                            <DataGrid.Columns>
+                                <DataGridTemplateColumn Header="ID" Width="*">
+                                    <DataGridTemplateColumn.CellTemplate>
+                                        <DataTemplate>
+                                            <TextBlock Text="{Binding Id}" TextWrapping="Wrap"/>
+                                        </DataTemplate>
+                                    </DataGridTemplateColumn.CellTemplate>
+                                </DataGridTemplateColumn>
+                                <DataGridTemplateColumn Header="Name" Width="*">
+                                    <DataGridTemplateColumn.CellTemplate>
+                                        <DataTemplate>
+                                            <TextBlock Text="{Binding Name}" TextWrapping="Wrap"/>
+                                        </DataTemplate>
+                                    </DataGridTemplateColumn.CellTemplate>
+                                </DataGridTemplateColumn>
+                            </DataGrid.Columns>
+                        </DataGrid>-->
+                        <DataGrid  x:Name="dataGridOracle" Grid.Row="1"  Margin="0" AutoGenerateColumns="false" ItemsSource="{Binding Documents}" IsReadOnly="True">
+                            <DataGrid.Columns>
+                                <DataGridTemplateColumn Header="ID" Width="*">
+                                    <DataGridTemplateColumn.CellTemplate>
+                                        <DataTemplate>
+                                            <TextBlock Text="{Binding Id}" TextWrapping="Wrap"/>
+                                        </DataTemplate>
+                                    </DataGridTemplateColumn.CellTemplate>
+                                </DataGridTemplateColumn>
+                                <DataGridTemplateColumn Header="NodeId" Width="*">
+                                    <DataGridTemplateColumn.CellTemplate>
+                                        <DataTemplate>
+                                            <TextBlock Text="{Binding NodeId}" TextWrapping="Wrap"/>
+                                        </DataTemplate>
+                                    </DataGridTemplateColumn.CellTemplate>
+                                </DataGridTemplateColumn>
+                            </DataGrid.Columns>
+                        </DataGrid>
+                    </Grid>
+                    <Grid Grid.Column="0">
+                        <Grid Grid.Row="1">
+                            <workerstate:WorkerStateWrapper/>
+                        </Grid>
+                    </Grid>
                 </Grid>
-            </Grid>
-        </Grid>
+            </TabItem>   
+            <TabItem Header="LiveLogger">
+                <ContentControl Content="{x:Static app:App.LogViewer}"/>
+            </TabItem>
+
+        </TabControl>
+        
         <local:StatusBarUC Grid.Row="1" Height="40"/>
 
     </Grid>
