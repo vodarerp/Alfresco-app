@@ -2,30 +2,14 @@
 using Alfresco.Contracts.Models;
 using Alfresco.Contracts.Oracle.Models;
 using Alfresco.Contracts.Request;
-using Alfresco.Contracts.Response;
 using Mapper;
 using Microsoft.Extensions.DependencyInjection;
-using Migration.Workers.Interfaces;
-using Newtonsoft.Json;
 using Oracle.Abstraction.Interfaces;
-using System;
-using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.ComponentModel;
-using System.Linq;
 using System.Runtime.CompilerServices;
-using System.Text;
-using System.Text.Json.Nodes;
-using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
-using System.Windows.Data;
-using System.Windows.Documents;
-using System.Windows.Input;
-using System.Windows.Media;
-using System.Windows.Media.Imaging;
-using System.Windows.Navigation;
-using System.Windows.Shapes;
 
 namespace Alfresco.App.UserControls
 {
@@ -34,6 +18,23 @@ namespace Alfresco.App.UserControls
     /// </summary>
     public partial class Main : UserControl, INotifyPropertyChanged
     {
+        private volatile bool _isLiveLoggerActive; // set to true kada je LiveLogger tab aktivan
+        private int _unreadPending;
+        #region -UnreadErrors- property
+        private int _UnreadErrors = 0;
+        public int UnreadErrors
+        {
+            get { return _UnreadErrors; }
+            set
+            {
+                if (_UnreadErrors != value)
+                {
+                    _UnreadErrors = value;
+                    NotifyPropertyChanged();
+                }
+            }
+        }
+        #endregion
 
         private readonly IAlfrescoApi _alfrescoService;
         private readonly IAlfrescoWriteApi _alfrescoWriteService;
@@ -110,6 +111,35 @@ namespace Alfresco.App.UserControls
             //_alfrescoService = App.AppHost.Services.GetRequiredService<IAlfrescoApi>(); 
             _docStagingRepository = App.AppHost.Services.GetRequiredService<IDocStagingRepository>();
             _folderStagingRepository = App.AppHost.Services.GetRequiredService<IFolderStagingRepository>();
+            _isLiveLoggerActive = false;
+            App.LogViewer.IncrementIfInactiveAction = IncrementUnreadIfInactive;
+        }
+
+        public void IncrementUnreadIfInactive()
+        {
+            if (!Volatile.Read(ref _isLiveLoggerActive))
+            {
+                Interlocked.Increment(ref _unreadPending);
+
+                Application.Current.Dispatcher.BeginInvoke((Action)(() =>
+                {
+                    var x = Interlocked.Exchange(ref _unreadPending, 0);
+                    if (x > 0) UnreadErrors += x;
+                }), System.Windows.Threading.DispatcherPriority.Background);
+            }
+        }
+        public void ResetUnread()
+        {
+            // obavezno na UI thread-u
+            if (!Application.Current.Dispatcher.CheckAccess())
+            {
+                Application.Current.Dispatcher.BeginInvoke((Action)ResetUnread);
+                return;
+            }
+
+            // poništi i pending i prikazani broj
+            Interlocked.Exchange(ref _unreadPending, 0);
+            UnreadErrors = 0;
         }
 
         private async void btnLoad_Click(object sender, RoutedEventArgs e)
@@ -332,6 +362,13 @@ namespace Alfresco.App.UserControls
             {
                 MessageBox.Show($"Error: {ex.Message}");
             }
+        }
+
+        private void TabControl_SelectionChanged(object sender, SelectionChangedEventArgs e)
+        {
+            _isLiveLoggerActive = (tcMain.SelectedIndex == 1); 
+            if (_isLiveLoggerActive)
+                ResetUnread();
         }
     }
 }

@@ -17,6 +17,19 @@ namespace Alfresco.App.UserControls
     /// </summary>
     public partial class LiveLogViewer : UserControl
     {
+        public static readonly DependencyProperty IncrementIfInactiveActionProperty =
+        DependencyProperty.Register(
+            nameof(IncrementIfInactiveAction),
+            typeof(Action),
+            typeof(LiveLogViewer),
+            new PropertyMetadata(null));
+
+        public Action? IncrementIfInactiveAction
+        {
+            get => (Action?)GetValue(IncrementIfInactiveActionProperty);
+            set => SetValue(IncrementIfInactiveActionProperty, value);
+        }
+
         private readonly ObservableCollection<LogEntry> _allLogs;
         private readonly ObservableCollection<LogEntry> _filteredLogs;
         private readonly DispatcherTimer _updateTimer;
@@ -80,6 +93,11 @@ namespace Alfresco.App.UserControls
             lock (_queueLock)
             {
                 _pendingLogs.Enqueue(logEntry);
+            }
+
+            if (level == LogLevel.Error || level == LogLevel.Critical)
+            {
+                IncrementIfInactiveAction?.Invoke();
             }
         }
 

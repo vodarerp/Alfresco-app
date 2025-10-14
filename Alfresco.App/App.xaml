@@ -1,12 +1,12 @@
 ﻿<Application x:Class="Alfresco.App.App"
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-             xmlns:local="clr-namespace:Alfresco.App" 
+             xmlns:local="clr-namespace:Alfresco.App"             
              StartupUri="MainWindow.xaml">
     <Application.Resources>
         <ResourceDictionary>
-            <ResourceDictionary.MergedDictionaries>
-                <!-- Globalni stilovi -->
+            <ResourceDictionary.MergedDictionaries>                <!-- Globalni stilovi -->
+               
                 <ResourceDictionary Source="Resources/GlobalStyles.xaml"/>
             </ResourceDictionary.MergedDictionaries>
         </ResourceDictionary>

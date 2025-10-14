@@ -6,6 +6,7 @@
              xmlns:local="clr-namespace:Alfresco.App.UserControls"
              xmlns:workerstate="clr-namespace:Alfresco.App.UserControls.WorkerState"
              xmlns:app="clr-namespace:Alfresco.App"
+            
              mc:Ignorable="d"  
              d:DesignHeight="550" d:DesignWidth="800"            
              >
@@ -14,7 +15,7 @@
             <RowDefinition Height="*"></RowDefinition>
             <RowDefinition Height="Auto"></RowDefinition>
         </Grid.RowDefinitions>
-        <TabControl Grid.Row="0" SelectedIndex="0" >
+        <TabControl x:Name="tcMain" Grid.Row="0" SelectedIndex="0" SelectionChanged="TabControl_SelectionChanged" >
             <TabItem Header="Dashboard">
                 <Grid x:Name="MainGrid" Grid.Row="0">
                     <Grid.ColumnDefinitions>
@@ -70,8 +71,52 @@
                         </Grid>
                     </Grid>
                 </Grid>
-            </TabItem>   
-            <TabItem Header="LiveLogger">
+            </TabItem>
+            
+            <TabItem >
+                <TabItem.Header>
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto"/>
+                            <ColumnDefinition Width="Auto"/>
+                        </Grid.ColumnDefinitions>
+                        <Grid  Grid.Column="1" Margin="0,-3,0,0" HorizontalAlignment="Right"
+                               VerticalAlignment="Top">
+                            <Grid.Style>
+                                <Style TargetType="Grid">
+                                    <Setter Property="Visibility" Value="Visible"/>
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding UnreadErrors}" Value="0">
+                                            <Setter Property="Visibility" Value="Collapsed"/>
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </Grid.Style>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="Auto" />
+                            </Grid.RowDefinitions>
+                            <TextBlock Grid.Row="0" Text="{Binding UnreadErrors}" FontSize="10" HorizontalAlignment="Right"                                       
+                                      Foreground="Black" Panel.ZIndex="1"
+                                       />
+                            <TextBlock Grid.Row="1" FontFamily="Segoe Fluent Icons" Text="&#xe783;"
+                                        Margin="0,-4,-2,0"  Foreground="Red"
+                                        HorizontalAlignment="Center" VerticalAlignment="Center"
+                                       FontSize="18" />
+                            
+                        </Grid>
+                        <TextBlock Grid.Column="0" Text="LiveLogger"  
+                                   VerticalAlignment="Center" 
+                                   Margin="0,0,3,0"/>
+                        <!--<Border x:Name="Badge" Grid.Column="1" 
+                                HorizontalAlignment="Right" VerticalAlignment="Top"
+                        Background="#E74C3C" CornerRadius="8"
+                        MinWidth="18" Height="18" Padding="0"
+                        Visibility="Visible">
+                            <TextBlock Text="10" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>-->
+                    </Grid>                    
+                </TabItem.Header>
                 <ContentControl Content="{x:Static app:App.LogViewer}"/>
             </TabItem>
 
