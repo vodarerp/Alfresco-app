@@ -1,8 +1,8 @@
-﻿using Alfresco.App.Helpers;
+﻿using Alfresco.Abstraction.Interfaces;
+using Alfresco.Abstraction.Models;
+using Alfresco.App.Helpers;
 using Alfresco.App.Logging;
 using Alfresco.App.UserControls;
-using Alfresco.Abstraction.Interfaces;
-using Alfresco.Abstraction.Models;
 using Alfresco.Client;
 using Alfresco.Client.Handlers;
 using Alfresco.Client.Helpers;
@@ -19,6 +19,7 @@ using Microsoft.Extensions.Options;
 using Migration.Abstraction.Interfaces;
 using Migration.Abstraction.Interfaces.Services;
 using Migration.Abstraction.Interfaces.Wrappers;
+using Migration.Infrastructure.Implementation.Alfresco;
 // TODO: Uncomment when external APIs are available
 // using Migration.Abstraction.Models;
 // using Migration.Infrastructure.Implementation;
@@ -141,7 +142,7 @@ namespace Alfresco.App
                         //.AddPolicyHandler(GetCircuitBreakerPolicy());
 
                     services.Configure<OracleOptions>(context.Configuration.GetSection("Oracle"));
-
+                    services.Configure<AlfrescoDbOptions>(context.Configuration.GetSection(AlfrescoDbOptions.SectionName));
                     services.AddSingleton(sp => sp.GetRequiredService<IOptions<OracleOptions>>().Value);
 
                     // =====================================================================================
@@ -268,6 +269,8 @@ namespace Alfresco.App
                     services.AddTransient<IMoveReader, MoveReader>();
                     services.AddTransient<IMoveExecutor, MoveExecutor>();
                     services.AddSingleton<IMoveService, MoveService>();
+
+                    services.AddSingleton<IAlfrescoDbReader, AlfrescoDbReader>();
 
                     //
 

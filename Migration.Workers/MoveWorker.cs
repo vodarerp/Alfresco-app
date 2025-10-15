@@ -98,6 +98,48 @@ namespace Migration.Workers
 
         public Exception? LastError { get; private set; }
 
+        #region Progress Tracking
+        #region -TotalItems- property
+        private long _TotalItems;
+        public long TotalItems
+        {
+            get { return _TotalItems; }
+            set
+            {
+                if (_TotalItems != value)
+                {
+                    _TotalItems = value;
+                    NotifyPropertyChanged();
+                    NotifyPropertyChanged(nameof(RemainingItems));
+                    NotifyPropertyChanged(nameof(ProgressPercentage));
+                }
+            }
+        }
+        #endregion
+
+        #region -ProcessedItems- property
+        private long _ProcessedItems;
+        public long ProcessedItems
+        {
+            get { return _ProcessedItems; }
+            set
+            {
+                if (_ProcessedItems != value)
+                {
+                    _ProcessedItems = value;
+                    NotifyPropertyChanged();
+                    NotifyPropertyChanged(nameof(RemainingItems));
+                    NotifyPropertyChanged(nameof(ProgressPercentage));
+                }
+            }
+        }
+        #endregion
+
+        public long RemainingItems => Math.Max(0, TotalItems - ProcessedItems);
+
+        public double ProgressPercentage => TotalItems > 0 ? (ProcessedItems * 100.0 / TotalItems) : 0.0;
+        #endregion
+
         public MoveWorker(ILoggerFactory logger, IServiceProvider sp)
         {
             //_fileLogger = logger;
@@ -179,7 +221,14 @@ namespace Migration.Workers
                         var svc = scope.ServiceProvider.GetRequiredService<IMoveService>();
                         _fileLogger.LogInformation("Starting RunLoopAsync ....");
                         using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken, _cts.Token);
-                        await svc.RunLoopAsync(linkedCts.Token).ConfigureAwait(false);
+
+                        // Progress callback to update UI
+                        await svc.RunLoopAsync(linkedCts.Token, progress =>
+                        {
+                            TotalItems = progress.TotalItems;
+                            ProcessedItems = progress.ProcessedItems;
+                        }).ConfigureAwait(false);
+
                         _fileLogger.LogInformation("Worker finised {time}!", DateTime.Now);
                     }
                     catch (OperationCanceledException)

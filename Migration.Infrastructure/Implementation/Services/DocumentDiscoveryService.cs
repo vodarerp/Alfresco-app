@@ -571,6 +571,11 @@ namespace Migration.Infrastructure.Implementation.Services
             }
         }
 
+        public Task RunLoopAsync(CancellationToken ct, Action<WorkerProgress>? progressCallback)
+        {
+            throw new NotImplementedException();
+        }
+
 
         #endregion
 

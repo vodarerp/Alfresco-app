@@ -49,7 +49,7 @@ namespace Alfresco.Client.Implementation
             var body = await getResponse.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
             if (!getResponse.IsSuccessStatusCode)
                 throw new AlfrescoException("Neuspešan odgovor pri čitanju root čvora.", (int)getResponse.StatusCode, body); // izbaciti
-
+            
             var toRet = JsonConvert.DeserializeObject<NodeChildrenResponse>(body);
             return toRet;
         }

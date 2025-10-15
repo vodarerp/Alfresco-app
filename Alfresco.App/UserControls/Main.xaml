@@ -46,7 +46,7 @@
                                 </DataGridTemplateColumn>
                             </DataGrid.Columns>
                         </DataGrid>-->
-                        <DataGrid  x:Name="dataGridOracle" Grid.Row="1"  Margin="0" AutoGenerateColumns="false" ItemsSource="{Binding Documents}" IsReadOnly="True">
+                        <!--<DataGrid  x:Name="dataGridOracle" Grid.Row="1"  Margin="0" AutoGenerateColumns="false" ItemsSource="{Binding Documents}" IsReadOnly="True">
                             <DataGrid.Columns>
                                 <DataGridTemplateColumn Header="ID" Width="*">
                                     <DataGridTemplateColumn.CellTemplate>
@@ -63,7 +63,8 @@
                                     </DataGridTemplateColumn.CellTemplate>
                                 </DataGridTemplateColumn>
                             </DataGrid.Columns>
-                        </DataGrid>
+                        </DataGrid>-->
+                        <workerstate:WorkerMonitorWrapper Grid.Row="1"/>
                     </Grid>
                     <Grid Grid.Column="0">
                         <Grid Grid.Row="1">

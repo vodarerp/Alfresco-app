@@ -99,7 +99,7 @@ namespace Migration.Infrastructure.Implementation.Services
                 _cursor = page.Next;
             }
 
-            Interlocked.Add(ref _totalInserted, inserted);
+            Interlocked.Add(ref _totalInserted, foldersToInsert.Count);
 
             // Save checkpoint after successful batch
             if (!ct.IsCancellationRequested)
@@ -208,7 +208,155 @@ namespace Migration.Infrastructure.Implementation.Services
                 batchCounter - 1, _totalInserted);
         }
 
+        public async Task RunLoopAsync(CancellationToken ct, Action<WorkerProgress>? progressCallback)
+        {
+            var batchCounter = 1;
+            var emptyResultCounter = 0;
+            var delay = _options.Value.IdleDelayInMs;
+            var maxEmptyResults = _options.Value.BreakEmptyResults;
+            var batchSize = _options.Value.FolderDiscovery.BatchSize ?? _options.Value.BatchSize;
 
+            _fileLogger.LogInformation("FolderDiscovery worker started");
+
+            // Note: FolderDiscovery doesn't have IN PROGRESS state issues
+            // because it doesn't mark folders as IN PROGRESS during processing
+            // It inserts directly to staging tables
+
+            // Load checkpoint to resume from last position
+            await LoadCheckpointAsync(ct).ConfigureAwait(false);
+
+            // Reset metrics if starting fresh
+            if (_cursor == null)
+            {
+                _totalInserted = 0;
+            }
+
+            // Try to get total count
+            long totalCount = 0;
+            try
+            {
+                var rootDiscoveryId = _options.Value.RootDiscoveryFolderId;
+                var nameFilter = _options.Value.FolderDiscovery.NameFilter ?? "-";
+
+                _fileLogger.LogInformation("Attempting to count total folders...");
+                totalCount = await _reader.CountTotalFoldersAsync(rootDiscoveryId, nameFilter, ct).ConfigureAwait(false);
+
+                if (totalCount >= 0)
+                {
+                    _fileLogger.LogInformation("Total folders to discover: {TotalCount}", totalCount);
+                }
+                else
+                {
+                    _fileLogger.LogWarning("Count not supported by Alfresco, progress will show processed items only");
+                }
+            }
+            catch (Exception ex)
+            {
+                _fileLogger.LogWarning(ex, "Failed to count total folders, continuing without total count");
+                totalCount = 0;
+            }
+
+            // Initial progress report
+            var progress = new WorkerProgress
+            {
+                TotalItems = totalCount, // Will be 0 if count failed
+                ProcessedItems = _totalInserted,
+                BatchSize = batchSize,
+                CurrentBatch = 0,
+                Message = totalCount > 0
+                    ? $"Starting folder discovery... (Total: {totalCount})"
+                    : "Starting folder discovery..."
+            };
+            progressCallback?.Invoke(progress);
+
+            while (!ct.IsCancellationRequested)
+            {
+                using var batchScope = _fileLogger.BeginScope(new Dictionary<string, object>
+                {
+                    ["BatchCounter"] = batchCounter
+                });
+
+                try
+                {
+                    _fileLogger.LogDebug("Starting batch {BatchCounter}", batchCounter);
+
+                    var result = await RunBatchAsync(ct).ConfigureAwait(false);
+
+                    // Update progress after each batch
+                    progress.ProcessedItems = _totalInserted;
+                    progress.CurrentBatch = batchCounter;
+                    progress.CurrentBatchCount = result.InsertedCount;
+                    progress.SuccessCount = result.InsertedCount;
+                    progress.FailedCount = 0;
+                    progress.Timestamp = DateTimeOffset.UtcNow;
+                    progress.Message = result.InsertedCount > 0
+                        ? $"Discovered {result.InsertedCount} folders in batch {batchCounter}"
+                        : "No more folders to discover";
+
+                    progressCallback?.Invoke(progress);
+
+                    if (result.InsertedCount == 0)
+                    {
+                        emptyResultCounter++;
+                        _fileLogger.LogDebug(
+                            "Empty result ({Counter}/{Max})",
+                            emptyResultCounter, maxEmptyResults);
+
+                        if (emptyResultCounter >= maxEmptyResults)
+                        {
+                            _fileLogger.LogInformation(
+                                "Breaking after {Count} consecutive empty results",
+                                emptyResultCounter);
+                            _dbLogger.LogInformation(
+                                "Breaking after {Count} consecutive empty results",
+                                emptyResultCounter);
+
+                            progress.Message = $"Completed: {_totalInserted} folders discovered";
+                            progressCallback?.Invoke(progress);
+                            break;
+                        }
+
+                        await Task.Delay(delay, ct).ConfigureAwait(false);
+                    }
+                    else
+                    {
+                        emptyResultCounter = 0; // Reset counter on success
+
+                        var betweenDelay = _options.Value.FolderDiscovery.DelayBetweenBatchesInMs
+                            ?? _options.Value.DelayBetweenBatchesInMs;
+
+                        if (betweenDelay > 0)
+                        {
+                            await Task.Delay(betweenDelay, ct).ConfigureAwait(false);
+                        }
+                    }
+
+                    batchCounter++;
+                }
+                catch (OperationCanceledException)
+                {
+                    _dbLogger.LogInformation("FolderDiscovery worker cancelled");
+                    progress.Message = $"Cancelled after discovering {_totalInserted} folders";
+                    progressCallback?.Invoke(progress);
+                    throw;
+                }
+                catch (Exception ex)
+                {
+                    _dbLogger.LogError(ex, "Error in batch {BatchCounter}", batchCounter);
+
+                    progress.Message = $"Error in batch {batchCounter}: {ex.Message}";
+                    progressCallback?.Invoke(progress);
+
+                    // Exponential backoff on error
+                    await Task.Delay(delay * 2, ct).ConfigureAwait(false);
+                    batchCounter++;
+                }
+            }
+
+            _fileLogger.LogInformation(
+                "FolderDiscovery worker completed after {Count} batches. Total: {Total} folders inserted",
+                batchCounter - 1, _totalInserted);
+        }
 
         #region private methods
 
@@ -337,6 +485,8 @@ namespace Migration.Infrastructure.Implementation.Services
                 throw;
             }
         }
+
+       
 
 
         #endregion

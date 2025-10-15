@@ -1,0 +1,144 @@
+<UserControl x:Class="Alfresco.App.UserControls.WorkerState.WorkerMonitorCard"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             xmlns:local="clr-namespace:Alfresco.App.UserControls.WorkerState"
+             mc:Ignorable="d"
+             x:Name="root"
+             d:DesignHeight="200" d:DesignWidth="400">
+    <Border BorderBrush="#CCCCCC" BorderThickness="1" CornerRadius="8" Padding="15" Margin="5" Background="White">
+        <Border.Effect>
+            <DropShadowEffect Color="Gray" BlurRadius="8" ShadowDepth="2" Opacity="0.3"/>
+        </Border.Effect>
+        <Grid>
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="Auto"/>
+            </Grid.RowDefinitions>
+
+            <!-- Worker Name and Toggle -->
+            <Grid Grid.Row="0" Margin="0,0,0,10">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="Auto"/>
+                </Grid.ColumnDefinitions>
+
+                <TextBlock Grid.Column="0" Text="{Binding Worker.DisplayName, ElementName=root}"
+                          FontSize="16" FontWeight="Bold" VerticalAlignment="Center"/>
+
+                <ToggleButton Grid.Column="1" x:Name="tglBtn" Width="50" Height="25"
+                             IsChecked="{Binding Worker.IsEnabled, ElementName=root}"
+                             Click="tglBtn_Click">
+                    <ToggleButton.Style>
+                        <Style TargetType="ToggleButton">
+                            <Setter Property="Template">
+                                <Setter.Value>
+                                    <ControlTemplate TargetType="ToggleButton">
+                                        <Border CornerRadius="12.5" Background="{TemplateBinding Background}">
+                                            <Ellipse x:Name="Knob" Width="19" Height="19" Fill="White" Margin="3"/>
+                                        </Border>
+                                        <ControlTemplate.Triggers>
+                                            <Trigger Property="IsChecked" Value="True">
+                                                <Setter TargetName="Knob" Property="Margin" Value="28,3,3,3"/>
+                                                <Setter Property="Background" Value="#4CAF50"/>
+                                            </Trigger>
+                                            <Trigger Property="IsChecked" Value="False">
+                                                <Setter TargetName="Knob" Property="Margin" Value="3,3,28,3"/>
+                                                <Setter Property="Background" Value="#BDBDBD"/>
+                                            </Trigger>
+                                        </ControlTemplate.Triggers>
+                                    </ControlTemplate>
+                                </Setter.Value>
+                            </Setter>
+                        </Style>
+                    </ToggleButton.Style>
+                </ToggleButton>
+            </Grid>
+
+            <!-- Status -->
+            <Grid Grid.Row="1" Margin="0,0,0,10">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="*"/>
+                </Grid.ColumnDefinitions>
+
+                <TextBlock Grid.Column="0" Text="Status: " FontWeight="SemiBold" FontSize="13"/>
+                <Border Grid.Column="1" x:Name="statusBorder" CornerRadius="3" Padding="5,2" HorizontalAlignment="Left">
+                    <TextBlock x:Name="txtState" Text="{Binding Worker.State, ElementName=root}"
+                              FontSize="13" FontWeight="SemiBold"/>
+                </Border>
+            </Grid>
+
+            <!-- Progress Bar -->
+            <ProgressBar Grid.Row="2" Height="25"
+                        Value="{Binding Worker.ProgressPercentage, ElementName=root, Mode=OneWay}"
+                        Minimum="0" Maximum="100" Margin="0,0,0,8">
+                <ProgressBar.Style>
+                    <Style TargetType="ProgressBar">
+                        <Setter Property="Foreground" Value="#2196F3"/>
+                        <Style.Triggers>
+                            <DataTrigger Binding="{Binding Worker.State, ElementName=root}" Value="Failed">
+                                <Setter Property="Foreground" Value="#F44336"/>
+                            </DataTrigger>
+                            <DataTrigger Binding="{Binding Worker.State, ElementName=root}" Value="Idle">
+                                <Setter Property="Foreground" Value="#9E9E9E"/>
+                            </DataTrigger>
+                        </Style.Triggers>
+                    </Style>
+                </ProgressBar.Style>
+            </ProgressBar>
+
+            <!-- Progress Percentage Text Overlay -->
+            <TextBlock Grid.Row="2"
+                      Text="{Binding Worker.ProgressPercentage, ElementName=root, StringFormat={}{0:F1}%}"
+                      HorizontalAlignment="Center" VerticalAlignment="Center"
+                      FontSize="12" FontWeight="Bold" Foreground="#333333"/>
+
+            <!-- Statistics -->
+            <Grid Grid.Row="3" Margin="0,5,0,5">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="*"/>
+                </Grid.ColumnDefinitions>
+
+                <StackPanel Grid.Column="0" Orientation="Horizontal">
+                    <TextBlock Text="Obrađeno: " FontSize="12" Foreground="#666666"/>
+                    <TextBlock Text="{Binding Worker.ProcessedItems, ElementName=root}"
+                              FontSize="12" FontWeight="Bold" Foreground="#4CAF50"/>
+                </StackPanel>
+
+                <StackPanel Grid.Column="1" Orientation="Horizontal" HorizontalAlignment="Right">
+                    <TextBlock Text="Ukupno: " FontSize="12" Foreground="#666666"/>
+                    <TextBlock Text="{Binding Worker.TotalItems, ElementName=root}"
+                              FontSize="12" FontWeight="Bold" Foreground="#2196F3"/>
+                </StackPanel>
+            </Grid>
+
+            <!-- Remaining Items -->
+            <Grid Grid.Row="4" Margin="0,0,0,5">
+                <StackPanel Orientation="Horizontal">
+                    <TextBlock Text="Preostalo: " FontSize="12" Foreground="#666666"/>
+                    <TextBlock Text="{Binding Worker.RemainingItems, ElementName=root}"
+                              FontSize="12" FontWeight="Bold" Foreground="#FF9800"/>
+                </StackPanel>
+            </Grid>
+
+            <!-- Last Activity -->
+            <Grid Grid.Row="5" Margin="0,5,0,0">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                </Grid.ColumnDefinitions>
+
+                <TextBlock FontSize="11" Foreground="#999999">
+                    <Run Text="Poslednji start: "/>
+                    <Run Text="{Binding Worker.LastStarted, ElementName=root, StringFormat='{}{0:g}', TargetNullValue='N/A'}"/>
+                </TextBlock>
+            </Grid>
+        </Grid>
+    </Border>
+</UserControl>

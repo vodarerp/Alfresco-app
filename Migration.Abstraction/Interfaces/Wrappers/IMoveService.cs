@@ -13,5 +13,6 @@ namespace Migration.Abstraction.Interfaces.Wrappers
         Task<MoveBatchResult> RunBatchAsync(  CancellationToken ct);
 
         Task RunLoopAsync( CancellationToken ct);
+        Task RunLoopAsync( CancellationToken ct, Action<WorkerProgress>? progressCallback);
     }
 }

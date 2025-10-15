@@ -18,6 +18,12 @@ namespace Migration.Workers.Interfaces
         DateTimeOffset? LastStopped { get; }
         Exception? LastError { get; }
 
+        // Progress tracking
+        long TotalItems { get; }
+        long ProcessedItems { get; }
+        long RemainingItems { get; }
+        double ProgressPercentage { get; }
+
         void StopService();
         void StartService();
     }

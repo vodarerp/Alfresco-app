@@ -15,10 +15,12 @@ namespace Migration.Infrastructure.Implementation.Folder
     public class FolderReader : IFolderReader
     {
         private readonly IAlfrescoReadApi _read;
+        private readonly IAlfrescoDbReader? _dbReader;
 
-        public FolderReader(IAlfrescoReadApi read)
+        public FolderReader(IAlfrescoReadApi read, IAlfrescoDbReader? dbReader = null)
         {
-                _read = read;
+            _read = read;
+            _dbReader = dbReader;
         }
 
         //public sealed record FolderReaderRequest(string RootId, string NameFilter, int Skip, int Take);
@@ -77,6 +79,62 @@ namespace Migration.Infrastructure.Implementation.Folder
             }
 
             return new FolderReaderResult(Items: result, next);
+        }
+
+        public async Task<long> CountTotalFoldersAsync(string rootId, string nameFilter, CancellationToken ct)
+        {
+            // Option 1: Try direct DB query first (most accurate)
+            if (_dbReader != null)
+            {
+                try
+                {
+                    var dbCount = await _dbReader.CountTotalFoldersAsync(rootId, nameFilter, ct).ConfigureAwait(false);
+                    if (dbCount >= 0)
+                    {
+                        return dbCount;
+                    }
+                }
+                catch
+                {
+                    // Fall through to CMIS attempt
+                }
+            }
+
+            // Option 2: Try CMIS count query (may not be supported)
+            var cmsLike = string.IsNullOrWhiteSpace(nameFilter) ? "" : nameFilter;
+            var countQuery = new StringBuilder();
+            countQuery.Append("SELECT cmis:objectId FROM cmis:folder ")
+                      .Append($"WHERE IN_TREE('{rootId}') ");
+
+            var req = new PostSearchRequest()
+            {
+                Query = new QueryRequest()
+                {
+                    Language = "cmis",
+                    Query = countQuery.ToString()
+                },
+                Paging = new PagingRequest()
+                {
+                    MaxItems = 1,
+                    SkipCount = 0
+                }
+            };
+
+            try
+            {
+                var result = await _read.SearchAsync(req, ct).ConfigureAwait(false);
+
+                if (result?.List?.Pagination?.TotalItems != null)
+                {
+                    return result.List.Pagination.TotalItems;
+                }
+
+                return -1; // Count not available
+            }
+            catch (Exception)
+            {
+                return -1; // Count not available
+            }
         }
     }
 }
