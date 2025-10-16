@@ -6,12 +6,32 @@
 -- ============================================================================
 
 -- Drop table if exists (use with caution in production)
-DROP TABLE if exists DocStaging CASCADE CONSTRAINTS;
+BEGIN
+   EXECUTE IMMEDIATE 'DROP TABLE DocStaging CASCADE CONSTRAINTS';
+EXCEPTION
+   WHEN OTHERS THEN NULL;
+END;
+/
+
+BEGIN
+   EXECUTE IMMEDIATE 'DROP SEQUENCE DocStaging_SEQ';
+EXCEPTION
+   WHEN OTHERS THEN NULL;
+END;
+/
+
+-- Create sequence for ID generation
+CREATE SEQUENCE DocStaging_SEQ
+    START WITH 1
+    INCREMENT BY 1
+    NOCACHE
+    NOCYCLE;
 
 CREATE TABLE DocStaging
 (
     -- Primary Key
-    Id NUMBER(19) GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    Id NUMBER(19) DEFAULT DocStaging_SEQ.NEXTVAL NOT NULL,
+    CONSTRAINT pk_docstaging PRIMARY KEY (Id),
 
     -- Document Identification
     NodeId VARCHAR2(500) NOT NULL,              -- Alfresco NodeId of document
@@ -126,10 +146,13 @@ COMMENT ON COLUMN DocStaging.ModifiedDateAlf IS
 BEGIN
     DBMS_STATS.GATHER_TABLE_STATS(
         ownname => USER,
-        tabname => 'DocStaging',
+        tabname => 'DOCSTAGING',
         estimate_percent => DBMS_STATS.AUTO_SAMPLE_SIZE,
         cascade => TRUE
     );
+EXCEPTION
+    WHEN OTHERS THEN
+        DBMS_OUTPUT.PUT_LINE('Warning: Unable to gather statistics - ' || SQLERRM);
 END;
 /
 

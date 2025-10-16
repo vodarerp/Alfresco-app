@@ -17,17 +17,15 @@ namespace Alfresco.App.UserControls
     /// </summary>
     public partial class LiveLogViewer : UserControl
     {
-        public static readonly DependencyProperty IncrementIfInactiveActionProperty =
-        DependencyProperty.Register(
-            nameof(IncrementIfInactiveAction),
-            typeof(Action),
-            typeof(LiveLogViewer),
-            new PropertyMetadata(null));
+        // Changed from DependencyProperty to simple field for thread-safe access
+        // DependencyProperty access (GetValue) must be on UI thread, causing issues when called from background threads
+        private Action? _incrementIfInactiveAction;
+        private readonly object _actionLock = new object();
 
         public Action? IncrementIfInactiveAction
         {
-            get => (Action?)GetValue(IncrementIfInactiveActionProperty);
-            set => SetValue(IncrementIfInactiveActionProperty, value);
+            get { lock (_actionLock) { return _incrementIfInactiveAction; } }
+            set { lock (_actionLock) { _incrementIfInactiveAction = value; } }
         }
 
         private readonly ObservableCollection<LogEntry> _allLogs;
@@ -57,6 +55,10 @@ namespace Alfresco.App.UserControls
             _pendingLogs = new Queue<LogEntry>();
             LogListBox.ItemsSource = _filteredLogs;
 
+            // Enable cross-thread collection access (WPF will auto-marshal to UI thread)
+            System.Windows.Data.BindingOperations.EnableCollectionSynchronization(_allLogs, _queueLock);
+            System.Windows.Data.BindingOperations.EnableCollectionSynchronization(_filteredLogs, _queueLock);
+
             // Setup timer for batch processing logs (optimized for performance)
             _updateTimer = new DispatcherTimer(DispatcherPriority.Background)
             {
@@ -73,6 +75,7 @@ namespace Alfresco.App.UserControls
         /// <summary>
         /// Add a log entry (call this from your logging infrastructure)
         /// OPTIMIZED: Queues log for batch processing instead of immediate UI update
+        /// Thread-safe: Can be called from any thread
         /// </summary>
         public void AddLog(LogLevel level, string message, string loggerName = "")
         {
@@ -95,9 +98,29 @@ namespace Alfresco.App.UserControls
                 _pendingLogs.Enqueue(logEntry);
             }
 
+            // Marshal IncrementIfInactiveAction to UI thread if needed
             if (level == LogLevel.Error || level == LogLevel.Critical)
             {
-                IncrementIfInactiveAction?.Invoke();
+                // Thread-safe read of action (no DependencyProperty access needed)
+                Action? actionToInvoke;
+                lock (_actionLock)
+                {
+                    actionToInvoke = _incrementIfInactiveAction;
+                }
+
+                if (actionToInvoke != null)
+                {
+                    // Check if we're already on UI thread
+                    if (Dispatcher.CheckAccess())
+                    {
+                        actionToInvoke.Invoke();
+                    }
+                    else
+                    {
+                        // Marshal to UI thread
+                        Dispatcher.BeginInvoke(actionToInvoke, DispatcherPriority.Normal);
+                    }
+                }
             }
         }
 
@@ -185,7 +208,7 @@ namespace Alfresco.App.UserControls
             if (_currentFilter != LogLevel.Trace)
             {
                 var logLevel = Enum.Parse<LogLevel>(logEntry.Level, true);
-                if (logLevel < _currentFilter)
+                if (logLevel != _currentFilter)
                     return false;
             }
 
@@ -197,6 +220,22 @@ namespace Alfresco.App.UserControls
             }
 
             return true;
+        }
+
+        /// <summary>
+        /// Refreshes the filtered logs view by reapplying all filters.
+        /// Call this when the control becomes visible to show accumulated logs.
+        /// Thread-safe: Can be called from any thread (will marshal to UI thread if needed)
+        /// </summary>
+        public void RefreshView()
+        {
+            if (!Dispatcher.CheckAccess())
+            {
+                Dispatcher.BeginInvoke(RefreshView, DispatcherPriority.Normal);
+                return;
+            }
+
+            ApplyFilters();
         }
 
         private void ApplyFilters()
@@ -212,6 +251,12 @@ namespace Alfresco.App.UserControls
             }
 
             UpdateFooter();
+
+            // Auto-scroll to latest log after refresh
+            if (ChkAutoScroll.IsChecked == true && _filteredLogs.Count > 0)
+            {
+                LogListBox.ScrollIntoView(_filteredLogs.Last());
+            }
         }
 
         private void UpdateStatistics(LogLevel level, int delta)
@@ -255,14 +300,28 @@ namespace Alfresco.App.UserControls
 
         private Brush GetColorForLevel(LogLevel level)
         {
-            return level switch
+            //return level switch
+            //{
+            //    LogLevel.Trace or LogLevel.Debug => new SolidColorBrush(Color.FromRgb(158, 158, 158)), // Gray
+            //    LogLevel.Information => new SolidColorBrush(Color.FromRgb(33, 150, 243)), // Blue
+            //    LogLevel.Warning => new SolidColorBrush(Color.FromRgb(255, 152, 0)), // Orange
+            //    LogLevel.Error or LogLevel.Critical => new SolidColorBrush(Color.FromRgb(244, 67, 54)), // Red
+            //    _ => Brushes.Black
+            //};
+            SolidColorBrush brush = level switch
             {
                 LogLevel.Trace or LogLevel.Debug => new SolidColorBrush(Color.FromRgb(158, 158, 158)), // Gray
-                LogLevel.Information => new SolidColorBrush(Color.FromRgb(33, 150, 243)), // Blue
-                LogLevel.Warning => new SolidColorBrush(Color.FromRgb(255, 152, 0)), // Orange
+                LogLevel.Information => new SolidColorBrush(Color.FromRgb(33, 150, 243)),  // Blue
+                LogLevel.Warning => new SolidColorBrush(Color.FromRgb(255, 152, 0)),   // Orange
                 LogLevel.Error or LogLevel.Critical => new SolidColorBrush(Color.FromRgb(244, 67, 54)), // Red
-                _ => Brushes.Black
+                _ => new SolidColorBrush(Colors.Black)
             };
+
+            // SolidColorBrush je Freezable, pa mora biti zamrznut
+            if (brush.CanFreeze)
+                brush.Freeze();
+
+            return brush;
         }
 
         private void SetActiveFilterButton(Button activeButton)

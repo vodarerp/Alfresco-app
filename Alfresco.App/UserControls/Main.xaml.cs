@@ -108,10 +108,20 @@ namespace Alfresco.App.UserControls
             Entries = new();
             _alfrescoWriteService = App.AppHost.Services.GetRequiredService<IAlfrescoWriteApi>();
             _alfrescoReadService = App.AppHost.Services.GetRequiredService<IAlfrescoReadApi>();
-            //_alfrescoService = App.AppHost.Services.GetRequiredService<IAlfrescoApi>(); 
+            //_alfrescoService = App.AppHost.Services.GetRequiredService<IAlfrescoApi>();
             _docStagingRepository = App.AppHost.Services.GetRequiredService<IDocStagingRepository>();
             _folderStagingRepository = App.AppHost.Services.GetRequiredService<IFolderStagingRepository>();
             _isLiveLoggerActive = false;
+
+            // Add LogViewer programmatically to avoid XAML binding thread issues
+            // This ensures LogViewer is created and bound on the same UI thread
+            Loaded += Main_Loaded;
+        }
+
+        private void Main_Loaded(object sender, RoutedEventArgs e)
+        {
+            // Set LogViewer content after control is loaded (on UI thread)
+            LiveLoggerTab.Content = App.LogViewer;
             App.LogViewer.IncrementIfInactiveAction = IncrementUnreadIfInactive;
         }
 
@@ -366,9 +376,13 @@ namespace Alfresco.App.UserControls
 
         private void TabControl_SelectionChanged(object sender, SelectionChangedEventArgs e)
         {
-            _isLiveLoggerActive = (tcMain.SelectedIndex == 1); 
+            _isLiveLoggerActive = (tcMain.SelectedIndex == 1);
             if (_isLiveLoggerActive)
+            {
                 ResetUnread();
+                // Refresh the log view to show accumulated logs when tab becomes active
+                App.LogViewer.RefreshView();
+            }
         }
     }
 }

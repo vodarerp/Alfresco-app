@@ -74,7 +74,7 @@
                 </Grid>
             </TabItem>
             
-            <TabItem >
+            <TabItem x:Name="LiveLoggerTab">
                 <TabItem.Header>
                     <Grid>
                         <Grid.ColumnDefinitions>
@@ -97,28 +97,28 @@
                                 <RowDefinition Height="Auto"/>
                                 <RowDefinition Height="Auto" />
                             </Grid.RowDefinitions>
-                            <TextBlock Grid.Row="0" Text="{Binding UnreadErrors}" FontSize="10" HorizontalAlignment="Right"                                       
+                            <TextBlock Grid.Row="0" Text="{Binding UnreadErrors}" FontSize="10" HorizontalAlignment="Right"
                                       Foreground="Black" Panel.ZIndex="1"
                                        />
                             <TextBlock Grid.Row="1" FontFamily="Segoe Fluent Icons" Text="&#xe783;"
                                         Margin="0,-4,-2,0"  Foreground="Red"
                                         HorizontalAlignment="Center" VerticalAlignment="Center"
                                        FontSize="18" />
-                            
+
                         </Grid>
-                        <TextBlock Grid.Column="0" Text="LiveLogger"  
-                                   VerticalAlignment="Center" 
+                        <TextBlock Grid.Column="0" Text="LiveLogger"
+                                   VerticalAlignment="Center"
                                    Margin="0,0,3,0"/>
-                        <!--<Border x:Name="Badge" Grid.Column="1" 
+                        <!--<Border x:Name="Badge" Grid.Column="1"
                                 HorizontalAlignment="Right" VerticalAlignment="Top"
                         Background="#E74C3C" CornerRadius="8"
                         MinWidth="18" Height="18" Padding="0"
                         Visibility="Visible">
                             <TextBlock Text="10" HorizontalAlignment="Center" VerticalAlignment="Center"/>
                         </Border>-->
-                    </Grid>                    
+                    </Grid>
                 </TabItem.Header>
-                <ContentControl Content="{x:Static app:App.LogViewer}"/>
+                <!-- LogViewer will be added programmatically in code-behind -->
             </TabItem>
 
         </TabControl>

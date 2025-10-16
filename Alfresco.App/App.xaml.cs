@@ -48,12 +48,40 @@ namespace Alfresco.App
     public partial class App : Application
     {
         public static IHost AppHost { get; private set; } = null!;
-        public static LiveLogViewer LogViewer { get; private set; } = null!;
+
+        // Lazy initialization to ensure LogViewer is created on UI thread at the right time
+        private static LiveLogViewer? _logViewer;
+        private static readonly object _logViewerLock = new object();
+
+        public static LiveLogViewer LogViewer
+        {
+            get
+            {
+                if (_logViewer == null)
+                {
+                    lock (_logViewerLock)
+                    {
+                        if (_logViewer == null)
+                        {
+                            // Create on UI thread if needed
+                            if (Current?.Dispatcher?.CheckAccess() == true)
+                            {
+                                _logViewer = new LiveLogViewer();
+                            }
+                            else
+                            {
+                                // Marshal to UI thread
+                                Current?.Dispatcher?.Invoke(() => _logViewer = new LiveLogViewer());
+                            }
+                        }
+                    }
+                }
+                return _logViewer!;
+            }
+        }
 
         public App()
         {
-            // Create global LiveLogViewer instance for UI monitoring
-            LogViewer = new LiveLogViewer();
 
             AppHost = Host.CreateDefaultBuilder()
                 .ConfigureServices((context, services) =>

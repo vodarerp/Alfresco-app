@@ -343,6 +343,7 @@ namespace Migration.Infrastructure.Implementation.Services
                 catch (Exception ex)
                 {
                     _dbLogger.LogError(ex, "Error in batch {BatchCounter}", batchCounter);
+                    _uiLogger.LogError(ex, "Error in batch {BatchCounter}", batchCounter);
 
                     progress.Message = $"Error in batch {batchCounter}: {ex.Message}";
                     progressCallback?.Invoke(progress);
@@ -480,7 +481,9 @@ namespace Migration.Infrastructure.Implementation.Services
             }
             catch (Exception ex)
             {
-                _dbLogger.LogError(ex, "Failed to insert {Count} folders", folders.Count);
+                //_dbLogger.LogError(ex, "Failed to insert {Count} folders", folders.Count);
+                //_uiLogger.LogError(ex, "Failed to insert {Count} folders", folders.Count);
+
                 await uow.RollbackAsync(ct: ct).ConfigureAwait(false);
                 throw;
             }
