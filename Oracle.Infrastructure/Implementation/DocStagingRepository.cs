@@ -61,16 +61,16 @@ namespace Oracle.Infrastructure.Implementation
         }
 
         public async Task<IReadOnlyList<DocStaging>> TakeReadyForProcessingAsync(int take, CancellationToken ct)
-        {            
+        {
 
             //var sql = @"select * from DocStaging
             //            where status = 'READY'
             //            and ROWNUM <= :take
             //            FOR UPDATE SKIP LOCKED";
 
-            var sql = @"select * from DocStaging  
-                         where status = 'READY'                           
-                         FETCH FIRST :take ROWS ONLY 
+            var sql = @"select * from DocStaging
+                         where status = 'READY'
+                         FETCH FIRST :take ROWS ONLY
                          FOR UPDATE SKIP LOCKED
                          ";
 
@@ -81,6 +81,18 @@ namespace Oracle.Infrastructure.Implementation
             var res = await Conn.QueryAsync<DocStaging>(cmd).ConfigureAwait(false);
 
             return res.AsList();
+        }
+
+        public async Task<long> CountReadyForProcessingAsync(CancellationToken ct)
+        {
+            var sql = @"select COUNT(*) from DocStaging
+                         where status = 'READY'";
+
+            var cmd = new CommandDefinition(sql, transaction: Tx, cancellationToken: ct);
+
+            var count = await Conn.ExecuteScalarAsync<long>(cmd).ConfigureAwait(false);
+
+            return count;
         }
     }
 }

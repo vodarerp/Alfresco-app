@@ -78,13 +78,13 @@ namespace Oracle.Infrastructure.Implementation
             //
             // FOR UPDATE SKIP LOCKED";
             //var sql = @"select * from FolderStaging
-            //            where status = 'READY'                        
-            //            FETCH FIRST :take ROWS ONLY                        
+            //            where status = 'READY'
+            //            FETCH FIRST :take ROWS ONLY
             //            FOR UPDATE SKIP LOCKED";
 
-            var sql = @$"select * from FolderStaging  
-                         where status = '{MigrationStatus.Ready.ToDbString()}'                           
-                         FETCH FIRST :take ROWS ONLY 
+            var sql = @$"select * from FolderStaging
+                         where status = '{MigrationStatus.Ready.ToDbString()}'
+                         FETCH FIRST :take ROWS ONLY
                          FOR UPDATE SKIP LOCKED
                          ";
 
@@ -95,6 +95,18 @@ namespace Oracle.Infrastructure.Implementation
             var res = await Conn.QueryAsync<FolderStaging>(cmd).ConfigureAwait(false);
 
             return res.AsList();
+        }
+
+        public async Task<long> CountReadyForProcessingAsync(CancellationToken ct)
+        {
+            var sql = @$"select COUNT(*) from FolderStaging
+                         where status = '{MigrationStatus.Ready.ToDbString()}'";
+
+            var cmd = new CommandDefinition(sql, transaction: Tx, cancellationToken: ct);
+
+            var count = await Conn.ExecuteScalarAsync<long>(cmd).ConfigureAwait(false);
+
+            return count;
         }
     }
 }

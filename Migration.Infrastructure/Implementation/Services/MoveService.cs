@@ -534,9 +534,147 @@ namespace Migration.Infrastructure.Implementation.Services
             }
         }
 
-        public Task RunLoopAsync(CancellationToken ct, Action<WorkerProgress>? progressCallback)
+        public async Task RunLoopAsync(CancellationToken ct, Action<WorkerProgress>? progressCallback)
         {
-            throw new NotImplementedException();
+            var emptyResultCounter = 0;
+            var delay = _options.Value.IdleDelayInMs;
+            var maxEmptyResults = _options.Value.BreakEmptyResults;
+            var batchSize = _options.Value.MoveService.BatchSize ?? _options.Value.BatchSize;
+
+            _fileLogger.LogInformation("Move worker started");
+
+            // Reset stuck documents from previous crashed run
+            await ResetStuckItemsAsync(ct).ConfigureAwait(false);
+
+            // Load checkpoint to resume from last position
+            await LoadCheckpointAsync(ct).ConfigureAwait(false);
+
+            // Start from next batch after checkpoint
+            var batchCounter = _batchCounter + 1;
+
+            // Try to get total count of documents to move
+            long totalCount = 0;
+            try
+            {
+                _fileLogger.LogInformation("Attempting to count total documents to move...");
+
+                await using var scope = _sp.CreateAsyncScope();
+                var docRepo = scope.ServiceProvider.GetRequiredService<IDocStagingRepository>();
+
+                totalCount = await docRepo.CountReadyForProcessingAsync(ct).ConfigureAwait(false);
+
+                if (totalCount >= 0)
+                {
+                    _fileLogger.LogInformation("Total documents to move: {TotalCount}", totalCount);
+                }
+                else
+                {
+                    _fileLogger.LogWarning("Count not available, progress will show processed items only");
+                }
+            }
+            catch (Exception ex)
+            {
+                _fileLogger.LogWarning(ex, "Failed to count total documents, continuing without total count");
+                totalCount = 0;
+            }
+
+            // Initial progress report
+            var progress = new WorkerProgress
+            {
+                TotalItems = totalCount, // Will be 0 if count failed
+                ProcessedItems = _totalMoved,
+                BatchSize = batchSize,
+                CurrentBatch = 0,
+                Message = totalCount > 0
+                    ? $"Starting move operation... (Total documents: {totalCount})"
+                    : "Starting move operation..."
+            };
+            progressCallback?.Invoke(progress);
+
+            while (!ct.IsCancellationRequested)
+            {
+                using var batchScope = _fileLogger.BeginScope(new Dictionary<string, object>
+                {
+                    ["BatchCounter"] = batchCounter
+                });
+
+                try
+                {
+                    _fileLogger.LogDebug("Starting batch {BatchCounter}", batchCounter);
+
+                    var result = await RunBatchAsync(ct).ConfigureAwait(false);
+
+                    // Update progress after each batch
+                    progress.ProcessedItems = _totalMoved;
+                    progress.CurrentBatch = batchCounter;
+                    progress.CurrentBatchCount = result.Done + result.Failed;
+                    progress.SuccessCount = result.Done;
+                    progress.FailedCount = result.Failed;
+                    progress.Timestamp = DateTimeOffset.UtcNow;
+                    progress.Message = (result.Done + result.Failed) > 0
+                        ? $"Moved {result.Done} documents in batch {batchCounter} ({result.Failed} failed)"
+                        : "No more documents to move";
+
+                    progressCallback?.Invoke(progress);
+
+                    if (result.Done == 0 && result.Failed == 0)
+                    {
+                        emptyResultCounter++;
+                        _fileLogger.LogDebug(
+                            "Empty result ({Counter}/{Max})",
+                            emptyResultCounter, maxEmptyResults);
+
+                        if (emptyResultCounter >= maxEmptyResults)
+                        {
+                            _fileLogger.LogInformation(
+                                "Breaking after {Count} consecutive empty results",
+                                emptyResultCounter);
+
+                            progress.Message = $"Completed: {_totalMoved} documents moved, {_totalFailed} failed";
+                            progressCallback?.Invoke(progress);
+                            break;
+                        }
+
+                        await Task.Delay(delay, ct).ConfigureAwait(false);
+                    }
+                    else
+                    {
+                        emptyResultCounter = 0; // Reset counter on success
+
+                        var betweenDelay = _options.Value.MoveService.DelayBetweenBatchesInMs
+                            ?? _options.Value.DelayBetweenBatchesInMs;
+
+                        if (betweenDelay > 0)
+                        {
+                            await Task.Delay(betweenDelay, ct).ConfigureAwait(false);
+                        }
+                    }
+
+                    batchCounter++;
+                }
+                catch (OperationCanceledException)
+                {
+                    _fileLogger.LogInformation("Move worker cancelled");
+                    progress.Message = $"Cancelled after moving {_totalMoved} documents ({_totalFailed} failed)";
+                    progressCallback?.Invoke(progress);
+                    throw;
+                }
+                catch (Exception ex)
+                {
+                    _dbLogger.LogError(ex, "Error in batch {BatchCounter}", batchCounter);
+
+                    progress.Message = $"Error in batch {batchCounter}: {ex.Message}";
+                    progressCallback?.Invoke(progress);
+
+                    // Exponential backoff on error
+                    await Task.Delay(delay * 2, ct).ConfigureAwait(false);
+                    batchCounter++;
+                }
+            }
+
+            _fileLogger.LogInformation(
+                "Move worker completed after {Count} batches. Total: {Moved} moved, {Failed} failed",
+                batchCounter - 1, _totalMoved, _totalFailed);
         }
 
         #endregion

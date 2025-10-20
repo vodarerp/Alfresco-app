@@ -127,6 +127,157 @@ namespace Migration.Infrastructure.Implementation.Services
 
 
         }
+        public async Task RunLoopAsync(CancellationToken ct, Action<WorkerProgress>? progressCallback)
+        {
+            var emptyResultCounter = 0;
+            var delay = _options.Value.IdleDelayInMs;
+            var maxEmptyResults = _options.Value.BreakEmptyResults;
+            var batchSize = _options.Value.DocumentDiscovery.BatchSize ?? _options.Value.BatchSize;
+
+            _fileLogger.LogInformation("DocumentDiscovery worker started");
+
+            // Reset stuck folders from previous crashed run
+            await ResetStuckItemsAsync(ct).ConfigureAwait(false);
+
+            // Load checkpoint to resume from last position
+            await LoadCheckpointAsync(ct).ConfigureAwait(false);
+
+            // Start from next batch after checkpoint
+            var batchCounter = _batchCounter + 1;
+
+            // Try to get total count of folders to process
+            long totalCount = 0;
+            try
+            {
+                _fileLogger.LogInformation("Attempting to count total folders to process...");
+
+                await using var scope = _sp.CreateAsyncScope();
+                var folderRepo = scope.ServiceProvider.GetRequiredService<IFolderStagingRepository>();
+
+                totalCount = await folderRepo.CountReadyForProcessingAsync(ct).ConfigureAwait(false);
+
+                if (totalCount >= 0)
+                {
+                    _fileLogger.LogInformation("Total folders to process: {TotalCount}", totalCount);
+                }
+                else
+                {
+                    _fileLogger.LogWarning("Count not available, progress will show processed items only");
+                }
+            }
+            catch (Exception ex)
+            {
+                _fileLogger.LogWarning(ex, "Failed to count total folders, continuing without total count");
+                totalCount = 0;
+            }
+
+            // Initial progress report
+            var progress = new WorkerProgress
+            {
+                TotalItems = totalCount, // Will be 0 if count failed
+                ProcessedItems = _totalProcessed,
+                BatchSize = batchSize,
+                CurrentBatch = 0,
+                Message = totalCount > 0
+                    ? $"Starting document discovery... (Total folders: {totalCount})"
+                    : "Starting document discovery..."
+            };
+            progressCallback?.Invoke(progress);
+
+            while (!ct.IsCancellationRequested)
+            {
+                using var batchScope = _fileLogger.BeginScope(new Dictionary<string, object>
+                {
+                    ["BatchCounter"] = batchCounter
+                });
+
+                try
+                {
+                    _fileLogger.LogDebug("Starting batch {BatchCounter}", batchCounter);
+
+                    var result = await RunBatchAsync(ct).ConfigureAwait(false);
+
+                    // Update progress after each batch
+                    progress.ProcessedItems = _totalProcessed;
+                    progress.CurrentBatch = batchCounter;
+                    progress.CurrentBatchCount = result.PlannedCount;
+                    progress.SuccessCount = result.PlannedCount;
+                    progress.FailedCount = (int)_totalFailed;
+                    progress.Timestamp = DateTimeOffset.UtcNow;
+                    progress.Message = result.PlannedCount > 0
+                        ? $"Processed {result.PlannedCount} folders in batch {batchCounter}"
+                        : "No more folders to process";
+
+                    progressCallback?.Invoke(progress);
+
+                    if (result.PlannedCount == 0)
+                    {
+                        emptyResultCounter++;
+                        _fileLogger.LogDebug(
+                                "Empty result ({Counter}/{Max})",
+                                emptyResultCounter, maxEmptyResults);
+
+                        if (emptyResultCounter >= maxEmptyResults)
+                        {
+                            _fileLogger.LogInformation(
+                                "Breaking after {Count} consecutive empty results",
+                                emptyResultCounter);
+                            _dbLogger.LogInformation(
+                                "Breaking after {Count} consecutive empty results",
+                                emptyResultCounter);
+
+                            progress.Message = $"Completed: {_totalProcessed} folders processed, {_totalFailed} failed";
+                            progressCallback?.Invoke(progress);
+                            break;
+                        }
+
+                        await Task.Delay(delay, ct).ConfigureAwait(false);
+                    }
+                    else
+                    {
+                        emptyResultCounter = 0;
+                        var betweenDelay = _options.Value.DocumentDiscovery.DelayBetweenBatchesInMs
+                            ?? _options.Value.DelayBetweenBatchesInMs;
+
+                        if (betweenDelay > 0)
+                        {
+                            await Task.Delay(betweenDelay, ct).ConfigureAwait(false);
+                        }
+                    }
+
+                    batchCounter++;
+                }
+                catch (OperationCanceledException)
+                {
+                    _dbLogger.LogInformation("DocumentDiscovery worker cancelled");
+                    progress.Message = $"Cancelled after processing {_totalProcessed} folders ({_totalFailed} failed)";
+                    progressCallback?.Invoke(progress);
+                    throw;
+                }
+                catch (Exception ex)
+                {
+                    _dbLogger.LogError(ex, "Error in batch {BatchCounter}", batchCounter);
+                    _uiLogger.LogError(ex, "Error in batch {BatchCounter}", batchCounter);
+
+                    progress.Message = $"Error in batch {batchCounter}: {ex.Message}";
+                    progressCallback?.Invoke(progress);
+
+                    // Exponential backoff on error
+                    await Task.Delay(delay * 2, ct).ConfigureAwait(false);
+                    batchCounter++;
+                }
+            }
+
+            _fileLogger.LogInformation(
+                "DocumentDiscovery worker completed after {Count} batches. " +
+                "Total: {Processed} processed, {Failed} failed",
+                batchCounter - 1, _totalProcessed, _totalFailed);
+            _dbLogger.LogInformation(
+                "DocumentDiscovery worker completed after {Count} batches. " +
+                "Total: {Processed} processed, {Failed} failed",
+                batchCounter - 1, _totalProcessed, _totalFailed);
+        }
+
 
         public async Task RunLoopAsync(CancellationToken ct)
         {
@@ -571,11 +722,7 @@ namespace Migration.Infrastructure.Implementation.Services
             }
         }
 
-        public Task RunLoopAsync(CancellationToken ct, Action<WorkerProgress>? progressCallback)
-        {
-            throw new NotImplementedException();
-        }
-
+     
 
         #endregion
 
