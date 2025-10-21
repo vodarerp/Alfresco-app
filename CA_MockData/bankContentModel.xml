@@ -1,0 +1,223 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<model name="ecm:contentModel" xmlns="http://www.alfresco.org/model/dictionary/1.0">
+    <description>Banking content model for client folders and documents</description>
+    <author>Migration System</author>
+    <version>1.0</version>
+
+    <!-- Import Alfresco standard models -->
+    <imports>
+        <import uri="http://www.alfresco.org/model/dictionary/1.0" prefix="d"/>
+        <import uri="http://www.alfresco.org/model/content/1.0" prefix="cm"/>
+    </imports>
+
+    <!-- Define namespace -->
+    <namespaces>
+        <namespace uri="http://www.bank.com/model/content/1.0" prefix="bank"/>
+    </namespaces>
+
+    <!-- Define types -->
+    <types>
+        <!-- Client Folder Type -->
+        <type name="ecm:clientFolder">
+            <title>Client Folder</title>
+            <parent>cm:folder</parent>
+            <properties>
+                <!-- Tip klijenta -->
+                <property name="ecm:clientType">
+                    <title>Tip klijenta</title>
+                    <type>d:text</type>
+                    <mandatory>false</mandatory>
+                    <constraints>
+                        <constraint type="LIST">
+                            <parameter name="allowedValues">
+                                <list>
+                                    <value>PL</value>
+                                    <value>FL</value>
+                                    <value>ACC</value>
+                                </list>
+                            </parameter>
+                        </constraint>
+                    </constraints>
+                </property>
+
+                <!-- Kreator -->
+                <property name="ecm:creator">
+                    <title>Kreator</title>
+                    <type>d:text</type>
+                    <mandatory>false</mandatory>
+                </property>
+
+                <!-- Jedinstveni identifikator dosijea -->
+                <property name="ecm:uniqueFolderId">
+                    <title>Jedinstveni identifikator dosijea</title>
+                    <type>d:text</type>
+                    <mandatory>false</mandatory>
+                    <index enabled="true">
+                        <atomic>true</atomic>
+                        <stored>false</stored>
+                        <tokenised>false</tokenised>
+                    </index>
+                </property>
+
+                <!-- Barclex -->
+                <property name="ecm:barclex">
+                    <title>Barclex</title>
+                    <type>d:text</type>
+                    <mandatory>false</mandatory>
+                </property>
+
+                <!-- Saradnik -->
+                <property name="ecm:collaborator">
+                    <title>Saradnik</title>
+                    <type>d:text</type>
+                    <mandatory>false</mandatory>
+                </property>
+
+                <!-- MBR/JMBG -->
+                <property name="ecm:mbrJmbg">
+                    <title>MBR/JMBG</title>
+                    <type>d:text</type>
+                    <mandatory>false</mandatory>
+                    <index enabled="true">
+                        <atomic>true</atomic>
+                        <stored>false</stored>
+                        <tokenised>false</tokenised>
+                    </index>
+                </property>
+
+                <!-- Core ID -->
+                <property name="ecm:coreId">
+                    <title>Core ID</title>
+                    <type>d:text</type>
+                    <mandatory>false</mandatory>
+                    <index enabled="true">
+                        <atomic>true</atomic>
+                        <stored>false</stored>
+                        <tokenised>false</tokenised>
+                    </index>
+                </property>
+
+                <!-- Naziv klijenta -->
+                <property name="ecm:clientName">
+                    <title>Naziv klijenta</title>
+                    <type>d:text</type>
+                    <mandatory>false</mandatory>
+                </property>
+
+                <!-- Partija -->
+                <property name="ecm:batch">
+                    <title>Partija</title>
+                    <type>d:text</type>
+                    <mandatory>false</mandatory>
+                </property>
+
+                <!-- Podtip klijenta -->
+                <property name="ecm:clientSubtype">
+                    <title>Podtip klijenta</title>
+                    <type>d:text</type>
+                    <mandatory>false</mandatory>
+                </property>
+
+                <!-- Staff -->
+                <property name="ecm:staff">
+                    <title>Staff</title>
+                    <type>d:text</type>
+                    <mandatory>false</mandatory>
+                </property>
+
+                <!-- OPU korisnika -->
+                <property name="ecm:opuUser">
+                    <title>OPU korisnika</title>
+                    <type>d:text</type>
+                    <mandatory>false</mandatory>
+                </property>
+
+                <!-- OPU/ID realizacije -->
+                <property name="ecm:opuRealization">
+                    <title>OPU/ID realizacije</title>
+                    <type>d:text</type>
+                    <mandatory>false</mandatory>
+                </property>
+
+                <!-- Tip proizvoda -->
+                <property name="ecm:productType">
+                    <title>Tip proizvoda</title>
+                    <type>d:text</type>
+                    <mandatory>false</mandatory>
+                </property>
+
+                <!-- Broj ugovora -->
+                <property name="ecm:contractNumber">
+                    <title>Broj ugovora</title>
+                    <type>d:text</type>
+                    <mandatory>false</mandatory>
+                </property>
+
+                <!-- Datum kreiranja (datum kada je depozit procesuiran) -->
+                <property name="ecm:depositProcessedDate">
+                    <title>Datum procesiranja depozita</title>
+                    <type>d:datetime</type>
+                    <mandatory>false</mandatory>
+                </property>
+
+                <!-- Rezidentnost -->
+                <property name="ecm:residency">
+                    <title>Rezidentnost</title>
+                    <type>d:text</type>
+                    <mandatory>false</mandatory>
+                    <constraints>
+                        <constraint type="LIST">
+                            <parameter name="allowedValues">
+                                <list>
+                                    <value>Resident</value>
+                                    <value>Non-resident</value>
+                                </list>
+                            </parameter>
+                        </constraint>
+                    </constraints>
+                </property>
+
+                <!-- Izvor -->
+                <property name="ecm:source">
+                    <title>Izvor</title>
+                    <type>d:text</type>
+                    <mandatory>false</mandatory>
+                </property>
+
+                <!-- Status -->
+                <property name="ecm:status">
+                    <title>Status</title>
+                    <type>d:text</type>
+                    <mandatory>false</mandatory>
+                    <default>ACTIVE</default>
+                    <constraints>
+                        <constraint type="LIST">
+                            <parameter name="allowedValues">
+                                <list>
+                                    <value>ACTIVE</value>
+                                    <value>INACTIVE</value>
+                                    <value>ARCHIVED</value>
+                                    <value>MIGRATED</value>
+                                </list>
+                            </parameter>
+                        </constraint>
+                    </constraints>
+                </property>
+
+                <!-- Datum arhiviranja -->
+                <property name="ecm:archiveDate">
+                    <title>Datum arhiviranja</title>
+                    <type>d:datetime</type>
+                    <mandatory>false</mandatory>
+                </property>
+
+                <!-- Segment -->
+                <property name="ecm:segment">
+                    <title>Segment</title>
+                    <type>d:text</type>
+                    <mandatory>false</mandatory>
+                </property>
+            </properties>
+        </type>
+    </types>
+</model>

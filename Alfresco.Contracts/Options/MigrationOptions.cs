@@ -21,9 +21,23 @@ namespace Alfresco.Contracts.Options
         /// </summary>
         public int StuckItemsTimeoutMinutes { get; set; } = 10;
 
+        /// <summary>
+        /// Root folder ID in Alfresco for destination (migration target)
+        /// </summary>
         public string RootDestinationFolderId { get; set; }
 
+        /// <summary>
+        /// Root folder ID in Alfresco for discovery (source scanning)
+        /// </summary>
         public string RootDiscoveryFolderId { get; set; }
+
+        /// <summary>
+        /// Physical root folder path on filesystem for document storage
+        /// Structure: ROOT -> dosie-{ClientType} -> {ClientType}{CoreId} -> documents
+        /// Example: C:\DocumentsRoot or /mnt/documents
+        /// NOTE: This should be stored in environment variable or external config, not in database
+        /// </summary>
+        public string? RootDocumentPath { get; set; }
 
         public ServiceOptions MoveService { get; set; } = new();
 

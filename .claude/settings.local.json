@@ -9,7 +9,13 @@
       "Bash(xcopy:*)",
       "Bash(awk:*)",
       "Read(//c/**)",
-      "Bash(dotnet add:*)"
+      "Bash(dotnet add:*)",
+      "Bash(curl -X GET \"http://localhost:8080/alfresco/api/-default-/public/alfresco/versions/1/cmm\" -H \"Authorization: Basic YWRtaW46YWRtaW4=\" -H \"Content-Type: application/json\")",
+      "Bash(curl -X GET \"http://localhost:8080/alfresco/api/-default-/public/cmm/versions/1/cmm\" -H \"Authorization: Basic YWRtaW46YWRtaW4=\" -H \"Content-Type: application/json\")",
+      "Bash(curl -X GET \"http://localhost:8080/alfresco/api/discovery\" -H \"Authorization: Basic YWRtaW46YWRtaW4=\")",
+      "Bash(docker ps --filter \"name=alfresco\" --format \"{{.Names}}\")",
+      "Bash(docker cp bankContentModel.xml docker-compose-alfresco-1:/usr/local/tomcat/shared/classes/alfresco/extension/model/)",
+      "Bash(docker exec docker-compose-alfresco-1 ls -la /usr/local/tomcat/shared/classes/alfresco/extension/model/)"
     ],
     "deny": [],
     "ask": []

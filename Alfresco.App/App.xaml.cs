@@ -286,6 +286,9 @@ namespace Alfresco.App
                     services.AddTransient<IFolderIngestor,FolderIngestor>();
                     services.AddSingleton<IFolderDiscoveryService, FolderDiscoveryService>();
 
+                    // Folder path and management services
+                    services.AddSingleton<IFolderPathService, Migration.Infrastructure.Implementation.FolderPathService>();
+                    services.AddSingleton<IFolderManager, Migration.Infrastructure.Implementation.FolderManager>();
 
                     services.AddTransient<IDocumentReader, DocumentReader>();
                     services.AddTransient<IDocumentResolver, DocumentResolver>();
