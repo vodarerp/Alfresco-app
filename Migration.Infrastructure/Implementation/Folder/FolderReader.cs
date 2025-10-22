@@ -136,5 +136,56 @@ namespace Migration.Infrastructure.Implementation.Folder
                 return -1; // Count not available
             }
         }
+
+        public async Task<Dictionary<string, string>> FindDossierSubfoldersAsync(string rootId, List<string>? folderTypes, CancellationToken ct)
+        {
+            var result = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+
+            // Build query to find DOSSIER-* folders
+            var sb = new StringBuilder();
+            sb.Append("SELECT * FROM cmis:folder ")
+              .Append($"WHERE cmis:parentId = '{rootId}' ")
+              .Append("AND cmis:name LIKE 'DOSSIER-%' ");
+
+            var req = new PostSearchRequest()
+            {
+                Query = new QueryRequest()
+                {
+                    Language = "cmis",
+                    Query = sb.ToString()
+                },
+                Paging = new PagingRequest()
+                {
+                    MaxItems = 100, // Should be enough for all DOSSIER types
+                    SkipCount = 0
+                },
+                Sort = null
+            };
+
+            var folders = (await _read.SearchAsync(req, ct).ConfigureAwait(false)).List?.Entries ?? new List<ListEntry>();
+
+            foreach (var folder in folders)
+            {
+                var folderName = folder.Entry?.Name;
+                if (string.IsNullOrEmpty(folderName) || !folderName.StartsWith("DOSSIER-", StringComparison.OrdinalIgnoreCase))
+                    continue;
+
+                // Extract type from folder name (e.g., "DOSSIER-PL" -> "PL")
+                var type = folderName.Substring("DOSSIER-".Length);
+
+                // If folderTypes is specified, filter by those types
+                if (folderTypes != null && folderTypes.Count > 0)
+                {
+                    if (!folderTypes.Contains(type, StringComparer.OrdinalIgnoreCase))
+                        continue;
+                }
+
+                // Add to result dictionary
+                var folderId = $"workspace://SpacesStore/{folder.Entry?.Id}";
+                result[type] = folderId;
+            }
+
+            return result;
+        }
     }
 }

@@ -43,6 +43,32 @@ namespace Migration.Abstraction.Models
 
     public sealed record FolderSeekCursor(string LastObjectId, DateTimeOffset LastObjectCreated);
 
+    /// <summary>
+    /// Tracks progress through multiple DOSSIER subfolders during discovery
+    /// </summary>
+    public class MultiFolderDiscoveryCursor
+    {
+        /// <summary>
+        /// Maps folder type (e.g., "PL", "FL") to its folder ID
+        /// </summary>
+        public Dictionary<string, string> SubfolderMap { get; set; } = new();
+
+        /// <summary>
+        /// Current subfolder type being processed (e.g., "PL")
+        /// </summary>
+        public string? CurrentFolderType { get; set; }
+
+        /// <summary>
+        /// Cursor within the current subfolder
+        /// </summary>
+        public FolderSeekCursor? CurrentCursor { get; set; }
+
+        /// <summary>
+        /// Index of current folder in ordered list
+        /// </summary>
+        public int CurrentFolderIndex { get; set; }
+    }
+
     public sealed record MoveReaderResponse(long DocStagingId, string DocumentNodeId, string FolderDestId);
 
 

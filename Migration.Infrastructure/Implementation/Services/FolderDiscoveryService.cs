@@ -24,7 +24,7 @@ namespace Migration.Infrastructure.Implementation.Services
         private readonly IFolderIngestor _ingestor;
         private readonly IFolderReader _reader;
         private readonly IOptions<MigrationOptions> _options;
-        private FolderSeekCursor? _cursor = null;
+        private MultiFolderDiscoveryCursor? _multiFolderCursor = null;
         private readonly IServiceProvider _sp;
         private readonly IUnitOfWork _unitOfWork;
         private readonly ILogger _dbLogger;
@@ -32,7 +32,6 @@ namespace Migration.Infrastructure.Implementation.Services
         private readonly ILogger _uiLogger;
         //private readonly ILogger<FolderDiscoveryService> _logger;
 
-        // private FolderSeekCursor? _cursor = null;
         private readonly object _cursorLock = new();
 
         // Metrics tracking
@@ -65,38 +64,101 @@ namespace Migration.Infrastructure.Implementation.Services
             var batch = _options.Value.FolderDiscovery.BatchSize ?? _options.Value.BatchSize;
             var nameFilter = _options.Value.FolderDiscovery.NameFilter ?? "-";
             var rootDiscoveryId = _options.Value.RootDiscoveryFolderId;
+            var folderTypes = _options.Value.FolderDiscovery.FolderTypes;
 
-            // Thread-safe cursor read
-            FolderSeekCursor? currentCursor;
+            // Initialize multi-folder cursor if needed
+            MultiFolderDiscoveryCursor? currentMultiCursor;
             lock (_cursorLock)
             {
-                currentCursor = _cursor;
+                currentMultiCursor = _multiFolderCursor;
             }
 
-            var folderRequest = new FolderReaderRequest(
-                RootId: rootDiscoveryId,
-                NameFilter: nameFilter,
-                Skip: 0,
-                Take: batch,
-                Cursor: currentCursor);
-
-            var page = await _reader.ReadBatchAsync(folderRequest, ct).ConfigureAwait(false);
-
-            if (!page.HasMore || page.Items.Count == 0)
+            // If no cursor exists, discover DOSSIER subfolders
+            if (currentMultiCursor == null || currentMultiCursor.SubfolderMap.Count == 0)
             {
-                _fileLogger.LogInformation("No more folders to process");
+                _fileLogger.LogInformation("Discovering DOSSIER subfolders...");
+                var subfolders = await _reader.FindDossierSubfoldersAsync(rootDiscoveryId, folderTypes, ct).ConfigureAwait(false);
+
+                if (subfolders.Count == 0)
+                {
+                    _fileLogger.LogWarning("No DOSSIER subfolders found matching criteria");
+                    return new FolderBatchResult(0);
+                }
+
+                currentMultiCursor = new MultiFolderDiscoveryCursor
+                {
+                    SubfolderMap = subfolders,
+                    CurrentFolderIndex = 0,
+                    CurrentFolderType = subfolders.Keys.First(),
+                    CurrentCursor = null
+                };
+
+                lock (_cursorLock)
+                {
+                    _multiFolderCursor = currentMultiCursor;
+                }
+
+                _fileLogger.LogInformation("Found {Count} DOSSIER subfolders: {Types}",
+                    subfolders.Count, string.Join(", ", subfolders.Keys));
+            }
+
+            // Get current subfolder to process
+            var orderedTypes = currentMultiCursor.SubfolderMap.Keys.OrderBy(k => k).ToList();
+            if (currentMultiCursor.CurrentFolderIndex >= orderedTypes.Count)
+            {
+                _fileLogger.LogInformation("All DOSSIER subfolders processed");
                 return new FolderBatchResult(0);
             }
 
-            _fileLogger.LogInformation("Read {Count} folders from Alfresco", page.Items.Count);
+            var currentType = orderedTypes[currentMultiCursor.CurrentFolderIndex];
+            var currentFolderId = currentMultiCursor.SubfolderMap[currentType];
+
+            _fileLogger.LogDebug("Processing DOSSIER-{Type} folder", currentType);
+
+            // Read batch from current subfolder
+            var folderRequest = new FolderReaderRequest(
+                RootId: currentFolderId,
+                NameFilter: nameFilter,
+                Skip: 0,
+                Take: batch,
+                Cursor: currentMultiCursor.CurrentCursor);
+
+            var page = await _reader.ReadBatchAsync(folderRequest, ct).ConfigureAwait(false);
+
+            // If no more items in current subfolder, move to next
+            if (!page.HasMore || page.Items.Count == 0)
+            {
+                _fileLogger.LogInformation("Finished processing DOSSIER-{Type}, moving to next subfolder", currentType);
+
+                lock (_cursorLock)
+                {
+                    _multiFolderCursor!.CurrentFolderIndex++;
+                    if (_multiFolderCursor.CurrentFolderIndex < orderedTypes.Count)
+                    {
+                        _multiFolderCursor.CurrentFolderType = orderedTypes[_multiFolderCursor.CurrentFolderIndex];
+                        _multiFolderCursor.CurrentCursor = null;
+                    }
+                }
+
+                // Save checkpoint
+                if (!ct.IsCancellationRequested)
+                {
+                    await SaveCheckpointAsync(ct).ConfigureAwait(false);
+                }
+
+                // Recursively call to start processing next folder
+                return await RunBatchAsync(ct).ConfigureAwait(false);
+            }
+
+            _fileLogger.LogInformation("Read {Count} folders from DOSSIER-{Type}", page.Items.Count, currentType);
 
             var foldersToInsert = page.Items.ToList().ToFolderStagingListInsert();
-
             var inserted = await InsertFoldersAsync(foldersToInsert, ct).ConfigureAwait(false);
 
-            lock (_cursorLock) 
+            // Update cursor
+            lock (_cursorLock)
             {
-                _cursor = page.Next;
+                _multiFolderCursor!.CurrentCursor = page.Next;
             }
 
             Interlocked.Add(ref _totalInserted, foldersToInsert.Count);
@@ -109,11 +171,11 @@ namespace Migration.Infrastructure.Implementation.Services
 
             sw.Stop();
             _fileLogger.LogInformation(
-                "FolderDiscovery batch completed: {Count} folders inserted in {Elapsed}ms (Total: {Total} inserted)",
-                inserted, sw.ElapsedMilliseconds, _totalInserted);
+                "FolderDiscovery batch completed: {Count} folders from DOSSIER-{Type} inserted in {Elapsed}ms (Total: {Total} inserted)",
+                inserted, currentType, sw.ElapsedMilliseconds, _totalInserted);
             _dbLogger.LogInformation(
-                "FolderDiscovery batch completed: {Count} folders inserted in {Elapsed}ms (Total: {Total} inserted)",
-                inserted, sw.ElapsedMilliseconds, _totalInserted);
+                "FolderDiscovery batch completed: {Count} folders from DOSSIER-{Type} inserted in {Elapsed}ms (Total: {Total} inserted)",
+                inserted, currentType, sw.ElapsedMilliseconds, _totalInserted);
 
             return new FolderBatchResult(inserted);
         }
@@ -135,7 +197,7 @@ namespace Migration.Infrastructure.Implementation.Services
             await LoadCheckpointAsync(ct).ConfigureAwait(false);
 
             // Reset metrics if starting fresh
-            if (_cursor == null)
+            if (_multiFolderCursor == null)
             {
                 _totalInserted = 0;
             }
@@ -226,7 +288,7 @@ namespace Migration.Infrastructure.Implementation.Services
             await LoadCheckpointAsync(ct).ConfigureAwait(false);
 
             // Reset metrics if starting fresh
-            if (_cursor == null)
+            if (_multiFolderCursor == null)
             {
                 _totalInserted = 0;
             }
@@ -381,15 +443,15 @@ namespace Migration.Infrastructure.Implementation.Services
 
                         if (!string.IsNullOrEmpty(checkpoint.CheckpointData))
                         {
-                            var cursor = JsonSerializer.Deserialize<FolderSeekCursor>(checkpoint.CheckpointData);
+                            var multiCursor = JsonSerializer.Deserialize<MultiFolderDiscoveryCursor>(checkpoint.CheckpointData);
                             lock (_cursorLock)
                             {
-                                _cursor = cursor;
+                                _multiFolderCursor = multiCursor;
                             }
 
                             _fileLogger.LogInformation(
-                                "Checkpoint loaded: {TotalProcessed} processed, cursor at {LastId} ({LastDate})",
-                                _totalInserted, cursor?.LastObjectId, cursor?.LastObjectCreated);
+                                "Checkpoint loaded: {TotalProcessed} processed, on folder {FolderType} (index {Index})",
+                                _totalInserted, multiCursor?.CurrentFolderType, multiCursor?.CurrentFolderIndex);
                         }
                         else
                         {
@@ -417,10 +479,10 @@ namespace Migration.Infrastructure.Implementation.Services
         {
             try
             {
-                FolderSeekCursor? currentCursor;
+                MultiFolderDiscoveryCursor? currentMultiCursor;
                 lock (_cursorLock)
                 {
-                    currentCursor = _cursor;
+                    currentMultiCursor = _multiFolderCursor;
                 }
 
                 await using var scope = _sp.CreateAsyncScope();
@@ -433,9 +495,9 @@ namespace Migration.Infrastructure.Implementation.Services
                     var checkpoint = new MigrationCheckpoint
                     {
                         ServiceName = ServiceName,
-                        CheckpointData = currentCursor != null ? JsonSerializer.Serialize(currentCursor) : null,
-                        LastProcessedId = currentCursor?.LastObjectId,
-                        LastProcessedAt = currentCursor?.LastObjectCreated.UtcDateTime,
+                        CheckpointData = currentMultiCursor != null ? JsonSerializer.Serialize(currentMultiCursor) : null,
+                        LastProcessedId = currentMultiCursor?.CurrentCursor?.LastObjectId,
+                        LastProcessedAt = currentMultiCursor?.CurrentCursor?.LastObjectCreated.UtcDateTime,
                         TotalProcessed = _totalInserted,
                         TotalFailed = 0
                     };

@@ -54,5 +54,12 @@ namespace Alfresco.Contracts.Options
         public int? DelayBetweenBatchesInMs { get; set; }
 
         public string? NameFilter { get; set; }
+
+        /// <summary>
+        /// List of folder types to process (e.g., "PL", "FL", "ACC", "D", "PI").
+        /// If null or empty, all folder types will be processed.
+        /// Folders are expected to be in subfolders named: DOSSIER-{FolderType}
+        /// </summary>
+        public List<string>? FolderTypes { get; set; }
     }
 }
