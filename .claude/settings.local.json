@@ -15,7 +15,13 @@
       "Bash(curl -X GET \"http://localhost:8080/alfresco/api/discovery\" -H \"Authorization: Basic YWRtaW46YWRtaW4=\")",
       "Bash(docker ps --filter \"name=alfresco\" --format \"{{.Names}}\")",
       "Bash(docker cp bankContentModel.xml docker-compose-alfresco-1:/usr/local/tomcat/shared/classes/alfresco/extension/model/)",
-      "Bash(docker exec docker-compose-alfresco-1 ls -la /usr/local/tomcat/shared/classes/alfresco/extension/model/)"
+      "Bash(docker exec docker-compose-alfresco-1 ls -la /usr/local/tomcat/shared/classes/alfresco/extension/model/)",
+      "Bash(dotnet --version:*)",
+      "Bash(dotnet new:*)",
+      "Bash(mkdir:*)",
+      "Bash(del \"C:\\Users\\Nikola Preradov\\source\\repos\\Alfresco\\SqlServer.Abstraction\\Class1.cs\")",
+      "Bash(del \"C:\\Users\\Nikola Preradov\\source\\repos\\Alfresco\\SqlServer.Infrastructure\\Class1.cs\")",
+      "Bash(rm:*)"
     ],
     "deny": [],
     "ask": []
