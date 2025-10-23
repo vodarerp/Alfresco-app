@@ -108,5 +108,26 @@ namespace Oracle.Infrastructure.Implementation
 
             return count;
         }
+
+        public async Task<FolderStaging?> AlfreGetByNodeIdAsync(string nodeId, CancellationToken ct)
+        {
+            var sql = @"select * from FolderStaging
+                        where NodeId = :nodeId
+                        FETCH FIRST 1 ROWS ONLY";
+
+            var dp = new DynamicParameters();
+            dp.Add(":nodeId", nodeId);
+
+            var cmd = new CommandDefinition(sql, dp, Tx, cancellationToken: ct);
+
+            var result = await Conn.QueryFirstOrDefaultAsync<FolderStaging>(cmd).ConfigureAwait(false);
+
+            return result;
+        }
+
+        public Task<FolderStaging?> GetByNodeIdAsync(string nodeId, CancellationToken ct)
+        {
+            throw new NotImplementedException();
+        }
     }
 }

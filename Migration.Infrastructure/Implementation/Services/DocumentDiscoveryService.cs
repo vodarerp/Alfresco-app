@@ -1,4 +1,5 @@
-﻿using Alfresco.Contracts.Enums;
+﻿using Alfresco.Abstraction.Interfaces;
+using Alfresco.Contracts.Enums;
 using Alfresco.Contracts.Options;
 using Alfresco.Contracts.Oracle.Models;
 using Mapper;
@@ -25,6 +26,7 @@ namespace Migration.Infrastructure.Implementation.Services
         private readonly IFolderStagingRepository _folderRepo;
         private readonly IDocumentReader _reader;
         private readonly IDocumentResolver _resolver;
+        private readonly IAlfrescoReadApi _alfrescoReadApi;
         private readonly IOptions<MigrationOptions> _options;
         private readonly IServiceProvider _sp;
         //private readonly ILogger<DocumentDiscoveryService> _logger;
@@ -40,13 +42,14 @@ namespace Migration.Infrastructure.Implementation.Services
 
         private const string ServiceName = "DocumentDiscovery";
 
-        public DocumentDiscoveryService(IDocumentIngestor ingestor, IDocumentReader reader, IDocumentResolver resolver, IDocStagingRepository docRepo, IFolderStagingRepository folderRepo, IOptions<MigrationOptions> options, IServiceProvider sp, IUnitOfWork unitOfWork,ILoggerFactory logger)
+        public DocumentDiscoveryService(IDocumentIngestor ingestor, IDocumentReader reader, IDocumentResolver resolver, IDocStagingRepository docRepo, IFolderStagingRepository folderRepo, IAlfrescoReadApi alfrescoReadApi, IOptions<MigrationOptions> options, IServiceProvider sp, IUnitOfWork unitOfWork,ILoggerFactory logger)
         {
             _ingestor = ingestor;
             _reader = reader;
             _resolver = resolver;
             _docRepo = docRepo;
             _folderRepo = folderRepo;
+            _alfrescoReadApi = alfrescoReadApi;
             _options = options;
             _sp = sp;
             _dbLogger = logger.CreateLogger("DbLogger");
@@ -82,6 +85,9 @@ namespace Migration.Infrastructure.Implementation.Services
             var processedCount = 0;
 
             var errors = new ConcurrentBag<(long folderId, Exception error)>();
+
+
+           // var x = await ResolveDestinationFolder(folders[0], ct).ConfigureAwait(false);
 
             await Parallel.ForEachAsync(folders, new ParallelOptions
             {
@@ -635,21 +641,31 @@ namespace Migration.Infrastructure.Implementation.Services
             var normalizedName = folder.Name?.NormalizeName()
                     ?? throw new InvalidOperationException($"Folder {folder.Id} has null name");
 
-            if(_resolvedFoldersCache.TryGetValue(normalizedName, out var cachedId))
+            // Check if we already resolved this folder's NodeId
+            string parentPath = string.Empty;
+            var cacheKey = $"node:{folder.ParentId}";
+            if(_resolvedFoldersCache.TryGetValue(cacheKey, out var cachedId))
             {
-                _fileLogger.LogDebug("Using cached destination folder ID for folder {FolderId}", folder.Id);
-                return cachedId;
+                _fileLogger.LogDebug("Using cached destination folder ID for NodeId {NodeId}", folder.NodeId);
+                parentPath = cachedId;
             }
+            else
+            {                
+                parentPath = await BuildParentPathFromDossierAsync(folder, ct).ConfigureAwait(false);
+            }
+            if (string.IsNullOrEmpty(parentPath))
+            {
+                _fileLogger.LogWarning("Could not build parent path for folder {FolderId}, using root destination", folder.Id);
+                var fallbackId = await _resolver.ResolveAsync(_options.Value.RootDestinationFolderId, normalizedName, ct).ConfigureAwait(false);
+                _resolvedFoldersCache.TryAdd(cacheKey, fallbackId);
+                return fallbackId;            
+            }
+            _resolvedFoldersCache.TryAdd(cacheKey, parentPath);
 
-
-            _fileLogger.LogDebug("Resolving destination folder for '{Name}'", normalizedName);
-
-            var destFolderId = await _resolver.ResolveAsync(_options.Value.RootDestinationFolderId, normalizedName, ct).ConfigureAwait(false);
-
-            _resolvedFoldersCache.TryAdd(normalizedName, destFolderId);
+            var newFolderId = await _resolver.ResolveAsync(parentPath, normalizedName, ct).ConfigureAwait(false);
 
             _fileLogger.LogDebug("Resolved and cached destination folder '{Name}' -> {Id}",
-                normalizedName, destFolderId);
+                normalizedName, newFolderId);
 
             if (_resolvedFoldersCache.Count > 10000)
             {
@@ -657,9 +673,122 @@ namespace Migration.Infrastructure.Implementation.Services
                 _fileLogger.LogWarning("Cache cleared due to size limit (10000 entries)");
             }
 
-
-            return destFolderId;
+            return newFolderId;
         }
+
+        /// <summary>
+        /// Builds the parent path from DOSSIER folder down to the folder's immediate parent
+        /// Returns list ordered from DOSSIER folder to immediate parent
+        /// </summary>
+        
+        private async Task<string> BuildParentPathFromDossierAsync(FolderStaging folder, CancellationToken ct)
+        {
+
+            string toRet = "";
+            var nodeResponse = await _alfrescoReadApi.GetNodeByIdAsync(folder.ParentId!, ct).ConfigureAwait(false);
+            if (nodeResponse?.Entry == null)
+            {
+                _fileLogger.LogDebug("Reached end of parent chain at NodeId {NodeId}", folder.NodeId!);
+                return toRet;
+            }
+
+            toRet = await _resolver.ResolveAsync(_options.Value.RootDestinationFolderId, nodeResponse.Entry.Name!, ct).ConfigureAwait(false);
+
+
+            return toRet;
+        }
+        //private async Task<List<(string NormalizedName, string DestinationId)>?> BuildParentPathFromDossierAsync(FolderStaging folder, CancellationToken ct)
+        //{
+        //    if (string.IsNullOrEmpty(folder.ParentId))
+        //    {
+        //        return null;
+        //    }
+
+        //    try
+        //    {
+        //        var path = new List<(string Name, string ParentId)>();
+        //        var currentNodeId = folder.ParentId;
+        //        var maxDepth = 20;
+        //        var depth = 0;
+
+        //        // Walk up the parent chain until we hit DOSSIER folder
+        //        while (depth < maxDepth)
+        //        {
+        //            var nodeResponse = await _alfrescoReadApi.GetNodeByIdAsync(currentNodeId, ct).ConfigureAwait(false);
+
+        //            if (nodeResponse?.Entry == null)
+        //            {
+        //                _fileLogger.LogDebug("Reached end of parent chain at NodeId {NodeId}", currentNodeId);
+        //                break;
+        //            }
+
+        //            var parentEntry = nodeResponse.Entry;
+        //            path.Add((parentEntry.Name, parentEntry.ParentId));
+
+        //            // Check if this is a DOSSIER folder
+        //            if (!string.IsNullOrEmpty(parentEntry.Name) &&
+        //                parentEntry.Name.StartsWith("DOSSIER-", StringComparison.OrdinalIgnoreCase))
+        //            {
+        //                // Found DOSSIER folder - this is the root of our path
+        //                break;
+        //            }
+
+        //            if (string.IsNullOrEmpty(parentEntry.ParentId))
+        //            {
+        //                break;
+        //            }
+
+        //            currentNodeId = parentEntry.ParentId;
+        //            depth++;
+        //        }
+
+        //        if (path.Count == 0)
+        //        {
+        //            return null;
+        //        }
+
+        //        // The last item in path should be DOSSIER folder
+        //        var dossierFolder = path[^1];
+        //        if (string.IsNullOrEmpty(dossierFolder.Name) ||
+        //            !dossierFolder.Name.StartsWith("DOSSIER-", StringComparison.OrdinalIgnoreCase))
+        //        {
+        //            _fileLogger.LogWarning("Parent chain did not end at DOSSIER folder for {FolderId}", folder.Id);
+        //            return null;
+        //        }
+
+        //        // Get or create DOSSIER folder in destination
+        //        var folderType = dossierFolder.Name.Substring("DOSSIER-".Length);
+        //        var dossierFolderName = $"DOSSIER-{folderType}";
+
+        //        var dossierDestId = await _resolver.ResolveAsync(
+        //            _options.Value.RootDestinationFolderId,
+        //            dossierFolderName,
+        //            ct).ConfigureAwait(false);
+
+        //        // Build result list (reversed - from DOSSIER down to immediate parent)
+        //        var result = new List<(string NormalizedName, string DestinationId)>();
+
+        //        // First item is DOSSIER folder
+        //        result.Add((dossierFolderName, dossierDestId));
+
+        //        // Add remaining folders in reverse order (from DOSSIER down to immediate parent)
+        //        for (int i = path.Count - 2; i >= 0; i--)
+        //        {
+        //            var f = path[i];
+        //            var normalizedName = f.Name?.NormalizeName() ?? throw new InvalidOperationException($"Folder has null name");
+        //            result.Add((normalizedName, string.Empty)); // DestinationId will be resolved during path creation
+        //        }
+
+        //        _fileLogger.LogDebug("Built parent path with {Count} levels for folder {FolderId}", result.Count, folder.Id);
+
+        //        return result;
+        //    }
+        //    catch (Exception ex)
+        //    {
+        //        _fileLogger.LogError(ex, "Error building parent path for folder {FolderId}", folder.Id);
+        //        return null;
+        //    }
+        //}
 
         private async Task MarkFolderAsProcessedAsync(long id, CancellationToken ct)
         {

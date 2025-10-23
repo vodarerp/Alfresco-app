@@ -9,5 +9,6 @@ namespace Oracle.Abstraction.Interfaces
         Task<long> CountReadyForProcessingAsync(CancellationToken ct);
         Task SetStatusAsync(long id, string status, string? error, CancellationToken ct);
         Task FailAsync(long id, string error, CancellationToken ct);
+        Task<FolderStaging?> GetByNodeIdAsync(string nodeId, CancellationToken ct);
     }
 }

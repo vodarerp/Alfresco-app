@@ -88,5 +88,28 @@ namespace Alfresco.Client.Implementation
 
             return toRet;
         }
+
+        public async Task<NodeResponse> GetNodeByIdAsync(string nodeId, CancellationToken ct = default)
+        {
+            // Remove workspace://SpacesStore/ prefix if present
+            //var cleanNodeId = nodeId.Replace("workspace://SpacesStore/", "");
+
+            using var getResponse = await _client.GetAsync(
+                $"/alfresco/api/-default-/public/alfresco/versions/1/nodes/{nodeId}",
+                ct).ConfigureAwait(false);
+
+            var body = await getResponse.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
+
+            if (!getResponse.IsSuccessStatusCode)
+            {
+                throw new AlfrescoException(
+                    $"Failed to get node with ID '{nodeId}'.",
+                    (int)getResponse.StatusCode,
+                    body);
+            }
+
+            var result = JsonConvert.DeserializeObject<NodeResponse>(body);
+            return result ?? throw new AlfrescoException($"Failed to deserialize response for node '{nodeId}'.", 500, body);
+        }
     }
 }

@@ -18,5 +18,12 @@ namespace Alfresco.Abstraction.Interfaces
 
         Task<string> GetFolderByRelative(string inNodeId, string inRelativePath, CancellationToken ct = default);
 
+        /// <summary>
+        /// Gets a single node by its ID
+        /// </summary>
+        /// <param name="nodeId">The node ID (e.g., "workspace://SpacesStore/node-id" or just "node-id")</param>
+        /// <param name="ct">Cancellation token</param>
+        /// <returns>Node information</returns>
+        Task<NodeResponse> GetNodeByIdAsync(string nodeId, CancellationToken ct = default);
     }
 }
