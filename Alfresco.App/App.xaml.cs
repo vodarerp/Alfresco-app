@@ -29,10 +29,12 @@ using Migration.Infrastructure.Implementation.Move;
 using Migration.Infrastructure.Implementation.Services;
 using Migration.Workers;
 using Migration.Workers.Interfaces;
-using Oracle.Abstraction.Interfaces;
-using Oracle.Infrastructure.Helpers;
-using Oracle.Infrastructure.Implementation;
-using Oracle.ManagedDataAccess.Client;
+//using Oracle.Abstraction.Interfaces;
+//using Oracle.Infrastructure.Helpers;
+//using Oracle.Infrastructure.Implementation;
+//using Oracle.ManagedDataAccess.Client;
+using SqlServer.Abstraction.Interfaces;
+using SqlServer.Infrastructure.Implementation;
 using Polly;
 using Polly.Extensions.Http;
 using System.Configuration;
@@ -169,9 +171,10 @@ namespace Alfresco.App
                         //.AddPolicyHandler(GetRetryPlicy())
                         //.AddPolicyHandler(GetCircuitBreakerPolicy());
 
-                    services.Configure<OracleOptions>(context.Configuration.GetSection("Oracle"));
+                    //services.Configure<OracleOptions>(context.Configuration.GetSection("Oracle"));
+                    services.Configure<Alfresco.Contracts.SqlServer.SqlServerOptions>(context.Configuration.GetSection("SqlServer"));
                     services.Configure<AlfrescoDbOptions>(context.Configuration.GetSection(AlfrescoDbOptions.SectionName));
-                    services.AddSingleton(sp => sp.GetRequiredService<IOptions<OracleOptions>>().Value);
+                    services.AddSingleton(sp => sp.GetRequiredService<IOptions<Alfresco.Contracts.SqlServer.SqlServerOptions>>().Value);
 
                     // =====================================================================================
                     // EXTERNAL API CLIENTS AND MIGRATION SERVICES
@@ -272,15 +275,22 @@ namespace Alfresco.App
                     // OracleConnection and OracleTransaction lifecycle is managed by OracleUnitOfWork (Scoped)
                     // No need to register them separately in DI - they are created lazily on BeginAsync()
 
-                    services.AddTransient<IDocStagingRepository, DocStagingRepository>();
-                    services.AddTransient<IFolderStagingRepository, FolderStagingRepository>();
-                    services.AddTransient<IMigrationCheckpointRepository, MigrationCheckpointRepository>();
+                    services.AddTransient<SqlServer.Abstraction.Interfaces.IDocStagingRepository, SqlServer.Infrastructure.Implementation.DocStagingRepository>();
+                    services.AddTransient<SqlServer.Abstraction.Interfaces.IFolderStagingRepository, SqlServer.Infrastructure.Implementation.FolderStagingRepository>();
+                    services.AddTransient<SqlServer.Abstraction.Interfaces.IMigrationCheckpointRepository, SqlServer.Infrastructure.Implementation.MigrationCheckpointRepository>();
+
+                    #region oracle DI (commented)
+                    //services.AddTransient<IDocStagingRepository, DocStagingRepository>();
+                    //services.AddTransient<IFolderStagingRepository, FolderStagingRepository>();
+                    //services.AddTransient<IMigrationCheckpointRepository, MigrationCheckpointRepository>(); 
+                    #endregion
 
 
                     services.Configure<MigrationOptions>(context.Configuration.GetSection("Migration"));
                    // services.Configure<WorkerSetting>(context.Configuration.GetSection("WorkerSetting"));
 
-                    services.AddScoped<IUnitOfWork>(sp => new OracleUnitOfWork(sp.GetRequiredService<OracleOptions>().ConnectionString));
+                    //services.AddScoped<IUnitOfWork>(sp => new OracleUnitOfWork(sp.GetRequiredService<OracleOptions>().ConnectionString));
+                    services.AddScoped<IUnitOfWork>(sp => new SqlServerUnitOfWork(sp.GetRequiredService<Alfresco.Contracts.SqlServer.SqlServerOptions>().ConnectionString));
 
                     services.AddTransient<IFolderReader, FolderReader>();
                     services.AddTransient<IFolderIngestor,FolderIngestor>();
@@ -330,11 +340,16 @@ namespace Alfresco.App
 
 
                     services.AddHealthChecks()
-                            .AddOracle(connectionString: context.Configuration["Oracle:ConnectionString"],
-                                       name: "Oracle-db",
-                                       
+                            //.AddOracle(connectionString: context.Configuration["Oracle:ConnectionString"],
+                            //           name: "Oracle-db",
+                            //
+                            //           failureStatus: HealthStatus.Unhealthy,
+                            //           tags: new[] {"db", "oracle"})
+                            .AddSqlServer(connectionString: context.Configuration["SqlServer:ConnectionString"],
+                                       name: "SqlServer-db",
+
                                        failureStatus: HealthStatus.Unhealthy,
-                                       tags: new[] {"db", "oracle"})
+                                       tags: new[] {"db", "sqlserver"})
                             .AddUrlGroup(uri: new Uri(context.Configuration["Alfresco:BaseUrl"]!),
                                          name: "alfresco-api",
                                          failureStatus: HealthStatus.Unhealthy,
@@ -365,7 +380,7 @@ namespace Alfresco.App
 
             //AppHost.MapHealthChecks();
             //Dapper.DefaultTypeMap.MatchNamesWithUnderscores = true;
-            //OracleHelpers.RegisterFrom<DocStaging>();
+            //OracleHelpers.RegisterFrom<DocStaging>(); // Oracle specific - not needed for SQL Server
         }
 
         protected override void OnStartup(StartupEventArgs e)

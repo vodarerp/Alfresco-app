@@ -7,7 +7,8 @@ using Microsoft.Extensions.Options;
 using Migration.Abstraction.Interfaces;
 using Migration.Abstraction.Interfaces.Services;
 using Migration.Abstraction.Models;
-using Oracle.Abstraction.Interfaces;
+//using Oracle.Abstraction.Interfaces;
+using SqlServer.Abstraction.Interfaces;
 using System;
 using System.Collections.Generic;
 using System.Data;
@@ -23,6 +24,7 @@ namespace Migration.Infrastructure.Implementation.Services
     {
         private readonly IFolderIngestor _ingestor;
         private readonly IFolderReader _reader;
+        private readonly IDocumentResolver _resolver;
         private readonly IOptions<MigrationOptions> _options;
         private MultiFolderDiscoveryCursor? _multiFolderCursor = null;
         private readonly IServiceProvider _sp;
@@ -37,12 +39,16 @@ namespace Migration.Infrastructure.Implementation.Services
         // Metrics tracking
         private long _totalInserted = 0;
 
+        // Cache for DOSSIER folder IDs: folderType -> destinationFolderId
+        private readonly Dictionary<string, string> _dossierFolderCache = new();
+
         private const string ServiceName = "FolderDiscovery";
 
-        public FolderDiscoveryService(IFolderIngestor ingestor, IFolderReader reader, IOptions<MigrationOptions> options, IServiceProvider sp, IUnitOfWork unitOfWork, ILoggerFactory logger)
+        public FolderDiscoveryService(IFolderIngestor ingestor, IFolderReader reader, IDocumentResolver resolver, IOptions<MigrationOptions> options, IServiceProvider sp, IUnitOfWork unitOfWork, ILoggerFactory logger)
         {
             _ingestor = ingestor;
             _reader = reader;
+            _resolver = resolver;
             _options = options;
             _sp = sp;
             _unitOfWork = unitOfWork;
@@ -85,6 +91,12 @@ namespace Migration.Infrastructure.Implementation.Services
                     return new FolderBatchResult(0);
                 }
 
+                _fileLogger.LogInformation("Found {Count} DOSSIER subfolders: {Types}",
+                    subfolders.Count, string.Join(", ", subfolders.Keys));
+
+                // PRE-CREATE all DOSSIER destination folders SEQUENTIALLY to avoid race conditions
+                await EnsureDossierFoldersExistAsync(subfolders.Keys, ct).ConfigureAwait(false);
+
                 currentMultiCursor = new MultiFolderDiscoveryCursor
                 {
                     SubfolderMap = subfolders,
@@ -97,9 +109,6 @@ namespace Migration.Infrastructure.Implementation.Services
                 {
                     _multiFolderCursor = currentMultiCursor;
                 }
-
-                _fileLogger.LogInformation("Found {Count} DOSSIER subfolders: {Types}",
-                    subfolders.Count, string.Join(", ", subfolders.Keys));
             }
 
             // Get current subfolder to process
@@ -153,6 +162,22 @@ namespace Migration.Infrastructure.Implementation.Services
             _fileLogger.LogInformation("Read {Count} folders from DOSSIER-{Type}", page.Items.Count, currentType);
 
             var foldersToInsert = page.Items.ToList().ToFolderStagingListInsert();
+
+            // Populate DossierDestFolderId from cache for all folders
+            if (_dossierFolderCache.TryGetValue(currentType, out var dossierFolderId))
+            {
+                foreach (var folder in foldersToInsert)
+                {
+                    folder.DossierDestFolderId = dossierFolderId;
+                }
+                _fileLogger.LogDebug("Populated DossierDestFolderId={DossierFolderId} for {Count} folders",
+                    dossierFolderId, foldersToInsert.Count);
+            }
+            else
+            {
+                _fileLogger.LogWarning("DOSSIER-{Type} not found in cache! This should not happen.", currentType);
+            }
+
             var inserted = await InsertFoldersAsync(foldersToInsert, ct).ConfigureAwait(false);
 
             // Update cursor
@@ -551,7 +576,55 @@ namespace Migration.Infrastructure.Implementation.Services
             }
         }
 
-       
+        /// <summary>
+        /// Pre-creates all DOSSIER destination folders SEQUENTIALLY to avoid race conditions
+        /// in DocumentDiscoveryService parallel processing
+        /// </summary>
+        private async Task EnsureDossierFoldersExistAsync(IEnumerable<string> folderTypes, CancellationToken ct)
+        {
+            _fileLogger.LogInformation("Pre-creating DOSSIER destination folders to avoid race conditions...");
+
+            foreach (var folderType in folderTypes)
+            {
+                // Check cache first
+                if (_dossierFolderCache.ContainsKey(folderType))
+                {
+                    _fileLogger.LogDebug("DOSSIER-{Type} already exists in cache", folderType);
+                    continue;
+                }
+
+                var dossierFolderName = $"DOSSIER-{folderType}";
+                _fileLogger.LogInformation("Creating destination folder: {FolderName}", dossierFolderName);
+
+                try
+                {
+                    // Create/resolve the DOSSIER folder under RootDestinationFolderId
+                    var dossierFolderId = await _resolver.ResolveAsync(
+                        _options.Value.RootDestinationFolderId,
+                        dossierFolderName,
+                        ct).ConfigureAwait(false);
+
+                    // Cache the folder ID
+                    _dossierFolderCache[folderType] = dossierFolderId;
+
+                    _fileLogger.LogInformation(
+                        "Successfully created/resolved DOSSIER-{Type} -> {FolderId}",
+                        folderType, dossierFolderId);
+                }
+                catch (Exception ex)
+                {
+                    _dbLogger.LogError(ex,
+                        "Failed to create DOSSIER-{Type} destination folder", folderType);
+                    _uiLogger.LogError(ex,
+                        "Failed to create DOSSIER-{Type} destination folder", folderType);
+                    throw;
+                }
+            }
+
+            _fileLogger.LogInformation(
+                "Successfully pre-created {Count} DOSSIER destination folders",
+                _dossierFolderCache.Count);
+        }
 
 
         #endregion

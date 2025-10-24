@@ -22,6 +22,13 @@ namespace Alfresco.Contracts.Oracle.Models
 
         public string? DestFolderId { get; set; }
 
+        /// <summary>
+        /// NodeId of the DOSSIER-{folderType} destination folder (e.g., DOSSIER-PL, DOSSIER-FL)
+        /// This is the parent folder under RootDestinationFolderId where target folders will be created
+        /// Populated by FolderDiscoveryService during initial discovery
+        /// </summary>
+        public string? DossierDestFolderId { get; set; }
+
         public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 
         public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;

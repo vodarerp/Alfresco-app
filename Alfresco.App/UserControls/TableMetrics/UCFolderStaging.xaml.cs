@@ -1,7 +1,10 @@
 ﻿using Alfresco.Abstraction.Interfaces;
 using Microsoft.Extensions.DependencyInjection;
-using Migration.Extensions.Oracle;
-using Oracle.Abstraction.Interfaces;
+//using Migration.Extensions.Oracle;
+using Migration.Extensions.SqlServer;
+//using Oracle.Abstraction.Interfaces;
+using SqlServer.Abstraction.Interfaces;
+using SqlServer.Infrastructure.Implementation;
 using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;

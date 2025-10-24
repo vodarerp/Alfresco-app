@@ -18,7 +18,8 @@
     <ProjectReference Include="..\Mapper\Mapper.csproj" />
     <ProjectReference Include="..\Migration.Abstraction\Migration.Abstraction.csproj" />
     <ProjectReference Include="..\Migration.Extensions\Migration.Extensions.csproj" />
-    <ProjectReference Include="..\Oracle.Abstraction\Oracle.Abstraction.csproj" />    
+    <!--<ProjectReference Include="..\Oracle.Abstraction\Oracle.Abstraction.csproj" />-->
+    <ProjectReference Include="..\SqlServer.Abstraction\SqlServer.Abstraction.csproj" />
   </ItemGroup>
 
 </Project>

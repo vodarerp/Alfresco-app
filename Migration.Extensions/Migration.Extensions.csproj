@@ -13,6 +13,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\Oracle.Abstraction\Oracle.Abstraction.csproj" />
+    <ProjectReference Include="..\SqlServer.Abstraction\SqlServer.Abstraction.csproj" />
   </ItemGroup>
 
 </Project>

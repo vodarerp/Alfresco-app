@@ -103,21 +103,21 @@ namespace Alfresco.App.UserControls
             {
                 Connected = false;
             }
-            var healt = App.AppHost.Services.GetRequiredService<HealthCheckService>();
-            var report = await healt.CheckHealthAsync();
+            //var healt = App.AppHost.Services.GetRequiredService<HealthCheckService>();
+            //var report = await healt.CheckHealthAsync();
 
-            foreach(var entri in report.Entries)
-            {
-                var val = entri.Value;
-                HealthItems.Add(new HealthItem
-                {
-                    Name = entri.Key,
-                    DurationInMs = (int)val.Duration.TotalMilliseconds,
-                    Description = val.Description,
-                    Error = val.Exception?.Message,
-                    Tags = string.Join(", ", val.Tags)
-                });
-            }
+            //foreach(var entri in report.Entries)
+            //{
+            //    var val = entri.Value;
+            //    HealthItems.Add(new HealthItem
+            //    {
+            //        Name = entri.Key,
+            //        DurationInMs = (int)val.Duration.TotalMilliseconds,
+            //        Description = val.Description,
+            //        Error = val.Exception?.Message,
+            //        Tags = string.Join(", ", val.Tags)
+            //    });
+            //}
 
 
             //var l = report.Entries.Values.ToList();

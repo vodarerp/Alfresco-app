@@ -10,9 +10,11 @@ using Migration.Abstraction.Interfaces;
 using Migration.Abstraction.Interfaces.Wrappers;
 using Migration.Abstraction.Models;
 using Migration.Infrastructure.Implementation.Helpers;
-using Oracle.Abstraction.Interfaces;
+//using Oracle.Abstraction.Interfaces;
+using SqlServer.Abstraction.Interfaces;
 using System.Collections.Concurrent;
-using Migration.Extensions.Oracle;
+//using Migration.Extensions.Oracle;
+using Migration.Extensions.SqlServer;
 using System.Diagnostics;
 using System.Text.Json;
 
@@ -641,31 +643,54 @@ namespace Migration.Infrastructure.Implementation.Services
             var normalizedName = folder.Name?.NormalizeName()
                     ?? throw new InvalidOperationException($"Folder {folder.Id} has null name");
 
-            // Check if we already resolved this folder's NodeId
             string parentPath = string.Empty;
-            var cacheKey = $"node:{folder.ParentId}";
-            if(_resolvedFoldersCache.TryGetValue(cacheKey, out var cachedId))
+
+            // FIRST: Try to use DossierDestFolderId populated by FolderDiscoveryService
+            if (!string.IsNullOrEmpty(folder.DossierDestFolderId))
             {
-                _fileLogger.LogDebug("Using cached destination folder ID for NodeId {NodeId}", folder.NodeId);
-                parentPath = cachedId;
+                parentPath = folder.DossierDestFolderId;
+                _fileLogger.LogDebug("Using pre-populated DossierDestFolderId={DossierDestFolderId} for folder {FolderId}",
+                    parentPath, folder.Id);
             }
             else
-            {                
-                parentPath = await BuildParentPathFromDossierAsync(folder, ct).ConfigureAwait(false);
+            {
+                // FALLBACK: Use cache or build parent path (for backwards compatibility)
+                _fileLogger.LogWarning("DossierDestFolderId is null for folder {FolderId}, falling back to legacy path resolution", folder.Id);
+
+                var cacheKey = $"node:{folder.ParentId}";
+
+                if(_resolvedFoldersCache.TryGetValue(cacheKey, out var cachedId))
+                {
+                    _fileLogger.LogDebug("Using cached destination folder ID for ParentId {ParentId}", folder.ParentId);
+                    parentPath = cachedId;
+                }
+                else
+                {
+                    // Build parent path (DOSSIER folder) and cache it BEFORE resolving child
+                    parentPath = await BuildParentPathFromDossierAsync(folder, ct).ConfigureAwait(false);
+
+                    // Cache the parent path immediately so subsequent folders with same parent use it
+                    if (!string.IsNullOrEmpty(parentPath))
+                    {
+                        _resolvedFoldersCache.TryAdd(cacheKey, parentPath);
+                        _fileLogger.LogDebug("Cached parent destination folder ID {ParentPath} for ParentId {ParentId}",
+                            parentPath, folder.ParentId);
+                    }
+                }
             }
+
             if (string.IsNullOrEmpty(parentPath))
             {
-                _fileLogger.LogWarning("Could not build parent path for folder {FolderId}, using root destination", folder.Id);
+                _fileLogger.LogWarning("Could not determine parent path for folder {FolderId}, using root destination", folder.Id);
                 var fallbackId = await _resolver.ResolveAsync(_options.Value.RootDestinationFolderId, normalizedName, ct).ConfigureAwait(false);
-                _resolvedFoldersCache.TryAdd(cacheKey, fallbackId);
-                return fallbackId;            
+                return fallbackId;
             }
-            _resolvedFoldersCache.TryAdd(cacheKey, parentPath);
 
+            // Now resolve the target folder under the parent (DOSSIER folder)
             var newFolderId = await _resolver.ResolveAsync(parentPath, normalizedName, ct).ConfigureAwait(false);
 
-            _fileLogger.LogDebug("Resolved and cached destination folder '{Name}' -> {Id}",
-                normalizedName, newFolderId);
+            _fileLogger.LogDebug("Resolved destination folder '{Name}' -> {Id} under parent {ParentPath}",
+                normalizedName, newFolderId, parentPath);
 
             if (_resolvedFoldersCache.Count > 10000)
             {
@@ -683,17 +708,30 @@ namespace Migration.Infrastructure.Implementation.Services
         
         private async Task<string> BuildParentPathFromDossierAsync(FolderStaging folder, CancellationToken ct)
         {
-
             string toRet = "";
+
+            // Get the parent folder from Alfresco (should be DOSSIER-{folderType})
+            _fileLogger.LogDebug("Getting parent folder info from Alfresco for ParentId {ParentId}", folder.ParentId);
             var nodeResponse = await _alfrescoReadApi.GetNodeByIdAsync(folder.ParentId!, ct).ConfigureAwait(false);
+
             if (nodeResponse?.Entry == null)
             {
-                _fileLogger.LogDebug("Reached end of parent chain at NodeId {NodeId}", folder.NodeId!);
+                _fileLogger.LogWarning("Could not retrieve parent folder from Alfresco for ParentId {ParentId}, folder {FolderId}",
+                    folder.ParentId, folder.Id);
                 return toRet;
             }
 
-            toRet = await _resolver.ResolveAsync(_options.Value.RootDestinationFolderId, nodeResponse.Entry.Name!, ct).ConfigureAwait(false);
+            var parentFolderName = nodeResponse.Entry.Name;
+            _fileLogger.LogDebug("Parent folder name from Alfresco: '{ParentName}' for folder {FolderId}",
+                parentFolderName, folder.Id);
 
+            // Resolve/create the DOSSIER folder under RootDestinationFolderId
+            // This creates: RootDestinationFolderId/DOSSIER-{folderType}
+            toRet = await _resolver.ResolveAsync(_options.Value.RootDestinationFolderId, parentFolderName!, ct).ConfigureAwait(false);
+
+            _fileLogger.LogInformation(
+                "Built parent path: DOSSIER folder '{ParentName}' resolved to {ParentFolderId} under root {RootId}",
+                parentFolderName, toRet, _options.Value.RootDestinationFolderId);
 
             return toRet;
         }

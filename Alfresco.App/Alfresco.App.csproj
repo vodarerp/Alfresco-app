@@ -9,7 +9,8 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="AspNetCore.HealthChecks.Oracle" Version="9.0.0" />
+    <!--<PackageReference Include="AspNetCore.HealthChecks.Oracle" Version="9.0.0" />-->
+    <PackageReference Include="AspNetCore.HealthChecks.SqlServer" Version="9.0.0" />
     <PackageReference Include="AspNetCore.HealthChecks.UI.Client" Version="9.0.0" />
     <PackageReference Include="AspNetCore.HealthChecks.Uris" Version="9.0.0" />
     <PackageReference Include="Dapper" Version="2.1.66" />
@@ -35,6 +36,8 @@
     <ProjectReference Include="..\Migration.Infrastructure\Migration.Infrastructure.csproj" />
     <ProjectReference Include="..\Migration.Workers\Migration.Workers.csproj" />
     <ProjectReference Include="..\Oracle.Infrastructure\Oracle.Infrastructure.csproj" />
+    <ProjectReference Include="..\SqlServer.Abstraction\SqlServer.Abstraction.csproj" />
+    <ProjectReference Include="..\SqlServer.Infrastructure\SqlServer.Infrastructure.csproj" />
   </ItemGroup>
 
   <ItemGroup>
