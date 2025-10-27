@@ -179,27 +179,20 @@ namespace Alfresco.App
                     // =====================================================================================
                     // EXTERNAL API CLIENTS AND MIGRATION SERVICES
                     // =====================================================================================
-                    // TODO: Uncomment when ClientAPI and DUT API become available
-                    // Per INTEGRATION_INSTRUCTIONS.md - these services are ready but need API access
 
-                    /*
                     // Configure ClientAPI Options
-                    services.Configure<ClientApiOptions>(
-                        context.Configuration.GetSection(ClientApiOptions.SectionName));
-
-                    // Configure DUT API Options
-                    services.Configure<DutApiOptions>(
-                        context.Configuration.GetSection(DutApiOptions.SectionName));
+                    services.Configure<Migration.Infrastructure.Implementation.ClientApiOptions>(
+                        context.Configuration.GetSection(Migration.Infrastructure.Implementation.ClientApiOptions.SectionName));
 
                     // ClientAPI HttpClient with Polly policies
-                    services.AddHttpClient<IClientApi, ClientApi>(cli =>
+                    services.AddHttpClient<IClientApi, Migration.Infrastructure.Implementation.ClientApi>(cli =>
                     {
                         cli.Timeout = TimeSpan.FromSeconds(
                             context.Configuration.GetValue<int>("ClientApi:TimeoutSeconds", 30));
                     })
                         .ConfigureHttpClient((sp, cli) =>
                         {
-                            var options = sp.GetRequiredService<IOptions<ClientApiOptions>>().Value;
+                            var options = sp.GetRequiredService<IOptions<Migration.Infrastructure.Implementation.ClientApiOptions>>().Value;
                             cli.BaseAddress = new Uri(options.BaseUrl);
                             cli.DefaultRequestHeaders.Accept.Add(
                                 new System.Net.Http.Headers.MediaTypeWithQualityHeaderValue("application/json"));
@@ -219,6 +212,12 @@ namespace Alfresco.App
                         .SetHandlerLifetime(TimeSpan.FromMinutes(5))
                         .AddPolicyHandler(GetRetryPlicy())
                         .AddPolicyHandler(GetCircuitBreakerPolicy());
+
+                    // TODO: Uncomment when DUT API becomes available
+                    /*
+                    // Configure DUT API Options
+                    services.Configure<DutApiOptions>(
+                        context.Configuration.GetSection(DutApiOptions.SectionName));
 
                     // DUT API HttpClient with Polly policies
                     services.AddHttpClient<IDutApi, DutApi>(cli =>
@@ -249,10 +248,11 @@ namespace Alfresco.App
                         .AddPolicyHandler(GetRetryPlicy())
                         .AddPolicyHandler(GetCircuitBreakerPolicy());
 
-                    // Migration Services
+                    // Migration Services (uncomment when DUT API is available)
                     services.AddScoped<IClientEnrichmentService, ClientEnrichmentService>();
                     services.AddScoped<IDocumentTypeTransformationService, DocumentTypeTransformationService>();
                     services.AddScoped<IUniqueFolderIdentifierService, UniqueFolderIdentifierService>();
+                    */
 
                     // Health checks for external APIs (optional)
                     // services.AddHealthChecks()
@@ -266,7 +266,6 @@ namespace Alfresco.App
                     //         name: "dutapi",
                     //         failureStatus: HealthStatus.Degraded,
                     //         tags: new[] {"api", "external"});
-                    */
 
                     // =====================================================================================
                     // END OF EXTERNAL API CONFIGURATION

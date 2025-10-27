@@ -2,6 +2,7 @@
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
+using System.Text.Json.Serialization;
 using System.Threading.Tasks;
 
 namespace Alfresco.Contracts.Models
@@ -18,5 +19,19 @@ namespace Alfresco.Contracts.Models
         public string Id { get; set; } = string.Empty;
         public string NodeType { get; set; } = string.Empty;
         public string ParentId { get; set; } = string.Empty;
+
+        /// <summary>
+        /// Raw properties from Alfresco (including custom ecm: properties)
+        /// Populated when using include=properties parameter in API calls
+        /// </summary>
+        public Dictionary<string, object>? Properties { get; set; }
+
+        /// <summary>
+        /// Client-specific properties that can be retrieved from Alfresco
+        /// or enriched from ClientAPI if not present.
+        /// </summary>
+        /// 
+        [JsonPropertyName("properties")]
+        public ClientProperties? ClientProperties { get; set; }
     }
 }

@@ -22,7 +22,10 @@
       "Bash(del \"C:\\Users\\Nikola Preradov\\source\\repos\\Alfresco\\SqlServer.Abstraction\\Class1.cs\")",
       "Bash(del \"C:\\Users\\Nikola Preradov\\source\\repos\\Alfresco\\SqlServer.Infrastructure\\Class1.cs\")",
       "Bash(rm:*)",
-      "Bash(dotnet sln:*)"
+      "Bash(dotnet sln:*)",
+      "Bash(findstr:*)",
+      "Bash(timeout /t 5)",
+      "Bash(curl:*)"
     ],
     "deny": [],
     "ask": []

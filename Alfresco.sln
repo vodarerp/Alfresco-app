@@ -32,6 +32,7 @@ Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Solution Items", "Solution 
 		ClientAPI - swagger.json = ClientAPI - swagger.json
 		Migracija_Dokumentacija.pdf = Migracija_Dokumentacija.pdf
 		Migracija_dokumentacija.txt = Migracija_dokumentacija.txt
+		Mock_ClientAPI_DOKUMENTACIJA.md = Mock_ClientAPI_DOKUMENTACIJA.md
 	EndProjectSection
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "SqlServer.Infrastructure", "SqlServer.Infrastructure\SqlServer.Infrastructure.csproj", "{DB1F8ECE-9F2E-4866-9ECA-30B759C39447}"

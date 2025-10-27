@@ -1,4 +1,6 @@
-﻿using Alfresco.Contracts.Options;
+﻿using Alfresco.Contracts.Extensions;
+using Alfresco.Contracts.Models;
+using Alfresco.Contracts.Options;
 using Alfresco.Contracts.Oracle.Models;
 using Mapper;
 using Microsoft.Extensions.DependencyInjection;
@@ -7,6 +9,7 @@ using Microsoft.Extensions.Options;
 using Migration.Abstraction.Interfaces;
 using Migration.Abstraction.Interfaces.Services;
 using Migration.Abstraction.Models;
+using Migration.Infrastructure.Extensions;
 //using Oracle.Abstraction.Interfaces;
 using SqlServer.Abstraction.Interfaces;
 using System;
@@ -32,6 +35,7 @@ namespace Migration.Infrastructure.Implementation.Services
         private readonly ILogger _dbLogger;
         private readonly ILogger _fileLogger;
         private readonly ILogger _uiLogger;
+        private readonly IClientApi? _clientApi;
         //private readonly ILogger<FolderDiscoveryService> _logger;
 
         private readonly object _cursorLock = new();
@@ -44,7 +48,15 @@ namespace Migration.Infrastructure.Implementation.Services
 
         private const string ServiceName = "FolderDiscovery";
 
-        public FolderDiscoveryService(IFolderIngestor ingestor, IFolderReader reader, IDocumentResolver resolver, IOptions<MigrationOptions> options, IServiceProvider sp, IUnitOfWork unitOfWork, ILoggerFactory logger)
+        public FolderDiscoveryService(
+            IFolderIngestor ingestor,
+            IFolderReader reader,
+            IDocumentResolver resolver,
+            IOptions<MigrationOptions> options,
+            IServiceProvider sp,
+            IUnitOfWork unitOfWork,
+            ILoggerFactory logger,
+            IClientApi? clientApi = null)
         {
             _ingestor = ingestor;
             _reader = reader;
@@ -52,6 +64,7 @@ namespace Migration.Infrastructure.Implementation.Services
             _options = options;
             _sp = sp;
             _unitOfWork = unitOfWork;
+            _clientApi = clientApi;
             //_logger = logger;
             _dbLogger = logger.CreateLogger("DbLogger");
             _fileLogger = logger.CreateLogger("FileLogger");
@@ -160,6 +173,9 @@ namespace Migration.Infrastructure.Implementation.Services
             }
 
             _fileLogger.LogInformation("Read {Count} folders from DOSSIER-{Type}", page.Items.Count, currentType);
+
+            // Enrich folders with ClientAPI data if properties are missing
+            await EnrichFoldersWithClientDataAsync(page.Items, ct).ConfigureAwait(false);
 
             var foldersToInsert = page.Items.ToList().ToFolderStagingListInsert();
 
@@ -624,6 +640,76 @@ namespace Migration.Infrastructure.Implementation.Services
             _fileLogger.LogInformation(
                 "Successfully pre-created {Count} DOSSIER destination folders",
                 _dossierFolderCache.Count);
+        }
+
+        /// <summary>
+        /// Enriches folders with ClientAPI data if Alfresco properties are missing
+        /// </summary>
+        private async Task EnrichFoldersWithClientDataAsync(IReadOnlyList<ListEntry> folders, CancellationToken ct)
+        {
+            if (_clientApi == null)
+            {
+                _fileLogger.LogDebug("ClientAPI not configured, skipping client data enrichment");
+                return;
+            }
+
+            var enrichmentCount = 0;
+            var errorCount = 0;
+
+            foreach (var listEntry in folders)
+            {
+                var entry = listEntry.Entry;
+
+                // First, try to parse properties from Alfresco if they exist
+                entry.PopulateClientProperties();
+
+                // Check if we need to enrich from ClientAPI
+                if (entry.HasClientProperties())
+                {
+                    _fileLogger.LogDebug("Folder {Name} already has client properties from Alfresco", entry.Name);
+                    continue;
+                }
+
+                // Try to extract CoreId from folder name
+                var coreId = entry.TryExtractCoreIdFromName();
+                if (string.IsNullOrWhiteSpace(coreId))
+                {
+                    _fileLogger.LogWarning("Could not extract CoreId from folder name: {Name}", entry.Name);
+                    continue;
+                }
+
+                try
+                {
+                    _fileLogger.LogDebug("Fetching client data from ClientAPI for CoreId: {CoreId}", coreId);
+
+                    // Call ClientAPI to get client data
+                    var clientData = await _clientApi.GetClientDataAsync(coreId, ct).ConfigureAwait(false);
+
+                    // Enrich entry with client data
+                    entry.EnrichWithClientData(clientData);
+
+                    enrichmentCount++;
+
+                    _fileLogger.LogDebug(
+                        "Successfully enriched folder {Name} with ClientAPI data for CoreId: {CoreId}",
+                        entry.Name, coreId);
+                }
+                catch (Exception ex)
+                {
+                    errorCount++;
+                    _fileLogger.LogWarning(ex,
+                        "Failed to enrich folder {Name} with ClientAPI data for CoreId: {CoreId}",
+                        entry.Name, coreId);
+                    // Continue processing other folders even if one fails
+                }
+            }
+
+            if (enrichmentCount > 0)
+            {
+                _fileLogger.LogInformation(
+                    "Enriched {EnrichedCount} folders with ClientAPI data (Errors: {ErrorCount})",
+                    enrichmentCount, errorCount);
+            }
         }
 
 

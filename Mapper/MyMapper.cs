@@ -25,7 +25,7 @@ namespace Mapper
 
         public static FolderStaging ToFolderStagingInsert(this Entry inEntryi)
         {
-            return new FolderStaging
+            var folderStaging = new FolderStaging
             {
                 NodeId = inEntryi.Id,
                 ParentId = inEntryi.ParentId,
@@ -35,6 +35,25 @@ namespace Mapper
                 UpdatedAt = DateTime.UtcNow
                 //InsertedAtAlfresco = inEntryi.CreatedAt
             };
+
+            // Map ClientProperties if available
+            if (inEntryi.ClientProperties != null)
+            {
+                folderStaging.CoreId = inEntryi.ClientProperties.CoreId;
+                folderStaging.MbrJmbg = inEntryi.ClientProperties.MbrJmbg;
+                folderStaging.ClientName = inEntryi.ClientProperties.ClientName;
+                folderStaging.ClientType = inEntryi.ClientProperties.ClientType;
+                folderStaging.ClientSubtype = inEntryi.ClientProperties.ClientSubtype;
+                folderStaging.Residency = inEntryi.ClientProperties.Residency;
+                folderStaging.Segment = inEntryi.ClientProperties.Segment;
+                folderStaging.Staff = inEntryi.ClientProperties.Staff;
+                folderStaging.OpuUser = inEntryi.ClientProperties.OpuUser;
+                folderStaging.OpuRealization = inEntryi.ClientProperties.OpuRealization;
+                folderStaging.Barclex = inEntryi.ClientProperties.Barclex;
+                folderStaging.Collaborator = inEntryi.ClientProperties.Collaborator;
+            }
+
+            return folderStaging;
         }
 
         public static List<FolderStaging> ToFolderStagingListInsert(this IEnumerable<Entry> inEntries)

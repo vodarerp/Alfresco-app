@@ -8,6 +8,7 @@ namespace Migration.Abstraction.Interfaces
 {
     public interface IDocumentResolver
     {
-        Task<string> ResolveAsync(string destinationRootId, string newFolderName,CancellationToken ct);
+        Task<string> ResolveAsync(string destinationRootId, string newFolderName, CancellationToken ct);
+        Task<string> ResolveAsync(string destinationRootId, string newFolderName, Dictionary<string, object>? properties, CancellationToken ct);
     }
 }

@@ -1,5 +1,6 @@
 ﻿using Alfresco.Abstraction.Interfaces;
 using Alfresco.Contracts.Enums;
+using Alfresco.Contracts.Extensions;
 using Alfresco.Contracts.Options;
 using Alfresco.Contracts.Oracle.Models;
 using Mapper;
@@ -682,12 +683,15 @@ namespace Migration.Infrastructure.Implementation.Services
             if (string.IsNullOrEmpty(parentPath))
             {
                 _fileLogger.LogWarning("Could not determine parent path for folder {FolderId}, using root destination", folder.Id);
-                var fallbackId = await _resolver.ResolveAsync(_options.Value.RootDestinationFolderId, normalizedName, ct).ConfigureAwait(false);
+                var properties = folder.ToAlfrescoProperties();
+                var fallbackId = await _resolver.ResolveAsync(_options.Value.RootDestinationFolderId, normalizedName, properties, ct).ConfigureAwait(false);
                 return fallbackId;
             }
 
             // Now resolve the target folder under the parent (DOSSIER folder)
-            var newFolderId = await _resolver.ResolveAsync(parentPath, normalizedName, ct).ConfigureAwait(false);
+            // Include ClientProperties from FolderStaging when creating the folder
+            var alfrescoProperties = folder.ToAlfrescoProperties();
+            var newFolderId = await _resolver.ResolveAsync(parentPath, normalizedName, alfrescoProperties, ct).ConfigureAwait(false);
 
             _fileLogger.LogDebug("Resolved destination folder '{Name}' -> {Id} under parent {ParentPath}",
                 normalizedName, newFolderId, parentPath);

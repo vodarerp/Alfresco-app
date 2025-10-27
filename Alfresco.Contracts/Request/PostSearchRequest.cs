@@ -12,5 +12,7 @@ namespace Alfresco.Contracts.Request
 
         public PagingRequest? Paging { get; set; } = new();
         public List<SortRequest>? Sort { get; set; } = new() { new() };
+
+        public string[] Include { get; set;  } = new string[] {  };
     }
 }

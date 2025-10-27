@@ -64,7 +64,8 @@ namespace Migration.Infrastructure.Implementation.Folder
                     MaxItems = inRequest.Take,
                     SkipCount = 0
                 },
-                Sort = null
+                Sort = null,
+                Include = new string[] { "properties" }
             };
 
             var result = (await _read.SearchAsync(req, ct).ConfigureAwait(false)).List?.Entries ?? new List<ListEntry>();

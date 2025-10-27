@@ -30,12 +30,16 @@ namespace Migration.Infrastructure.Implementation.Document
         }
         public async Task<string> ResolveAsync(string destinationRootId, string newFolderName, CancellationToken ct)
         {
+            return await ResolveAsync(destinationRootId, newFolderName, null, ct).ConfigureAwait(false);
+        }
 
+        public async Task<string> ResolveAsync(string destinationRootId, string newFolderName, Dictionary<string, object>? properties, CancellationToken ct)
+        {
             var folderID = await _read.GetFolderByRelative(destinationRootId, newFolderName, ct).ConfigureAwait(false);
 
             if (string.IsNullOrEmpty(folderID))
             {
-                folderID = await _write.CreateFolderAsync(destinationRootId, newFolderName, ct).ConfigureAwait(false);
+                folderID = await _write.CreateFolderAsync(destinationRootId, newFolderName, properties, ct).ConfigureAwait(false);
             }
 
             return folderID;

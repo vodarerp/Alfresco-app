@@ -56,18 +56,27 @@ namespace Alfresco.Client.Implementation
 
         public async Task<string> CreateFolderAsync(string parentFolderId, string newFolderName, CancellationToken ct = default)
         {
+            return await CreateFolderAsync(parentFolderId, newFolderName, null, ct).ConfigureAwait(false);
+        }
+
+        public async Task<string> CreateFolderAsync(string parentFolderId, string newFolderName, Dictionary<string, object>? properties, CancellationToken ct = default)
+        {
             var jsonSerializerSettings = new JsonSerializerSettings
             {
                 NullValueHandling = NullValueHandling.Ignore,
                 ContractResolver = new Newtonsoft.Json.Serialization.CamelCasePropertyNamesContractResolver()
             };
 
+            // Build body with optional properties
+            dynamic body = new System.Dynamic.ExpandoObject();
+            body.name = newFolderName;
+            body.nodeType = "cm:folder";
 
-            var body = new
+            // Add custom properties if provided
+            if (properties != null && properties.Count > 0)
             {
-                name = newFolderName,
-                nodeType = "cm:folder"
-            };
+                body.properties = properties;
+            }
 
             var json = JsonConvert.SerializeObject(body, jsonSerializerSettings);
             using var bodyRequest = new StringContent(json, Encoding.UTF8, "application/json");

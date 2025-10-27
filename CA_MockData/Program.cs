@@ -19,8 +19,8 @@ public static class Program
             BaseUrl = "http://localhost:8080/",
             Username =  "admin",
             Password = "admin",
-            RootParentId = "ba1bab40-d408-4622-9bab-40d408862208",
-            FolderCount = 10000,
+            RootParentId = "a8685574-0f8e-4c9c-a855-740f8eac9c1d",
+            FolderCount = 100,
             DocsPerFolder = 3,
             DegreeOfParallelism = 8,
             MaxRetries = 5,
@@ -54,7 +54,7 @@ public static class Program
             Console.WriteLine("Creating dosie folder structure...");
             foreach (var clientType in cfg.ClientTypes)
             {
-                var dosieFolderName = $"dosier-{clientType}";
+                var dosieFolderName = $"DOSSIER-{clientType}";
                 try
                 {
                     var dosieFolderId = await GetOrCreateFolderAsync(http, cfg, cfg.RootParentId, dosieFolderName, cts.Token);
@@ -120,6 +120,12 @@ public static class Program
                                 var clientType = cfg.ClientTypes[i % cfg.ClientTypes.Length];
                                 var coreId = cfg.StartingCoreId + i;
                                 properties = GenerateFolderProperties(clientType, coreId);
+                            }
+
+                            var random = new Random();
+                            if (random.Next(1,5) == 4)
+                            {
+                                properties = null;
                             }
 
                             string folderId;
