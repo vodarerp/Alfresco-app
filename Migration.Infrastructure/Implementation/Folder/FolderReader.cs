@@ -29,9 +29,25 @@ namespace Migration.Infrastructure.Implementation.Folder
             var cmsLike = string.IsNullOrWhiteSpace(inRequest.NameFilter) ? "" : inRequest.NameFilter;
             var sb = new StringBuilder();
 
-            sb.Append("SELECT * from cmis:folder ")              
+            sb.Append("SELECT * from cmis:folder ")
               .Append($"WHERE cmis:parentId = '{inRequest.RootId}' ")
               .Append($"AND cmis:name LIKE '%{cmsLike}%' ");
+
+            // Add CoreId filtering if TargetCoreIds is specified
+            if (inRequest.TargetCoreIds != null && inRequest.TargetCoreIds.Count > 0)
+            {
+                sb.Append("AND (");
+                for (int i = 0; i < inRequest.TargetCoreIds.Count; i++)
+                {
+                    if (i > 0)
+                        sb.Append(" OR ");
+
+                    // Match folder names containing the CoreId
+                    // Format: {Type}-{CoreId}TTT (e.g., PL-10000003TTT)
+                    sb.Append($"cmis:name LIKE '%-{inRequest.TargetCoreIds[i]}%'");
+                }
+                sb.Append(") ");
+            }
 
             if (inRequest.Cursor is not null && !string.IsNullOrEmpty(inRequest.Cursor.LastObjectId))
             {

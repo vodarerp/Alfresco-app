@@ -61,5 +61,12 @@ namespace Alfresco.Contracts.Options
         /// Folders are expected to be in subfolders named: DOSSIER-{FolderType}
         /// </summary>
         public List<string>? FolderTypes { get; set; }
+
+        /// <summary>
+        /// List of CoreIds to process. Only folders/dossiers containing these CoreIds will be processed.
+        /// If null or empty, all folders will be processed (no CoreId filtering).
+        /// CoreId is typically extracted from folder names (e.g., "PL-10000003" contains CoreId "10000003")
+        /// </summary>
+        public List<string>? TargetCoreIds { get; set; }
     }
 }

@@ -34,7 +34,7 @@ namespace Migration.Abstraction.Models
 
     public sealed record MoveExecutorRequest(string DocumentId, string DestFolderId, string? NewDocumentName);
 
-    public sealed record FolderReaderRequest(string RootId, string NameFilter, int Skip, int Take, FolderSeekCursor? Cursor);
+    public sealed record FolderReaderRequest(string RootId, string NameFilter, int Skip, int Take, FolderSeekCursor? Cursor, List<string>? TargetCoreIds = null);
 
     public sealed record FolderReaderResult(IReadOnlyList<ListEntry> Items, FolderSeekCursor? Next) 
     {

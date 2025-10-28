@@ -84,6 +84,7 @@ namespace Migration.Infrastructure.Implementation.Services
             var nameFilter = _options.Value.FolderDiscovery.NameFilter ?? "-";
             var rootDiscoveryId = _options.Value.RootDiscoveryFolderId;
             var folderTypes = _options.Value.FolderDiscovery.FolderTypes;
+            var targetCoreIds = _options.Value.FolderDiscovery.TargetCoreIds;
 
             // Initialize multi-folder cursor if needed
             MultiFolderDiscoveryCursor? currentMultiCursor;
@@ -137,13 +138,22 @@ namespace Migration.Infrastructure.Implementation.Services
 
             _fileLogger.LogDebug("Processing DOSSIER-{Type} folder", currentType);
 
+            if (targetCoreIds != null && targetCoreIds.Count > 0)
+            {
+                _fileLogger.LogInformation(
+                    "Filtering by {Count} CoreIds: {CoreIds}",
+                    targetCoreIds.Count,
+                    string.Join(", ", targetCoreIds));
+            }
+
             // Read batch from current subfolder
             var folderRequest = new FolderReaderRequest(
                 RootId: currentFolderId,
                 NameFilter: nameFilter,
                 Skip: 0,
                 Take: batch,
-                Cursor: currentMultiCursor.CurrentCursor);
+                Cursor: currentMultiCursor.CurrentCursor,
+                TargetCoreIds: targetCoreIds);
 
             var page = await _reader.ReadBatchAsync(folderRequest, ct).ConfigureAwait(false);
 
