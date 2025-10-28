@@ -79,10 +79,12 @@ namespace Migration.Infrastructure.Implementation
             catch (Exception ex)
             {
                 _logger.LogError(ex,
-                    "Failed to enrich folder {FolderId} ({FolderName}) with client data for CoreId: {CoreId}",
-                    folder.Id, folder.Name, folder.CoreId);
-                throw new InvalidOperationException(
-                    $"Failed to enrich folder {folder.Id} with client data for CoreId: {folder.CoreId}", ex);
+                    "Failed to enrich folder {FolderId} ({FolderName}) with client data for CoreId: {CoreId}. " +
+                    "Continuing without ClientAPI properties. Error: {ErrorType} - {ErrorMessage}",
+                    folder.Id, folder.Name, folder.CoreId, ex.GetType().Name, ex.Message);
+
+                // Return folder without ClientAPI properties - application continues
+                return folder;
             }
         }
 
@@ -154,10 +156,13 @@ namespace Migration.Infrastructure.Implementation
             catch (Exception ex)
             {
                 _logger.LogError(ex,
-                    "Failed to enrich document {DocId} with active accounts for CoreId: {CoreId}",
-                    document.Id, document.CoreId);
-                throw new InvalidOperationException(
-                    $"Failed to enrich document {document.Id} with accounts for CoreId: {document.CoreId}", ex);
+                    "Failed to enrich document {DocId} with active accounts for CoreId: {CoreId}. " +
+                    "Continuing without account numbers. Error: {ErrorType} - {ErrorMessage}",
+                    document.Id, document.CoreId, ex.GetType().Name, ex.Message);
+
+                // Set empty account numbers and continue - application continues
+                document.AccountNumbers = string.Empty;
+                return document;
             }
         }
 
@@ -165,7 +170,8 @@ namespace Migration.Infrastructure.Implementation
         {
             if (string.IsNullOrWhiteSpace(coreId))
             {
-                throw new ArgumentException("CoreId cannot be null or empty", nameof(coreId));
+                _logger.LogWarning("Cannot validate client - CoreId is null or empty");
+                return false;
             }
 
             try
@@ -184,9 +190,12 @@ namespace Migration.Infrastructure.Implementation
             catch (Exception ex)
             {
                 _logger.LogError(ex,
-                    "Failed to validate client for CoreId: {CoreId}",
-                    coreId);
-                throw;
+                    "Failed to validate client for CoreId: {CoreId}. " +
+                    "Assuming client does not exist. Error: {ErrorType} - {ErrorMessage}",
+                    coreId, ex.GetType().Name, ex.Message);
+
+                // Return false on error - treat as non-existent client
+                return false;
             }
         }
 

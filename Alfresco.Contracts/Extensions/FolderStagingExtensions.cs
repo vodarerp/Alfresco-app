@@ -20,6 +20,7 @@ namespace Alfresco.Contracts.Extensions
 
             var alfrescoProperties = new Dictionary<string, object>();
 
+            //alfrescoProperties["ecm:TestError123"] = "Test123321";
             // Only add non-null values
             if (!string.IsNullOrWhiteSpace(folder.CoreId))
                 alfrescoProperties["ecm:coreId"] = folder.CoreId;

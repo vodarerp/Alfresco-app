@@ -1,7 +1,9 @@
-﻿using Alfresco.App.Helpers;
-using Alfresco.Abstraction.Interfaces;
+﻿using Alfresco.Abstraction.Interfaces;
+using Alfresco.App.Helpers;
+using Microsoft.Data.SqlClient;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
+using Microsoft.Extensions.Options;
 using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
@@ -29,6 +31,7 @@ namespace Alfresco.App.UserControls
     {
 
         private readonly IAlfrescoReadApi _alfrescoService;
+        private readonly IOptions<Alfresco.Contracts.SqlServer.SqlServerOptions> _options;
 
         #region -HealthItems- property
         private ObservableCollection<HealthItem> _HealthItems = new();
@@ -44,7 +47,7 @@ namespace Alfresco.App.UserControls
                 }
             }
         }
-#endregion
+        #endregion
 
         #region -HealtChecks- property
         private ObservableCollection<HealthReportEntry> _HealtChecks = new();
@@ -78,12 +81,29 @@ namespace Alfresco.App.UserControls
         }
         #endregion
 
-        
+        #region -DbConnected- property
+        private bool _DbConnected;
+        public bool DbConnected
+        {
+            get { return _DbConnected; }
+            set
+            {
+                if (_DbConnected != value)
+                {
+                    _DbConnected = value;
+                    NotifyPropertyChanged();
+                }
+            }
+        }
+#endregion
+
+
         public StatusBarUC()
         {
             DataContext = this;
             InitializeComponent();
-            _alfrescoService = App.AppHost.Services.GetRequiredService<IAlfrescoReadApi>(); 
+            _alfrescoService = App.AppHost.Services.GetRequiredService<IAlfrescoReadApi>();
+            _options = App.AppHost.Services.GetRequiredService<IOptions<Alfresco.Contracts.SqlServer.SqlServerOptions>>();
 
             this.Loaded += StatusBarUC_Loaded;
 
@@ -98,10 +118,18 @@ namespace Alfresco.App.UserControls
 
                 Connected = await _alfrescoService.PingAsync();
 
+                using (var conn = new SqlConnection(_options.Value.ConnectionString))
+                {
+                    conn.Open();
+
+                    DbConnected = conn.State == System.Data.ConnectionState.Open;
+                }
+
             }
             catch (Exception ex)
             {
                 Connected = false;
+                DbConnected = false;
             }
             //var healt = App.AppHost.Services.GetRequiredService<HealthCheckService>();
             //var report = await healt.CheckHealthAsync();

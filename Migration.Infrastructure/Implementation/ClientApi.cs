@@ -36,7 +36,8 @@ namespace Migration.Infrastructure.Implementation
         {
             if (string.IsNullOrWhiteSpace(coreId))
             {
-                throw new ArgumentException("CoreId cannot be null or empty", nameof(coreId));
+                _logger.LogWarning("GetClientDataAsync called with null or empty CoreId, returning empty ClientData");
+                return CreateEmptyClientData(coreId ?? string.Empty);
             }
 
             try
@@ -54,7 +55,8 @@ namespace Migration.Infrastructure.Implementation
 
                 if (mockClientData == null)
                 {
-                    throw new InvalidOperationException($"Client API returned null data for CoreId: {coreId}");
+                    _logger.LogWarning("Client API returned null data for CoreId: {CoreId}, returning empty ClientData", coreId);
+                    return CreateEmptyClientData(coreId);
                 }
 
                 // Map mock API response to ClientData model
@@ -84,14 +86,26 @@ namespace Migration.Infrastructure.Implementation
             catch (HttpRequestException ex)
             {
                 _logger.LogError(ex,
-                    "HTTP request failed while fetching client data for CoreId: {CoreId}", coreId);
-                throw new InvalidOperationException($"Failed to retrieve client data for CoreId: {coreId}", ex);
+                    "HTTP request failed while fetching client data for CoreId: {CoreId}. " +
+                    "Error: {ErrorMessage}. Returning empty ClientData.",
+                    coreId, ex.Message);
+                return CreateEmptyClientData(coreId);
+            }
+            catch (TaskCanceledException ex)
+            {
+                _logger.LogError(ex,
+                    "Request timeout while fetching client data for CoreId: {CoreId}. " +
+                    "Error: {ErrorMessage}. Returning empty ClientData.",
+                    coreId, ex.Message);
+                return CreateEmptyClientData(coreId);
             }
             catch (Exception ex)
             {
                 _logger.LogError(ex,
-                    "Unexpected error while fetching client data for CoreId: {CoreId}", coreId);
-                throw;
+                    "Unexpected error while fetching client data for CoreId: {CoreId}. " +
+                    "Error: {ErrorType} - {ErrorMessage}. Returning empty ClientData.",
+                    coreId, ex.GetType().Name, ex.Message);
+                return CreateEmptyClientData(coreId);
             }
         }
 
@@ -99,7 +113,8 @@ namespace Migration.Infrastructure.Implementation
         {
             if (string.IsNullOrWhiteSpace(coreId))
             {
-                throw new ArgumentException("CoreId cannot be null or empty", nameof(coreId));
+                _logger.LogWarning("GetActiveAccountsAsync called with null or empty CoreId, returning empty list");
+                return new List<string>();
             }
 
             try
@@ -143,14 +158,26 @@ namespace Migration.Infrastructure.Implementation
             catch (HttpRequestException ex)
             {
                 _logger.LogError(ex,
-                    "HTTP request failed while fetching active accounts for CoreId: {CoreId}", coreId);
-                throw new InvalidOperationException($"Failed to retrieve active accounts for CoreId: {coreId}", ex);
+                    "HTTP request failed while fetching active accounts for CoreId: {CoreId}. " +
+                    "Error: {ErrorMessage}. Returning empty list.",
+                    coreId, ex.Message);
+                return new List<string>();
+            }
+            catch (TaskCanceledException ex)
+            {
+                _logger.LogError(ex,
+                    "Request timeout while fetching active accounts for CoreId: {CoreId}. " +
+                    "Error: {ErrorMessage}. Returning empty list.",
+                    coreId, ex.Message);
+                return new List<string>();
             }
             catch (Exception ex)
             {
                 _logger.LogError(ex,
-                    "Unexpected error while fetching active accounts for CoreId: {CoreId}", coreId);
-                throw;
+                    "Unexpected error while fetching active accounts for CoreId: {CoreId}. " +
+                    "Error: {ErrorType} - {ErrorMessage}. Returning empty list.",
+                    coreId, ex.GetType().Name, ex.Message);
+                return new List<string>();
             }
         }
 
@@ -158,7 +185,8 @@ namespace Migration.Infrastructure.Implementation
         {
             if (string.IsNullOrWhiteSpace(coreId))
             {
-                throw new ArgumentException("CoreId cannot be null or empty", nameof(coreId));
+                _logger.LogWarning("ValidateClientExistsAsync called with null or empty CoreId, returning false");
+                return false;
             }
 
             try
@@ -181,18 +209,52 @@ namespace Migration.Infrastructure.Implementation
             catch (HttpRequestException ex)
             {
                 _logger.LogError(ex,
-                    "HTTP request failed while validating client for CoreId: {CoreId}", coreId);
+                    "HTTP request failed while validating client for CoreId: {CoreId}. " +
+                    "Error: {ErrorMessage}. Assuming client does not exist.",
+                    coreId, ex.Message);
+                return false;
+            }
+            catch (TaskCanceledException ex)
+            {
+                _logger.LogError(ex,
+                    "Request timeout while validating client for CoreId: {CoreId}. " +
+                    "Error: {ErrorMessage}. Assuming client does not exist.",
+                    coreId, ex.Message);
                 return false;
             }
             catch (Exception ex)
             {
                 _logger.LogError(ex,
-                    "Unexpected error while validating client for CoreId: {CoreId}", coreId);
-                throw;
+                    "Unexpected error while validating client for CoreId: {CoreId}. " +
+                    "Error: {ErrorType} - {ErrorMessage}. Assuming client does not exist.",
+                    coreId, ex.GetType().Name, ex.Message);
+                return false;
             }
         }
 
         #region Helper Methods
+
+        /// <summary>
+        /// Creates an empty ClientData object when ClientAPI fails or returns no data
+        /// </summary>
+        private ClientData CreateEmptyClientData(string coreId)
+        {
+            return new ClientData
+            {
+                CoreId = coreId,
+                MbrJmbg = string.Empty,
+                ClientName = string.Empty,
+                ClientType = string.Empty,
+                ClientSubtype = string.Empty,
+                Residency = string.Empty,
+                Segment = string.Empty,
+                Staff = null,
+                OpuUser = null,
+                OpuRealization = null,
+                Barclex = null,
+                Collaborator = null
+            };
+        }
 
         /// <summary>
         /// Maps mock API ClientType to banking ClientType (FL = Fizičko Lice, PL = Pravno Lice)

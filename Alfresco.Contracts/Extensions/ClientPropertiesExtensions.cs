@@ -99,7 +99,7 @@ namespace Alfresco.Contracts.Extensions
                 return null;
 
             var alfrescoProperties = new Dictionary<string, object>();
-
+            //alfrescoProperties["ecm:TestError123"] = "Test123321";
             // Only add non-null values
             if (!string.IsNullOrWhiteSpace(clientProperties.CoreId))
                 alfrescoProperties["ecm:coreId"] = clientProperties.CoreId;

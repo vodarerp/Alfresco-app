@@ -41,22 +41,49 @@
                 <TextBlock Text="Total: " FontWeight="Bold" VerticalAlignment="Center"/>
                 <TextBlock Text="Ready" VerticalAlignment="Center"/>
             </StackPanel>-->
-                <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center" HorizontalAlignment="Right" Margin="0,0,10,0">
-                    <TextBlock Text="Connected: " FontWeight="Bold" VerticalAlignment="Center" MouseLeftButtonDown="TextBlock_MouseLeftButtonDown"/>
-                    <TextBlock VerticalAlignment="Center">
-                        <TextBlock.Style>
-                            <Style TargetType="TextBlock">
-                                <Setter Property="Text" Value="Disconnected"/>
-                                <Setter Property="Foreground" Value="Red"/>
-                                <Style.Triggers>
-                                    <DataTrigger Binding="{Binding Connected}" Value="True">
-                                        <Setter Property="Text" Value="Connected"/>
-                                        <Setter Property="Foreground" Value="Green"/>
-                                    </DataTrigger>
-                                </Style.Triggers>
-                            </Style>
-                        </TextBlock.Style>
-                    </TextBlock>
+                <StackPanel Grid.Column="1" Orientation="Vertical" VerticalAlignment="Center" HorizontalAlignment="Right" Margin="0,0,10,0">
+                    <Grid Name="AlfGrid">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto"/> 
+                            <ColumnDefinition Width="Auto"/> 
+                        </Grid.ColumnDefinitions>
+                        <TextBlock Grid.Column="0" Text="Alfresco Connection: " FontWeight="Bold" VerticalAlignment="Center" MouseLeftButtonDown="TextBlock_MouseLeftButtonDown"/>
+                        <TextBlock VerticalAlignment="Center" Grid.Column="1">
+                            <TextBlock.Style>
+                                <Style TargetType="TextBlock">
+                                    <Setter Property="Text" Value="Disconnected"/>
+                                    <Setter Property="Foreground" Value="Red"/>
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding Connected}" Value="True">
+                                            <Setter Property="Text" Value="Connected"/>
+                                            <Setter Property="Foreground" Value="Green"/>
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </TextBlock.Style>
+                        </TextBlock>
+                    </Grid>
+                    <Grid Name="DbConn">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto"/>
+                            <ColumnDefinition Width="Auto"/>
+                        </Grid.ColumnDefinitions>
+                        <TextBlock Grid.Column="0" Text="SqlServer Connection: " FontWeight="Bold" VerticalAlignment="Center" MouseLeftButtonDown="TextBlock_MouseLeftButtonDown"/>
+                        <TextBlock VerticalAlignment="Center" Grid.Column="1">
+                            <TextBlock.Style>
+                                <Style TargetType="TextBlock">
+                                    <Setter Property="Text" Value="Disconnected"/>
+                                    <Setter Property="Foreground" Value="Red"/>
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding DbConnected}" Value="True">
+                                            <Setter Property="Text" Value="Connected"/>
+                                            <Setter Property="Foreground" Value="Green"/>
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </TextBlock.Style>
+                        </TextBlock>
+                    </Grid>
                 </StackPanel>
             </Grid>
         </Border>
