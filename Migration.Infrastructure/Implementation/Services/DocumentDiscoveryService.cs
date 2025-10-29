@@ -139,12 +139,13 @@ namespace Migration.Infrastructure.Implementation.Services
 
 
         }
-        public async Task RunLoopAsync(CancellationToken ct, Action<WorkerProgress>? progressCallback)
+        public async Task<bool> RunLoopAsync(CancellationToken ct, Action<WorkerProgress>? progressCallback)
         {
             var emptyResultCounter = 0;
             var delay = _options.Value.IdleDelayInMs;
             var maxEmptyResults = _options.Value.BreakEmptyResults;
             var batchSize = _options.Value.DocumentDiscovery.BatchSize ?? _options.Value.BatchSize;
+            var completedSuccessfully = false;
 
             _fileLogger.LogInformation("DocumentDiscovery service started - IdleDelay: {IdleDelay}ms, MaxEmptyResults: {MaxEmptyResults}",
                 delay, maxEmptyResults);
@@ -244,6 +245,7 @@ namespace Migration.Infrastructure.Implementation.Services
 
                             progress.Message = $"Completed: {_totalProcessed} folders processed, {_totalFailed} failed";
                             progressCallback?.Invoke(progress);
+                            completedSuccessfully = true;
                             break;
                         }
 
@@ -295,14 +297,17 @@ namespace Migration.Infrastructure.Implementation.Services
                 "DocumentDiscovery service completed - Total: {Processed} processed, {Failed} failed",
                 _totalProcessed, _totalFailed);
             _uiLogger.LogInformation("Document Discovery completed: {Processed} folders processed", _totalProcessed);
+
+            return completedSuccessfully;
         }
 
 
-        public async Task RunLoopAsync(CancellationToken ct)
+        public async Task<bool> RunLoopAsync(CancellationToken ct)
         {
             var emptyResultCounter = 0;
             var delay = _options.Value.IdleDelayInMs;
             var maxEmptyResults = _options.Value.BreakEmptyResults;
+            var completedSuccessfully = false;
 
             // Reset stuck folders from previous crashed run
             await ResetStuckItemsAsync(ct).ConfigureAwait(false);
@@ -338,6 +343,7 @@ namespace Migration.Infrastructure.Implementation.Services
                             _fileLogger.LogInformation(
                                 "Breaking after {Count} consecutive empty results",
                                 emptyResultCounter);
+                            completedSuccessfully = true;
                             break;
                         }
                         await Task.Delay(delay,ct).ConfigureAwait(false);
@@ -373,7 +379,8 @@ namespace Migration.Infrastructure.Implementation.Services
                 "DocumentDiscovery worker completed after {Count} batches. " +
                 "Total: {Processed} processed, {Failed} failed",
                 batchCounter - 1, _totalProcessed, _totalFailed);
-            
+
+            return completedSuccessfully;
         }
 
         #region Private metods

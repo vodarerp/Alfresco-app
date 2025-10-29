@@ -214,13 +214,29 @@ namespace Migration.Workers
                         using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken, _cts.Token);
 
                         // Progress callback to update UI
-                        await svc.RunLoopAsync(linkedCts.Token, progress =>
+                        var completedSuccessfully = await svc.RunLoopAsync(linkedCts.Token, progress =>
                         {
                             TotalItems = progress.TotalItems;
                             ProcessedItems = progress.ProcessedItems;
                         }).ConfigureAwait(false);
 
                         _fileLogger.LogInformation("Worker end {time}!", DateTime.Now);
+
+                        // If work completed successfully (no more items), stop the worker
+                        if (completedSuccessfully)
+                        {
+                            lock (_lockObj)
+                            {
+                                LastStopped = DateTimeOffset.Now;
+                                LastError = null;
+                                State = WorkerState.Idle;
+                                IsEnabled = false;
+                            }
+
+                            _fileLogger.LogInformation("Worker {Key} completed all work and stopped automatically", Key);
+                            _dbLogger.LogInformation("Worker {Key} completed all work and stopped automatically", Key);
+                            _uiLogger.LogInformation("Worker {Key} completed successfully", Key);
+                        }
 
                     }
                     catch (OperationCanceledException)

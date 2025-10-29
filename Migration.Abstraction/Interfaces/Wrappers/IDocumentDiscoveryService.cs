@@ -13,8 +13,8 @@ namespace Migration.Abstraction.Interfaces.Wrappers
 
         Task<DocumentBatchResult> RunBatchAsync(CancellationToken ct);
 
-        Task RunLoopAsync(CancellationToken ct);
-        Task RunLoopAsync(CancellationToken ct, Action<WorkerProgress>? progressCallback);
+        Task<bool> RunLoopAsync(CancellationToken ct);
+        Task<bool> RunLoopAsync(CancellationToken ct, Action<WorkerProgress>? progressCallback);
 
 
 
