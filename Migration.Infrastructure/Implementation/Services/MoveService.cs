@@ -176,11 +176,12 @@ namespace Migration.Infrastructure.Implementation.Services
             return new MoveBatchResult(doneCount, errors.Count);
         }
 
-        public async Task RunLoopAsync(CancellationToken ct)
+        public async Task<bool> RunLoopAsync(CancellationToken ct)
         {
             var emptyResultCounter = 0;
             var delay = _options.Value.IdleDelayInMs;
             var maxEmptyResults = _options.Value.BreakEmptyResults;
+            var completedSuccessfully = false;
 
             _fileLogger.LogInformation("Move service started - IdleDelay: {IdleDelay}ms, MaxEmptyResults: {MaxEmptyResults}",
                 delay, maxEmptyResults);
@@ -222,6 +223,7 @@ namespace Migration.Infrastructure.Implementation.Services
                             _fileLogger.LogInformation(
                                 "Breaking after {Count} consecutive empty results",
                                 emptyResultCounter);
+                            completedSuccessfully = true;
                             break;
                         }
 
@@ -268,6 +270,8 @@ namespace Migration.Infrastructure.Implementation.Services
                 "Move service completed - Total: {Moved} moved, {Failed} failed",
                 _totalMoved, _totalFailed);
             _uiLogger.LogInformation("Move completed: {Moved} moved", _totalMoved);
+
+            return completedSuccessfully;
         }
 
         #region privates
@@ -571,12 +575,13 @@ namespace Migration.Infrastructure.Implementation.Services
             }
         }
 
-        public async Task RunLoopAsync(CancellationToken ct, Action<WorkerProgress>? progressCallback)
+        public async Task<bool> RunLoopAsync(CancellationToken ct, Action<WorkerProgress>? progressCallback)
         {
             var emptyResultCounter = 0;
             var delay = _options.Value.IdleDelayInMs;
             var maxEmptyResults = _options.Value.BreakEmptyResults;
             var batchSize = _options.Value.MoveService.BatchSize ?? _options.Value.BatchSize;
+            var completedSuccessfully = false;
 
             _fileLogger.LogInformation("Move worker started");
 
@@ -669,6 +674,7 @@ namespace Migration.Infrastructure.Implementation.Services
 
                             progress.Message = $"Completed: {_totalMoved} documents moved, {_totalFailed} failed";
                             progressCallback?.Invoke(progress);
+                            completedSuccessfully = true;
                             break;
                         }
 
@@ -712,6 +718,8 @@ namespace Migration.Infrastructure.Implementation.Services
             _fileLogger.LogInformation(
                 "Move worker completed after {Count} batches. Total: {Moved} moved, {Failed} failed",
                 batchCounter - 1, _totalMoved, _totalFailed);
+
+            return completedSuccessfully;
         }
 
         #endregion
