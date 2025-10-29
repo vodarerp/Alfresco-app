@@ -43,6 +43,8 @@ namespace Migration.Infrastructure.Implementation.Services
 
         private const string ServiceName = "Move";
 
+        private readonly ILogger _uiLogger;
+
         public MoveService(IMoveReader moveService, IMoveExecutor moveExecutor, IDocStagingRepository docRepo, IAlfrescoWriteApi write, IOptions<MigrationOptions> options, IServiceProvider sp, ILoggerFactory logger)
         {
             _moveReader = moveService;
@@ -53,7 +55,7 @@ namespace Migration.Infrastructure.Implementation.Services
             _sp = sp;
             _dbLogger = logger.CreateLogger("DbLogger");
             _fileLogger = logger.CreateLogger("FileLogger");
-            //_fileLogger = logger;
+            _uiLogger = logger.CreateLogger("UiLogger");
         }
 
         public async Task<MoveBatchResult> RunBatchAsync(CancellationToken ct)
@@ -61,19 +63,24 @@ namespace Migration.Infrastructure.Implementation.Services
             var sw = Stopwatch.StartNew();
             var acquireTimer = Stopwatch.StartNew();
 
-            _fileLogger.LogInformation("Move batch started");
+            _fileLogger.LogInformation("Move batch started - BatchSize: {BatchSize}, DOP: {DOP}",
+                _options.Value.MoveService.BatchSize ?? _options.Value.BatchSize,
+                _options.Value.MoveService.MaxDegreeOfParallelism ?? _options.Value.MaxDegreeOfParallelism);
+            _dbLogger.LogInformation("Move batch started");
 
             var batch = _options.Value.MoveService.BatchSize ?? _options.Value.BatchSize;
             var dop = _options.Value.MoveService.MaxDegreeOfParallelism ?? _options.Value.MaxDegreeOfParallelism;
 
             // 1. Atomic acquire - preuzmi i zaključaj dokumente u jednoj transakciji
+            _fileLogger.LogDebug("Acquiring documents for move - Batch size: {BatchSize}", batch);
             var documents = await AcquireDocumentsForMoveAsync(batch, ct).ConfigureAwait(false);
             acquireTimer.Stop();
             _fileLogger.LogInformation("Acquired {Count} documents in {Ms}ms", documents.Count, acquireTimer.ElapsedMilliseconds);
+            _dbLogger.LogInformation("Acquired {Count} documents in {Ms}ms", documents.Count, acquireTimer.ElapsedMilliseconds);
 
             if (documents.Count == 0)
             {
-                _fileLogger.LogInformation("No documents ready for move");
+                _fileLogger.LogDebug("No documents ready for move - batch is empty");
                 return new MoveBatchResult(0, 0);
             }
 
@@ -103,25 +110,28 @@ namespace Migration.Infrastructure.Implementation.Services
                     //    threadId, doc.Id);
                     try
                     {
+                        _fileLogger.LogDebug("Moving document {DocId} from {NodeId} to {ToPath}", doc.Id, doc.NodeId, doc.ToPath);
                         var res = await MoveSingleDocumentAsync(doc.Id, doc.NodeId, doc.ToPath, token).ConfigureAwait(false);
                         if (res)
                         {
                             successfulDocs.Add(doc.Id);
                             Interlocked.Increment(ref doneCount);
                             Interlocked.Increment(ref _totalMoved);
-
+                            _fileLogger.LogDebug("Successfully moved document {DocId}", doc.Id);
                         }
                         else
                         {
+                            _fileLogger.LogWarning("Move returned false for document {DocId} ({NodeId})", doc.Id, doc.NodeId);
+                            _dbLogger.LogWarning("Move returned false for document {DocId} ({NodeId})", doc.Id, doc.NodeId);
                             errors.Add((doc.Id, new InvalidOperationException("Move returned false")));
-
                         }
                     }
                     catch (Exception ex)
                     {
+                        _fileLogger.LogError("Failed to move document {DocId} - Error: {Error}", doc.Id, ex.Message);
                         _dbLogger.LogError(ex,
-                            "Failed to move document {DocId} ({NodeId})",
-                            doc.Id, doc.NodeId);
+                            "Failed to move document {DocId} ({NodeId}) to {ToPath}",
+                            doc.Id, doc.NodeId, doc.ToPath);
                         errors.Add((doc.Id, ex));
                     }
                 });
@@ -137,11 +147,13 @@ namespace Migration.Infrastructure.Implementation.Services
             var updateTimer = Stopwatch.StartNew();
             if (!ct.IsCancellationRequested && !successfulDocs.IsEmpty)
             {
+                _fileLogger.LogDebug("Marking {Count} documents as DONE", successfulDocs.Count);
                 await MarkDocumentsAsDoneAsync(successfulDocs, ct).ConfigureAwait(false);
             }
             // 4. Batch update za greške - sve u jednoj transakciji
             if (!ct.IsCancellationRequested && !errors.IsEmpty)
             {
+                _fileLogger.LogWarning("Marking {Count} documents as FAILED", errors.Count);
                 await MarkDocumentsAsFailedAsync(errors, ct).ConfigureAwait(false);
                 Interlocked.Add(ref _totalFailed, errors.Count);
             }
@@ -170,9 +182,13 @@ namespace Migration.Infrastructure.Implementation.Services
             var delay = _options.Value.IdleDelayInMs;
             var maxEmptyResults = _options.Value.BreakEmptyResults;
 
-            _fileLogger.LogInformation("Move worker started");
+            _fileLogger.LogInformation("Move service started - IdleDelay: {IdleDelay}ms, MaxEmptyResults: {MaxEmptyResults}",
+                delay, maxEmptyResults);
+            _dbLogger.LogInformation("Move service started");
+            _uiLogger.LogInformation("Move service started");
 
             // Reset stuck documents from previous crashed run
+            _fileLogger.LogInformation("Resetting stuck documents...");
             await ResetStuckItemsAsync(ct).ConfigureAwait(false);
 
             // Load checkpoint to resume from last position
@@ -228,12 +244,16 @@ namespace Migration.Infrastructure.Implementation.Services
                 }
                 catch (OperationCanceledException)
                 {
-                    _fileLogger.LogInformation("Move worker cancelled");
+                    _fileLogger.LogInformation("Move service cancelled by user");
+                    _dbLogger.LogInformation("Move service cancelled");
+                    _uiLogger.LogInformation("Move cancelled");
                     throw;
                 }
                 catch (Exception ex)
                 {
+                    _fileLogger.LogError("Critical error in batch {BatchCounter}: {Error}", batchCounter, ex.Message);
                     _dbLogger.LogError(ex, "Error in batch {BatchCounter}", batchCounter);
+                    _uiLogger.LogError("Error in batch {BatchCounter}", batchCounter);
 
                     // Exponential backoff on error
                     await Task.Delay(delay * 2, ct).ConfigureAwait(false);
@@ -242,8 +262,12 @@ namespace Migration.Infrastructure.Implementation.Services
             }
 
             _fileLogger.LogInformation(
-                "Move worker completed after {Count} batches. Total: {Moved} moved, {Failed} failed",
+                "Move service completed after {Count} batches. Total: {Moved} moved, {Failed} failed",
                 batchCounter - 1, _totalMoved, _totalFailed);
+            _dbLogger.LogInformation(
+                "Move service completed - Total: {Moved} moved, {Failed} failed",
+                _totalMoved, _totalFailed);
+            _uiLogger.LogInformation("Move completed: {Moved} moved", _totalMoved);
         }
 
         #region privates
@@ -253,6 +277,7 @@ namespace Migration.Infrastructure.Implementation.Services
             try
             {
                 var timeout = TimeSpan.FromMinutes(_options.Value.StuckItemsTimeoutMinutes);
+                _fileLogger.LogDebug("Checking for stuck documents with timeout: {Minutes} minutes", _options.Value.StuckItemsTimeoutMinutes);
 
                 await using var scope = _sp.CreateAsyncScope();
                 var uow = scope.ServiceProvider.GetRequiredService<IUnitOfWork>();
@@ -274,6 +299,10 @@ namespace Migration.Infrastructure.Implementation.Services
                         _fileLogger.LogWarning(
                             "Reset {Count} stuck documents that were IN PROGRESS for more than {Minutes} minutes",
                             resetCount, _options.Value.StuckItemsTimeoutMinutes);
+                        _dbLogger.LogWarning(
+                            "Reset {Count} stuck documents (timeout: {Minutes} minutes)",
+                            resetCount, _options.Value.StuckItemsTimeoutMinutes);
+                        _uiLogger.LogWarning("Reset {Count} stuck documents", resetCount);
                     }
                     else
                     {
@@ -288,7 +317,8 @@ namespace Migration.Infrastructure.Implementation.Services
             }
             catch (Exception ex)
             {
-                _fileLogger.LogWarning(ex, "Failed to reset stuck documents");
+                _fileLogger.LogWarning("Failed to reset stuck documents: {Error}", ex.Message);
+                _dbLogger.LogError(ex, "Failed to reset stuck documents");
             }
         }
 
@@ -296,6 +326,7 @@ namespace Migration.Infrastructure.Implementation.Services
         {
             try
             {
+                _fileLogger.LogDebug("Loading checkpoint for Move service...");
                 await using var scope = _sp.CreateAsyncScope();
                 var uow = scope.ServiceProvider.GetRequiredService<IUnitOfWork>();
                 var checkpointRepo = scope.ServiceProvider.GetRequiredService<IMigrationCheckpointRepository>();
@@ -315,6 +346,9 @@ namespace Migration.Infrastructure.Implementation.Services
                         _fileLogger.LogInformation(
                             "Checkpoint loaded: {TotalMoved} moved, {TotalFailed} failed, batch {BatchCounter}",
                             _totalMoved, _totalFailed, _batchCounter);
+                        _dbLogger.LogInformation(
+                            "Checkpoint loaded: {TotalMoved} moved, {TotalFailed} failed, batch {BatchCounter}",
+                            _totalMoved, _totalFailed, _batchCounter);
                     }
                     else
                     {
@@ -332,7 +366,8 @@ namespace Migration.Infrastructure.Implementation.Services
             }
             catch (Exception ex)
             {
-                _fileLogger.LogWarning(ex, "Failed to load checkpoint, starting fresh");
+                _fileLogger.LogWarning("Failed to load checkpoint, starting fresh: {Error}", ex.Message);
+                _dbLogger.LogError(ex, "Failed to load checkpoint, starting fresh");
                 _totalMoved = 0;
                 _totalFailed = 0;
                 _batchCounter = 0;
@@ -378,6 +413,7 @@ namespace Migration.Infrastructure.Implementation.Services
 
         private async Task<IReadOnlyList<DocStaging>> AcquireDocumentsForMoveAsync(int batch, CancellationToken ct)
         {
+            _fileLogger.LogDebug("Acquiring {BatchSize} documents for processing", batch);
 
             await using var scope = _sp.CreateAsyncScope();
             var uow = scope.ServiceProvider.GetRequiredService<IUnitOfWork>();
@@ -387,8 +423,8 @@ namespace Migration.Infrastructure.Implementation.Services
             try
             {
                 var documents = await docRepo.TakeReadyForProcessingAsync(batch, ct).ConfigureAwait(false);
-
-                // Mark documents as IN PROGRESS (not DONE!)
+                _fileLogger.LogDebug("Retrieved {Count} documents from database", documents.Count);
+                
                 var updates = documents.Select(d => (
                     d.Id,
                     MigrationStatus.InProgress.ToDbString(),
@@ -401,16 +437,15 @@ namespace Migration.Infrastructure.Implementation.Services
                     updates,
                     ct).ConfigureAwait(false);
 
-                //foreach (var doc in documents)
-                //{
-                //    await docRepo.SetStatusAsync(doc.Id, MigrationStatus.InProgress.ToDbString(), null, ct).ConfigureAwait(false);
-                //}
-
                 await uow.CommitAsync().ConfigureAwait(false);
+                _fileLogger.LogDebug("Marked {Count} documents as IN PROGRESS", documents.Count);
+
                 return documents;
             }
             catch (Exception ex)
             {
+                _fileLogger.LogError("Failed to acquire documents: {Error}", ex.Message);
+                _dbLogger.LogError(ex, "Failed to acquire documents for move");
                 await uow.RollbackAsync().ConfigureAwait(false);
                 throw;
             }
@@ -556,29 +591,29 @@ namespace Migration.Infrastructure.Implementation.Services
 
             // Try to get total count of documents to move
             long totalCount = 0;
-            try
-            {
-                _fileLogger.LogInformation("Attempting to count total documents to move...");
+            //try
+            //{
+            //    _fileLogger.LogInformation("Attempting to count total documents to move...");
 
-                await using var scope = _sp.CreateAsyncScope();
-                var docRepo = scope.ServiceProvider.GetRequiredService<IDocStagingRepository>();
+            //    await using var scope = _sp.CreateAsyncScope();
+            //    var docRepo = scope.ServiceProvider.GetRequiredService<IDocStagingRepository>();
 
-                totalCount = await docRepo.CountReadyForProcessingAsync(ct).ConfigureAwait(false);
+            //    totalCount = await docRepo.CountReadyForProcessingAsync(ct).ConfigureAwait(false);
 
-                if (totalCount >= 0)
-                {
-                    _fileLogger.LogInformation("Total documents to move: {TotalCount}", totalCount);
-                }
-                else
-                {
-                    _fileLogger.LogWarning("Count not available, progress will show processed items only");
-                }
-            }
-            catch (Exception ex)
-            {
-                _fileLogger.LogWarning(ex, "Failed to count total documents, continuing without total count");
-                totalCount = 0;
-            }
+            //    if (totalCount >= 0)
+            //    {
+            //        _fileLogger.LogInformation("Total documents to move: {TotalCount}", totalCount);
+            //    }
+            //    else
+            //    {
+            //        _fileLogger.LogWarning("Count not available, progress will show processed items only");
+            //    }
+            //}
+            //catch (Exception ex)
+            //{
+            //    _fileLogger.LogWarning(ex, "Failed to count total documents, continuing without total count");
+            //    totalCount = 0;
+            //}
 
             // Initial progress report
             var progress = new WorkerProgress

@@ -1,6 +1,7 @@
 ﻿using Alfresco.Abstraction.Interfaces;
 using Alfresco.Contracts.Models;
 using Alfresco.Contracts.Request;
+using Microsoft.Extensions.Logging;
 using Migration.Abstraction.Interfaces;
 using Migration.Abstraction.Models;
 using System;
@@ -16,16 +17,23 @@ namespace Migration.Infrastructure.Implementation.Folder
     {
         private readonly IAlfrescoReadApi _read;
         private readonly IAlfrescoDbReader? _dbReader;
+        private readonly ILogger _fileLogger;
+        private readonly ILogger _dbLogger;
 
-        public FolderReader(IAlfrescoReadApi read, IAlfrescoDbReader? dbReader = null)
+        public FolderReader(IAlfrescoReadApi read, ILoggerFactory logger, IAlfrescoDbReader? dbReader = null)
         {
             _read = read;
             _dbReader = dbReader;
+            _fileLogger = logger.CreateLogger("FileLogger");
+            _dbLogger = logger.CreateLogger("DbLogger");
         }
 
         //public sealed record FolderReaderRequest(string RootId, string NameFilter, int Skip, int Take);
         public async Task<FolderReaderResult> ReadBatchAsync(FolderReaderRequest inRequest, CancellationToken ct)
         {
+            _fileLogger.LogDebug("Reading folders from root {RootId} with filter '{NameFilter}', Take: {Take}",
+                inRequest.RootId, inRequest.NameFilter, inRequest.Take);
+
             var cmsLike = string.IsNullOrWhiteSpace(inRequest.NameFilter) ? "" : inRequest.NameFilter;
             var sb = new StringBuilder();
 
@@ -85,6 +93,8 @@ namespace Migration.Infrastructure.Implementation.Folder
             };
 
             var result = (await _read.SearchAsync(req, ct).ConfigureAwait(false)).List?.Entries ?? new List<ListEntry>();
+
+            _fileLogger.LogDebug("Found {Count} folders in root {RootId}", result.Count, inRequest.RootId);
 
             FolderSeekCursor? next = null;
 
@@ -156,6 +166,8 @@ namespace Migration.Infrastructure.Implementation.Folder
 
         public async Task<Dictionary<string, string>> FindDossierSubfoldersAsync(string rootId, List<string>? folderTypes, CancellationToken ct)
         {
+            _fileLogger.LogDebug("Finding DOSSIER subfolders in root {RootId}", rootId);
+
             var result = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
 
             // Build query to find DOSSIER-* folders
@@ -181,6 +193,8 @@ namespace Migration.Infrastructure.Implementation.Folder
 
             var folders = (await _read.SearchAsync(req, ct).ConfigureAwait(false)).List?.Entries ?? new List<ListEntry>();
 
+            _fileLogger.LogDebug("Found {Count} DOSSIER folders in root {RootId}", folders.Count, rootId);
+
             foreach (var folder in folders)
             {
                 var folderName = folder.Entry?.Name;
@@ -200,7 +214,10 @@ namespace Migration.Infrastructure.Implementation.Folder
                 // Add to result dictionary
                 var folderId = $"workspace://SpacesStore/{folder.Entry?.Id}";
                 result[type] = folderId;
+                _fileLogger.LogDebug("Added DOSSIER-{Type} folder: {FolderId}", type, folderId);
             }
+
+            _fileLogger.LogInformation("Found {Count} matching DOSSIER subfolders in root {RootId}", result.Count, rootId);
 
             return result;
         }

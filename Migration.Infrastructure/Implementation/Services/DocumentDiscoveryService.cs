@@ -72,25 +72,24 @@ namespace Migration.Infrastructure.Implementation.Services
                 ["Operation"] = "RunBatch"
             });
 
-            _fileLogger.LogInformation("DocumentDiscovery batch started");
-
             var batch = _options.Value.DocumentDiscovery.BatchSize ?? _options.Value.BatchSize;
             var dop = _options.Value.DocumentDiscovery.MaxDegreeOfParallelism ?? _options.Value.MaxDegreeOfParallelism;
+
+            _fileLogger.LogInformation("DocumentDiscovery batch started - BatchSize: {BatchSize}, DOP: {DOP}", batch, dop);
+            _dbLogger.LogInformation("DocumentDiscovery batch started");
 
             var folders = await AcquireFoldersForProcessingAsync(batch, ct).ConfigureAwait(false);
 
             if (folders.Count == 0)
             {
-                _fileLogger.LogInformation("No folders ready for processing");
+                _fileLogger.LogDebug("No folders ready for processing - batch is empty");
                 return new DocumentBatchResult(0);
             }
 
             var processedCount = 0;
-
             var errors = new ConcurrentBag<(long folderId, Exception error)>();
 
-
-           // var x = await ResolveDestinationFolder(folders[0], ct).ConfigureAwait(false);
+            _fileLogger.LogInformation("Starting parallel processing of {Count} folders with DOP={DOP}", folders.Count, dop);
 
             await Parallel.ForEachAsync(folders, new ParallelOptions
             {
@@ -101,12 +100,16 @@ namespace Migration.Infrastructure.Implementation.Services
             {
                 try
                 {
+                    _fileLogger.LogDebug("Processing folder {FolderId} ({Name})", folder.Id, folder.Name);
                     await ProcessSingleFolderAsync(folder, ct).ConfigureAwait(false);
                     Interlocked.Increment(ref processedCount);
                     Interlocked.Increment(ref _totalProcessed);
+                    _fileLogger.LogDebug("Successfully processed folder {FolderId}", folder.Id);
                 }
                 catch (Exception ex)
                 {
+                    _fileLogger.LogError("Failed to process folder {FolderId} ({Name}): {Error}",
+                        folder.Id, folder.Name, ex.Message);
                     _dbLogger.LogError(ex, "Failed to process folder {FolderId} ({Name})",
                            folder.Id, folder.Name);
                     errors.Add((folder.Id, ex));
@@ -143,9 +146,13 @@ namespace Migration.Infrastructure.Implementation.Services
             var maxEmptyResults = _options.Value.BreakEmptyResults;
             var batchSize = _options.Value.DocumentDiscovery.BatchSize ?? _options.Value.BatchSize;
 
-            _fileLogger.LogInformation("DocumentDiscovery worker started");
+            _fileLogger.LogInformation("DocumentDiscovery service started - IdleDelay: {IdleDelay}ms, MaxEmptyResults: {MaxEmptyResults}",
+                delay, maxEmptyResults);
+            _dbLogger.LogInformation("DocumentDiscovery service started");
+            _uiLogger.LogInformation("Document Discovery started");
 
             // Reset stuck folders from previous crashed run
+            _fileLogger.LogInformation("Resetting stuck folders...");
             await ResetStuckItemsAsync(ct).ConfigureAwait(false);
 
             // Load checkpoint to resume from last position
@@ -156,29 +163,29 @@ namespace Migration.Infrastructure.Implementation.Services
 
             // Try to get total count of folders to process
             long totalCount = 0;
-            try
-            {
-                _fileLogger.LogInformation("Attempting to count total folders to process...");
+            //try
+            //{
+            //    _fileLogger.LogInformation("Attempting to count total folders to process...");
 
-                await using var scope = _sp.CreateAsyncScope();
-                var folderRepo = scope.ServiceProvider.GetRequiredService<IFolderStagingRepository>();
+            //    await using var scope = _sp.CreateAsyncScope();
+            //    var folderRepo = scope.ServiceProvider.GetRequiredService<IFolderStagingRepository>();
 
-                totalCount = await folderRepo.CountReadyForProcessingAsync(ct).ConfigureAwait(false);
+            //    totalCount = await folderRepo.CountReadyForProcessingAsync(ct).ConfigureAwait(false);
 
-                if (totalCount >= 0)
-                {
-                    _fileLogger.LogInformation("Total folders to process: {TotalCount}", totalCount);
-                }
-                else
-                {
-                    _fileLogger.LogWarning("Count not available, progress will show processed items only");
-                }
-            }
-            catch (Exception ex)
-            {
-                _fileLogger.LogWarning(ex, "Failed to count total folders, continuing without total count");
-                totalCount = 0;
-            }
+            //    if (totalCount >= 0)
+            //    {
+            //        _fileLogger.LogInformation("Total folders to process: {TotalCount}", totalCount);
+            //    }
+            //    else
+            //    {
+            //        _fileLogger.LogWarning("Count not available, progress will show processed items only");
+            //    }
+            //}
+            //catch (Exception ex)
+            //{
+            //    _fileLogger.LogWarning(ex, "Failed to count total folders, continuing without total count");
+            //    totalCount = 0;
+            //}
 
             // Initial progress report
             var progress = new WorkerProgress
@@ -258,15 +265,18 @@ namespace Migration.Infrastructure.Implementation.Services
                 }
                 catch (OperationCanceledException)
                 {
-                    _dbLogger.LogInformation("DocumentDiscovery worker cancelled");
+                    _fileLogger.LogInformation("DocumentDiscovery service cancelled by user");
+                    _dbLogger.LogInformation("DocumentDiscovery service cancelled");
+                    _uiLogger.LogInformation("Document Discovery cancelled");
                     progress.Message = $"Cancelled after processing {_totalProcessed} folders ({_totalFailed} failed)";
                     progressCallback?.Invoke(progress);
                     throw;
                 }
                 catch (Exception ex)
                 {
+                    _fileLogger.LogError("Critical error in batch {BatchCounter}: {Error}", batchCounter, ex.Message);
                     _dbLogger.LogError(ex, "Error in batch {BatchCounter}", batchCounter);
-                    _uiLogger.LogError(ex, "Error in batch {BatchCounter}", batchCounter);
+                    _uiLogger.LogError("Error in batch {BatchCounter}", batchCounter);
 
                     progress.Message = $"Error in batch {batchCounter}: {ex.Message}";
                     progressCallback?.Invoke(progress);
@@ -278,13 +288,13 @@ namespace Migration.Infrastructure.Implementation.Services
             }
 
             _fileLogger.LogInformation(
-                "DocumentDiscovery worker completed after {Count} batches. " +
+                "DocumentDiscovery service completed after {Count} batches. " +
                 "Total: {Processed} processed, {Failed} failed",
                 batchCounter - 1, _totalProcessed, _totalFailed);
             _dbLogger.LogInformation(
-                "DocumentDiscovery worker completed after {Count} batches. " +
-                "Total: {Processed} processed, {Failed} failed",
-                batchCounter - 1, _totalProcessed, _totalFailed);
+                "DocumentDiscovery service completed - Total: {Processed} processed, {Failed} failed",
+                _totalProcessed, _totalFailed);
+            _uiLogger.LogInformation("Document Discovery completed: {Processed} folders processed", _totalProcessed);
         }
 
 
@@ -373,6 +383,7 @@ namespace Migration.Infrastructure.Implementation.Services
             try
             {
                 var timeout = TimeSpan.FromMinutes(_options.Value.StuckItemsTimeoutMinutes);
+                _fileLogger.LogDebug("Checking for stuck folders with timeout: {Minutes} minutes", _options.Value.StuckItemsTimeoutMinutes);
 
                 await using var scope = _sp.CreateAsyncScope();
                 var uow = scope.ServiceProvider.GetRequiredService<IUnitOfWork>();
@@ -394,6 +405,10 @@ namespace Migration.Infrastructure.Implementation.Services
                         _fileLogger.LogWarning(
                             "Reset {Count} stuck folders that were IN PROGRESS for more than {Minutes} minutes",
                             resetCount, _options.Value.StuckItemsTimeoutMinutes);
+                        _dbLogger.LogWarning(
+                            "Reset {Count} stuck folders (timeout: {Minutes} minutes)",
+                            resetCount, _options.Value.StuckItemsTimeoutMinutes);
+                        _uiLogger.LogWarning("Reset {Count} stuck folders", resetCount);
                     }
                     else
                     {
@@ -408,6 +423,7 @@ namespace Migration.Infrastructure.Implementation.Services
             }
             catch (Exception ex)
             {
+                _fileLogger.LogWarning("Failed to reset stuck folders: {Error}", ex.Message);
                 _dbLogger.LogError(ex, "Failed to reset stuck folders");
             }
         }
@@ -499,6 +515,8 @@ namespace Migration.Infrastructure.Implementation.Services
 
         private async Task<IReadOnlyList<FolderStaging>> AcquireFoldersForProcessingAsync(int batch, CancellationToken ct)
         {
+            _fileLogger.LogDebug("Acquiring {BatchSize} folders for processing", batch);
+
             await using var scope = _sp.CreateAsyncScope();
             var uow = scope.ServiceProvider.GetRequiredService<IUnitOfWork>();
             var folderRepo = scope.ServiceProvider.GetRequiredService<IFolderStagingRepository>();
@@ -507,6 +525,7 @@ namespace Migration.Infrastructure.Implementation.Services
             try
             {
                 var folders = await folderRepo.TakeReadyForProcessingAsync(batch, ct).ConfigureAwait(false);
+                _fileLogger.LogDebug("Retrieved {Count} folders from database", folders.Count);
 
                 // Batch update instead of N individual updates
                 var updates = folders.Select(f => (
@@ -522,13 +541,15 @@ namespace Migration.Infrastructure.Implementation.Services
                     ct).ConfigureAwait(false);
 
                 await uow.CommitAsync(ct: ct).ConfigureAwait(false);
+                _fileLogger.LogDebug("Marked {Count} folders as IN PROGRESS", folders.Count);
 
                 return folders;
 
             }
             catch (Exception ex)
             {
-                _dbLogger.LogWarning(ex, "Failed AcquireFoldersForProcessingAsync");
+                _fileLogger.LogError("Failed to acquire folders: {Error}", ex.Message);
+                _dbLogger.LogError(ex, "Failed to acquire folders for processing");
 
                 await uow.RollbackAsync(ct).ConfigureAwait(false);
                 throw;
@@ -549,6 +570,7 @@ namespace Migration.Infrastructure.Implementation.Services
             _fileLogger.LogDebug("Processing folder {FolderId} ({Name}, NodeId: {NodeId})",
                 folder.Id, folder.Name, folder.NodeId);
 
+            _fileLogger.LogDebug("Reading documents from Alfresco folder {NodeId}", folder.NodeId);
             var documents = await _reader.ReadBatchAsync(folder.NodeId!, ct).ConfigureAwait(false);
 
             if (documents == null || documents.Count == 0)
@@ -562,8 +584,9 @@ namespace Migration.Infrastructure.Implementation.Services
             _fileLogger.LogInformation("Found {Count} documents in folder {FolderId} ({Name})",
                 documents.Count, folder.Id, folder.Name);
 
+            _fileLogger.LogDebug("Resolving destination folder for {FolderId}", folder.Id);
             var desFolderId = await ResolveDestinationFolder(folder, ct).ConfigureAwait(false);
-            _fileLogger.LogDebug("Resolved destination folder: {DestFolderId}", desFolderId);
+            _fileLogger.LogInformation("Resolved destination folder: {DestFolderId} for source folder {FolderId}", desFolderId, folder.Id);
 
             var docsToInsert = new List<DocStaging>(documents.Count);
 

@@ -86,6 +86,10 @@ namespace Migration.Infrastructure.Implementation.Services
             var folderTypes = _options.Value.FolderDiscovery.FolderTypes;
             var targetCoreIds = _options.Value.FolderDiscovery.TargetCoreIds;
 
+            _fileLogger.LogInformation("FolderDiscovery batch started - BatchSize: {BatchSize}, NameFilter: {NameFilter}",
+                batch, nameFilter);
+            _dbLogger.LogInformation("FolderDiscovery batch started");
+
             // Initialize multi-folder cursor if needed
             MultiFolderDiscoveryCursor? currentMultiCursor;
             lock (_cursorLock)
@@ -96,17 +100,20 @@ namespace Migration.Infrastructure.Implementation.Services
             // If no cursor exists, discover DOSSIER subfolders
             if (currentMultiCursor == null || currentMultiCursor.SubfolderMap.Count == 0)
             {
-                _fileLogger.LogInformation("Discovering DOSSIER subfolders...");
+                _fileLogger.LogInformation("Discovering DOSSIER subfolders in root {RootId}...", rootDiscoveryId);
+                _dbLogger.LogInformation("Starting DOSSIER subfolder discovery");
                 var subfolders = await _reader.FindDossierSubfoldersAsync(rootDiscoveryId, folderTypes, ct).ConfigureAwait(false);
 
                 if (subfolders.Count == 0)
                 {
                     _fileLogger.LogWarning("No DOSSIER subfolders found matching criteria");
+                    _dbLogger.LogWarning("No DOSSIER subfolders found");
                     return new FolderBatchResult(0);
                 }
 
                 _fileLogger.LogInformation("Found {Count} DOSSIER subfolders: {Types}",
                     subfolders.Count, string.Join(", ", subfolders.Keys));
+                _dbLogger.LogInformation("Found {Count} DOSSIER subfolders", subfolders.Count);
 
                 // PRE-CREATE all DOSSIER destination folders SEQUENTIALLY to avoid race conditions
                 await EnsureDossierFoldersExistAsync(subfolders.Keys, ct).ConfigureAwait(false);
@@ -238,13 +245,17 @@ namespace Migration.Infrastructure.Implementation.Services
             var delay = _options.Value.IdleDelayInMs;
             var maxEmptyResults = _options.Value.BreakEmptyResults;
 
-            _fileLogger.LogInformation("FolderDiscovery worker started");
+            _fileLogger.LogInformation("FolderDiscovery service started - IdleDelay: {IdleDelay}ms, MaxEmptyResults: {MaxEmptyResults}",
+                delay, maxEmptyResults);
+            _dbLogger.LogInformation("FolderDiscovery service started");
+            _uiLogger.LogInformation("Folder Discovery started");
 
             // Note: FolderDiscovery doesn't have IN PROGRESS state issues
             // because it doesn't mark folders as IN PROGRESS during processing
             // It inserts directly to staging tables
 
             // Load checkpoint to resume from last position
+            _fileLogger.LogInformation("Loading checkpoint...");
             await LoadCheckpointAsync(ct).ConfigureAwait(false);
 
             // Reset metrics if starting fresh
@@ -303,12 +314,16 @@ namespace Migration.Infrastructure.Implementation.Services
                 }
                 catch (OperationCanceledException)
                 {
-                    _dbLogger.LogInformation("FolderDiscovery worker cancelled");
+                    _fileLogger.LogInformation("FolderDiscovery service cancelled by user");
+                    _dbLogger.LogInformation("FolderDiscovery service cancelled");
+                    _uiLogger.LogInformation("Folder Discovery cancelled");
                     throw;
                 }
                 catch (Exception ex)
                 {
+                    _fileLogger.LogError("Critical error in batch {BatchCounter}: {Error}", batchCounter, ex.Message);
                     _dbLogger.LogError(ex, "Error in batch {BatchCounter}", batchCounter);
+                    _uiLogger.LogError("Error in batch {BatchCounter}", batchCounter);
 
                     // Exponential backoff on error
                     await Task.Delay(delay * 2, ct).ConfigureAwait(false);
@@ -317,8 +332,12 @@ namespace Migration.Infrastructure.Implementation.Services
             }
 
             _fileLogger.LogInformation(
-                "FolderDiscovery worker completed after {Count} batches. Total: {Total} folders inserted",
+                "FolderDiscovery service completed after {Count} batches. Total: {Total} folders inserted",
                 batchCounter - 1, _totalInserted);
+            _dbLogger.LogInformation(
+                "FolderDiscovery service completed - Total: {Total} folders inserted",
+                _totalInserted);
+            _uiLogger.LogInformation("Folder Discovery completed: {Total} folders inserted", _totalInserted);
         }
 
         public async Task RunLoopAsync(CancellationToken ct, Action<WorkerProgress>? progressCallback)
@@ -346,28 +365,28 @@ namespace Migration.Infrastructure.Implementation.Services
 
             // Try to get total count
             long totalCount = 0;
-            try
-            {
-                var rootDiscoveryId = _options.Value.RootDiscoveryFolderId;
-                var nameFilter = _options.Value.FolderDiscovery.NameFilter ?? "-";
+            //try
+            //{
+            //    var rootDiscoveryId = _options.Value.RootDiscoveryFolderId;
+            //    var nameFilter = _options.Value.FolderDiscovery.NameFilter ?? "-";
 
-                _fileLogger.LogInformation("Attempting to count total folders...");
-                totalCount = await _reader.CountTotalFoldersAsync(rootDiscoveryId, nameFilter, ct).ConfigureAwait(false);
+            //    _fileLogger.LogInformation("Attempting to count total folders...");
+            //    totalCount = await _reader.CountTotalFoldersAsync(rootDiscoveryId, nameFilter, ct).ConfigureAwait(false);
 
-                if (totalCount >= 0)
-                {
-                    _fileLogger.LogInformation("Total folders to discover: {TotalCount}", totalCount);
-                }
-                else
-                {
-                    _fileLogger.LogWarning("Count not supported by Alfresco, progress will show processed items only");
-                }
-            }
-            catch (Exception ex)
-            {
-                _fileLogger.LogWarning(ex, "Failed to count total folders, continuing without total count");
-                totalCount = 0;
-            }
+            //    if (totalCount >= 0)
+            //    {
+            //        _fileLogger.LogInformation("Total folders to discover: {TotalCount}", totalCount);
+            //    }
+            //    else
+            //    {
+            //        _fileLogger.LogWarning("Count not supported by Alfresco, progress will show processed items only");
+            //    }
+            //}
+            //catch (Exception ex)
+            //{
+            //    _fileLogger.LogWarning(ex, "Failed to count total folders, continuing without total count");
+            //    totalCount = 0;
+            //}
 
             // Initial progress report
             var progress = new WorkerProgress
@@ -576,8 +595,11 @@ namespace Migration.Infrastructure.Implementation.Services
         {
             if (folders.Count == 0)
             {
+                _fileLogger.LogDebug("No folders to insert");
                 return 0;
             }
+
+            _fileLogger.LogDebug("Inserting {Count} folders into staging table", folders.Count);
 
             await using var scope = _sp.CreateAsyncScope();
             var uow = scope.ServiceProvider.GetRequiredService<IUnitOfWork>();
@@ -589,13 +611,13 @@ namespace Migration.Infrastructure.Implementation.Services
                 var inserted = await folderRepo.InsertManyAsync(folders, ct).ConfigureAwait(false);
                 await uow.CommitAsync(ct: ct).ConfigureAwait(false);
 
-                _fileLogger.LogDebug("Successfully inserted {Count} folders", inserted);
+                _fileLogger.LogInformation("Successfully inserted {Count} folders into staging", inserted);
                 return inserted;
             }
             catch (Exception ex)
             {
-                //_dbLogger.LogError(ex, "Failed to insert {Count} folders", folders.Count);
-                //_uiLogger.LogError(ex, "Failed to insert {Count} folders", folders.Count);
+                _fileLogger.LogError("Failed to insert {Count} folders: {Error}", folders.Count, ex.Message);
+                _dbLogger.LogError(ex, "Failed to insert {Count} folders", folders.Count);
 
                 await uow.RollbackAsync(ct: ct).ConfigureAwait(false);
                 throw;
@@ -609,6 +631,7 @@ namespace Migration.Infrastructure.Implementation.Services
         private async Task EnsureDossierFoldersExistAsync(IEnumerable<string> folderTypes, CancellationToken ct)
         {
             _fileLogger.LogInformation("Pre-creating DOSSIER destination folders to avoid race conditions...");
+            _dbLogger.LogInformation("Starting DOSSIER folder pre-creation");
 
             foreach (var folderType in folderTypes)
             {
@@ -636,19 +659,25 @@ namespace Migration.Infrastructure.Implementation.Services
                     _fileLogger.LogInformation(
                         "Successfully created/resolved DOSSIER-{Type} -> {FolderId}",
                         folderType, dossierFolderId);
+                    _dbLogger.LogInformation(
+                        "Created DOSSIER-{Type} destination folder",
+                        folderType);
                 }
                 catch (Exception ex)
                 {
+                    _fileLogger.LogError("Failed to create DOSSIER-{Type}: {Error}", folderType, ex.Message);
                     _dbLogger.LogError(ex,
                         "Failed to create DOSSIER-{Type} destination folder", folderType);
-                    _uiLogger.LogError(ex,
-                        "Failed to create DOSSIER-{Type} destination folder", folderType);
+                    _uiLogger.LogError("Failed to create DOSSIER-{Type}", folderType);
                     throw;
                 }
             }
 
             _fileLogger.LogInformation(
                 "Successfully pre-created {Count} DOSSIER destination folders",
+                _dossierFolderCache.Count);
+            _dbLogger.LogInformation(
+                "Pre-created {Count} DOSSIER folders",
                 _dossierFolderCache.Count);
         }
 
