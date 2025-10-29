@@ -64,7 +64,7 @@
                                 </DataGridTemplateColumn>
                             </DataGrid.Columns>
                         </DataGrid>-->
-                        <workerstate:WorkerMonitorWrapper Grid.Row="1"/>
+                        <workerstate:WorkerMonitorWrapper Grid.Row="1" />
                     </Grid>
                     <Grid Grid.Column="0">
                         <Grid Grid.Row="1">

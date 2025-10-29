@@ -8,7 +8,7 @@
              d:DesignHeight="450" d:DesignWidth="800"
              Loaded="UserControl_Loaded">
     <Grid Background="#F5F5F5">
-        <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+        <!--<ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
             <StackPanel Margin="10">
                 <TextBlock Text="Worker Monitoring Dashboard"
                           FontSize="24" FontWeight="Bold" Margin="10,10,10,20"
@@ -22,6 +22,42 @@
                     </ItemsControl.ItemTemplate>
                 </ItemsControl>
             </StackPanel>
+        </ScrollViewer>-->
+        <ScrollViewer VerticalScrollBarVisibility="Auto"
+                      HorizontalScrollBarVisibility="Disabled"
+                      CanContentScroll="True"
+                      Padding="10">
+
+            <DockPanel LastChildFill="True">
+                <!-- Naslov gore -->
+                <TextBlock DockPanel.Dock="Top"
+                           Text="Worker Monitoring Dashboard"
+                           FontSize="24" FontWeight="Bold"
+                           Margin="0,0,0,20"
+                           Foreground="#333333"/>
+
+              
+                <ItemsControl ItemsSource="{Binding Workers}">
+                    <ItemsControl.ItemsPanel>
+                        <ItemsPanelTemplate>
+                            <WrapPanel Orientation="Horizontal" />
+                        </ItemsPanelTemplate>
+                    </ItemsControl.ItemsPanel>
+
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate>
+                            <!-- Fiksiraj ili ogranii sirinu kartice po elji -->
+                            <local:WorkerMonitorCard Worker="{Binding}"
+                                                     Width="400"
+                                                     Margin="18"/>
+                            <!--
+                            Alternativa ako elis fleks: umesto fiksne sirine koristi MinWidth/MaxWidth
+                            MinWidth="380" MaxWidth="560"
+                            -->
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
+            </DockPanel>
         </ScrollViewer>
     </Grid>
 </UserControl>

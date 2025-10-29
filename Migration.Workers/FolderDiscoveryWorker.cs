@@ -210,6 +210,7 @@ namespace Migration.Workers
                     try
                     {
                         _fileLogger.LogInformation("Worker starter {time}!", DateTime.Now);
+                        _dbLogger.LogInformation("Worker starter {time}!", DateTime.Now);
                         using var scope = _sp.CreateScope();
                         var svc = scope.ServiceProvider.GetRequiredService<IFolderDiscoveryService>();
                         _fileLogger.LogInformation("Starting RunLoopAsync ....");
