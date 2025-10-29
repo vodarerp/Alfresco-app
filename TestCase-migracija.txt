@@ -1,0 +1,112 @@
+1.	Test Case:
+Svaki dokument koji je mapiran na način da u koloni “Naziv dokumenta_migracija” sadrži sufiks “migracija”, treba da bude migriran kao neaktivan (vrednost u Alfresco-u u polju status “poništen”)
+Primeri dokumenata, naziv u Alfresco-u Personal Notice, KYC Questionnaire, Communication Consent, Account Package, Specimen card.
+CoreID 13001926, naziv dokumenta Account Package
+CoreID 13000667, naziv dokumenta Specimen card
+CoreID 50034220, naziv dokumenta Specimen card for LE
+CoreID 50034220, naziv dokumenta Communication Consent
+
+2.	Test Case:
+Svaki dokument koji je mapiran na način da u koloni “Naziv dokumenta_migracija” NE sadrži sufiks “migracija”, treba da bude migriran kao aktivan (vrednost u Alfresco-u u polju status “validiran”)
+Primeri dokumenata, naziv u Alfresco-u Current Accounts Contract, Saving Accounts Contract, Family insurance, Card Limit Change.
+CoreID 13001926, naziv dokumenta Current Accounts Contract
+CoreID 50034220, naziv dokumenta Current Account Contract for LE 
+CoreID 13001926, naziv dokumenta Account Package RSD Instruction for Resident 
+CoreID 13000667, naziv dokumenta Pre-Contract Info
+
+3.	Test Case:
+Svaki dokument koji je mapiran na način da u koloni “Tip dosijea” ima vrednost Dosije paket računa, treba da bude migriran u dosije 300 Dosije paket računa.
+Primeri dokumenata, naziv u Alfresco-u Current Accounts Contract, Saving Accounts Contract, TEKUCI DEVIZNI RACUN 101899001, Prestige Package Tariff for LE.
+CoreID 13001926, naziv dokumenta TEKUCI DEVIZNI RACUN 13001926001
+CoreID 13001926, naziv dokumenta Current Accounts Contract
+CoreID 50034220, naziv dokumenta Current Account Contract for LE 
+CoreID 13000667, naziv dokumenta Specimen card
+CoreID 50034220, naziv dokumenta Specimen card for LE
+
+4.	Test Case:
+Svaki dokument koji je mapiran na način da u koloni “Tip dosijea” ima vrednost Dosije klijenta FL/PL, treba da bude migriran u odgovarajući dosije 500 Dosije fizičkog lica ili dosije 400 Dosije pravnog lica, u zavisnosti od toga da li je reč o fizičkom licu ili biznis klijentu (očekivanje je da će se na osnovu dodatnih atributa CoreID i segment/tip klijenta).
+Primeri dokumenata, naziv u Alfresco-u Credit Bureau Reports Consent, Personal Notice, KYC Questionnaire, Communication Consent.
+CoreID 50034220, naziv dokumenta Communication Consent (primera radi za ovaj dokument imajući u vidu da se trenutno nalazi u LE folderu (a ne u PI), znamo da se odnosi na pravno lice, tako da treba da bude migriran u 400 Dosije pravnog lica) 
+CoreID 50034141, naziv dokumenta Personal Notice (primera radi za ovaj dokument imajući u vidu da se trenutno nalazi u LE folderu (a ne u PI), znamo da se odnosi na pravno lice, tako da treba da bude migriran u 400 Dosije pravnog lica)
+CoreID 102206, naziv dokumenta KYC Questionnaire MDOC (primera radi za ovaj dokument imajući u vidu da se trenutno nalazi u PI folderu (a ne u LE), znamo da se odnosi na fizičko lice, tako da treba da bude migriran u 500 Dosije fizičkog lica)
+Dakle, da li je dokument migriran u folder PI ili LE, može takođe da bude od pomoći radi migriranja u ispravan dosije 500 Dosije fizičkog lica ili dosije 400 Dosije pravnog lica
+
+5.	Test Case:
+Svaki dokument koji je mapiran na način da u koloni “Tip dosijea” ima vrednost Dosije klijenta PL (dakle, ne sadrži deo FL), treba da bude migriran u dosije 400 Dosije pravnog lica.
+Primeri dokumenata, naziv u Alfresco-u KYC Questionnaire for LE, APR Certificate.
+CoreID 50034220, naziv dokumenta KYC Questionnaire for LE
+
+6.	Test Case:
+Svaki dokument koji je mapiran na način da u koloni “Tip dosijea” ima vrednost Dosije paket računa ili Dosije fizičkog lica ili Dosije pravnog lica ili Dosije ostalo treba da ima source Heimdall (vrednost u Alfresco-u u polju izvor).
+
+7.	Test Case:
+Svaki dokument koji je mapiran na način da u koloni “Tip dosijea” ima vrednost Dosije depozita treba da ima source DUT (vrednost u Alfresco-u u polju izvor).
+
+8.	Test Case:
+Ukoliko u novom Alfresco-u NE postoji kreiran adekvatan dosije, potrebno je najpre kreirati odgovarajući dosije klijenta. Klijentske podatke na dosijeu (atributi dosijea) popuniti pozivom ClienatAPI-a. Nakon što se kreira dosije potrebno je migrirati odgovarajući dokument (jedan ili više njih) u odgovarajući dosije. Zajedno sa dokumentom potrebno je migrirati i njegove podatke/atribute iz starog Alfresco-a.
+
+9.	Test Case:
+Ukoliko u novom Alfresco-u postoji kreiran adekvatan dosije, u tom slučaju NIJE potrebno kreirati odgovarajući dosije klijenta, već je potrebno migrirati odgovarajući dokument (jedan ili više njih) u odgovarajući dosije. Zajedno sa dokumentom potrebno je migrirati i njegove podatke/atribute iz starog Alfresco-a.
+
+10.	Test Case:
+Ukoliko za istog klijenta postoji više verzija istog dokumenta, potrebno je migrirati sve verzije tog dokumenta. 
+Primeri dokumenata, naziv u Alfresco-u Personal Notice, KYC Questionnaire, Communication Consent, Account Package, Specimen card.
+
+
+
+11.	Test Case: 
+Očekivanje je da prilikom migracije ne postoje dokumenta koja imaju status neaktivan (vrednost u Alfresco-u u polju status “poništen”), naime, očekivanje Biznisa je da su sva dokumenta aktivna (jer ne postoji frontend da bi ih neko učinio neaktivnim). 
+Ukoliko ipak postoji ovakva dokumenta, ona takođe treba da bude migirana kao neaktivan. 
+
+12.	Test Case:
+Ukoliko u novom Alfresco-u na novi način (dakle, deo koji nije predmet migracije, ali je definisano specifikacijom) postoji dokument kojem je politika cuvanja “nova verzija”, treba da se označi da je neaktivan (bilo da postoji jedan ili više ovih dokumenata).  
+Primer dokument tipa 00099 KDP za fizička lica.
+Ovo je bitno zbog finalnog statusa.
+13.	Test Case:
+Ukoliko u novom Alfresco-u na novi način (dakle, deo koji nije predmet migracije, ali je definisano specifikacijom) postoje dokumenta 00101 KDP za ovlašćena lica (za fizička lica) kojem je politika čuvanja “novi dokument”, treba da se označi da je neaktivan (bilo da postoji jedan ili više ovih dokumenata).
+Ovo je bitno zbog finalnog statusa.
+
+14.	Test Case:
+Ukoliko u novom Alfresco-u na novi način (dakle, deo koji nije predmet migracije, ali je definisano specifikacijom) postoje dokumenta 00100 KDP za pravna lica_iz aplikacije kojem je politika čuvanja “nova verzija”, treba da se označi da je neaktivan (bilo da postoji jedan ili više ovih dokumenata).  
+Ovo je bitno zbog finalnog statusa.
+
+15.	Test Case:
+Među migriranim dokumentima sa novog Alfresco-a ne treba da se nađe dokument 00702 Ovlascenje licima za donosenje instrumenata PP-a u Banku (ovo je više test case za Banku). 
+
+16.	Test Case (ovo je više za drugi deo kada urade kompletnu migraciju):
+Za tip dokumenata KDP vlasnika za FL 00824, potrebno je nakon migracije iz svih izvora, ako zadovoljava uslov da budu progalašena aktivnim, treba da postoji popunjen broj racuna.
+Ovo je bitno zbog finalnog statusa.
+
+17.	Test Case:
+Svaki dokument koji je mapiran na način da u koloni “Tip dosijea” ima vrednost Dosije depozita, treba da bude migriran u dosije 700 Dosije depozita.
+Primeri dokumenata, naziv u Alfresco-u PiVazeciUgovorOroceniDepozitDvojezicniRSD, ZahtevZaOtvaranjeRacunaOrocenogDepozita.
+
+18.	TestCase:
+Za dosije depozita, jedinstveni identifikator treba da bude formiran u formatu DE-<CoreId>-<SifraTipaProizvoda>-<brojUgovora>.       
+Primer: DE-10194302-00008-10104302_20241105154459
+
+19.	TestCase:
+Za dosije fizičkog lica, jedinstveni identifikator treba da bude formiran u formatu PI-<CoreId>.        
+
+20.	TestCase:
+Za dosije pravnog lica, jedinstveni identifikator treba da bude formiran u formatu LE-<CoreId>.        
+
+21.	TestCase:
+Za dosije paket računa, jedinstveni identifikator treba da bude formiran u formatu ACC-<CoreId>.        
+
+22.	Test Case:
+Za dosije depozita, za istog klijenta postoji više verzija istog dokumenta, potrebno je migrirati sve verzije tog dokumenta. Dakle, neopohodna je migracija svih verzija konkretnog dokumenta za konkretno oročenje, a ne samo zadnje verzije dokumenta.
+
+23.	Test Case:
+Za dosije depozita, migraciju je potrebno sprovseti samo za dokumentaciju koja u OfferBO tabeli, u okviru DUT aplikacije, ima status Booked. 
+
+24.	Test Case: 
+Za dosije depozita, u okviru jedinstvenog identifikatora dosijea može biti samo jedno oročenje koje treba da sadrži minimum sledeća dokumenta (za Fizička lica - Depozitni proizvodi (00008) Ugovor o orocenom depozitu, Ponuda, Plan isplate depozita, Obavezni elementi Ugovora, odnosno za SB - Depozitni proizvodi (00010) Ugovor o oročenom depozitu, Ponuda, Plan isplate depozita, Obavezni elementi Ugovora). 
+
+25.	Test Case: 
+Za dosije depozita, status migrirane dokumentacije treba da bude Aktivan.
+
+
+
+
+
