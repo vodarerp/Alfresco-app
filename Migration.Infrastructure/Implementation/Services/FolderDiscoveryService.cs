@@ -238,12 +238,13 @@ namespace Migration.Infrastructure.Implementation.Services
             return new FolderBatchResult(inserted);
         }
 
-        public async Task RunLoopAsync(CancellationToken ct)
+        public async Task<bool> RunLoopAsync(CancellationToken ct)
         {
             var batchCounter = 1;
             var emptyResultCounter = 0;
             var delay = _options.Value.IdleDelayInMs;
             var maxEmptyResults = _options.Value.BreakEmptyResults;
+            var completedSuccessfully = false;
 
             _fileLogger.LogInformation("FolderDiscovery service started - IdleDelay: {IdleDelay}ms, MaxEmptyResults: {MaxEmptyResults}",
                 delay, maxEmptyResults);
@@ -292,6 +293,7 @@ namespace Migration.Infrastructure.Implementation.Services
                             _dbLogger.LogInformation(
                                 "Breaking after {Count} consecutive empty results",
                                 emptyResultCounter);
+                            completedSuccessfully = true;
                             break;
                         }
 
@@ -338,15 +340,18 @@ namespace Migration.Infrastructure.Implementation.Services
                 "FolderDiscovery service completed - Total: {Total} folders inserted",
                 _totalInserted);
             _uiLogger.LogInformation("Folder Discovery completed: {Total} folders inserted", _totalInserted);
+
+            return completedSuccessfully;
         }
 
-        public async Task RunLoopAsync(CancellationToken ct, Action<WorkerProgress>? progressCallback)
+        public async Task<bool> RunLoopAsync(CancellationToken ct, Action<WorkerProgress>? progressCallback)
         {
             var batchCounter = 1;
             var emptyResultCounter = 0;
             var delay = _options.Value.IdleDelayInMs;
             var maxEmptyResults = _options.Value.BreakEmptyResults;
             var batchSize = _options.Value.FolderDiscovery.BatchSize ?? _options.Value.BatchSize;
+            var completedSuccessfully = false;
 
             _fileLogger.LogInformation("FolderDiscovery worker started");
 
@@ -445,6 +450,7 @@ namespace Migration.Infrastructure.Implementation.Services
 
                             progress.Message = $"Completed: {_totalInserted} folders discovered";
                             progressCallback?.Invoke(progress);
+                            completedSuccessfully = true;
                             break;
                         }
 
@@ -489,6 +495,8 @@ namespace Migration.Infrastructure.Implementation.Services
             _fileLogger.LogInformation(
                 "FolderDiscovery worker completed after {Count} batches. Total: {Total} folders inserted",
                 batchCounter - 1, _totalInserted);
+
+            return completedSuccessfully;
         }
 
         #region private methods
