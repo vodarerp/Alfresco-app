@@ -131,6 +131,19 @@ namespace Alfresco.Contracts.Oracle.Models
         /// Per documentation line 148: "Tip proizvoda (Fizicka lica – Depozitni proizvodi I SB- Depozitni proizvodi)"
         /// </summary>
         public string? ProductType { get; set; }
+
+        public string? OriginalDocumentName { get; set; }  // Pre mapiranja
+        public string? NewDocumentName { get; set; }       // Posle mapiranja (iz DocumentNameMapper)
+        public string? OriginalDocumentCode { get; set; }  // Pre mapiranja
+        public string? NewDocumentCode { get; set; }       // Posle mapiranja (iz DocumentCodeMapper)
+        public string? TipDosijea { get; set; }           // "Dosije paket računa", "Dosije klijenta FL/PL", itd.
+        public int? TargetDossierType { get; set; }       // 300, 400, 500, 700, 999 (DossierType enum vrednost)
+        public string? ClientSegment { get; set; }        // "PI", "LE", "RETAIL", "SME"
+        public string? OldAlfrescoStatus { get; set; }    // "validiran", "poništen" iz starog Alfresco-a
+        public string? NewAlfrescoStatus { get; set; }    // Novi status posle mapiranja
+        public bool WillReceiveMigrationSuffix { get; set; }  // Da li dobija "-migracija" sufiks
+        public bool CodeWillChange { get; set; }               // Da li se šifra menja
+
     }
 }
 

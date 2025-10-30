@@ -162,5 +162,10 @@ namespace Alfresco.Contracts.Oracle.Models
         /// Archival date (when document was archived, may differ from creation date)
         /// </summary>
         public DateTime? ArchivedAt { get; set; }
+
+        public string? TipDosijea { get; set; }           // "Dosije paket računa", "Dosije depozita", itd.
+        public int? TargetDossierType { get; set; }       // 300, 400, 500, 700, 999 (DossierType enum vrednost)
+
+        public string? ClientSegment { get; set; }        // "PI", "LE", "RETAIL", "SME"
     }
 }
