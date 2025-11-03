@@ -3,6 +3,8 @@ using Alfresco.Contracts.Enums;
 using Alfresco.Contracts.Extensions;
 using Alfresco.Contracts.Options;
 using Alfresco.Contracts.Oracle.Models;
+using Alfresco.Contracts.Models;
+using Alfresco.Contracts.Mapper;
 using Mapper;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
@@ -602,6 +604,10 @@ namespace Migration.Infrastructure.Implementation.Services
                 var item = d.Entry.ToDocStagingInsert();
                 item.ToPath = desFolderId;
                 item.Status = MigrationStatus.Ready.ToDbString();
+
+                // FAZA 3: Apply document mapping using mappers from Faze 1
+                ApplyDocumentMapping(item, folder, d.Entry);
+
                 docsToInsert.Add(item);
             }
 
@@ -1139,7 +1145,98 @@ namespace Migration.Infrastructure.Implementation.Services
         //    }
         //    _logger.LogInformation("RunLoopAsync END");
 
-        //} 
+        //}
+
+        /// <summary>
+        /// Applies document mapping using mappers from FAZA 1
+        /// Populates: OriginalDocumentName, NewDocumentName, OriginalDocumentCode, NewDocumentCode,
+        /// TipDosijea, TargetDossierType, ClientSegment, OldAlfrescoStatus, NewAlfrescoStatus,
+        /// WillReceiveMigrationSuffix, CodeWillChange, Source, IsActive
+        /// </summary>
+        private void ApplyDocumentMapping(DocStaging doc, FolderStaging folder, Entry alfrescoEntry)
+        {
+            try
+            {
+                // Step 1: Extract document name and code from Alfresco properties
+                // TODO: Read from alfrescoEntry.Properties["bank:nazivDokumenta"] and ["bank:tipDokumenta"]
+                // For now, use Name as fallback
+                string originalDocumentName = alfrescoEntry.Name ?? "Unknown";
+                string? originalDocumentCode = null; // Will be read from properties
+
+                // Try to read from Alfresco custom properties if available
+                if (alfrescoEntry.Properties != null)
+                {
+                    if (alfrescoEntry.Properties.TryGetValue("bank:nazivDokumenta", out var nazivObj))
+                        originalDocumentName = nazivObj?.ToString() ?? originalDocumentName;
+
+                    if (alfrescoEntry.Properties.TryGetValue("bank:tipDokumenta", out var tipObj))
+                        originalDocumentCode = tipObj?.ToString();
+
+                    // Read old status
+                    if (alfrescoEntry.Properties.TryGetValue("bank:status", out var statusObj))
+                        doc.OldAlfrescoStatus = statusObj?.ToString();
+                }
+
+                doc.OriginalDocumentName = originalDocumentName;
+                doc.OriginalDocumentCode = originalDocumentCode;
+
+                // Step 2: Get migration info using DocumentStatusDetector
+                var migrationInfo = DocumentStatusDetector.GetMigrationInfo(
+                    originalDocumentName,
+                    originalDocumentCode,
+                    doc.OldAlfrescoStatus);
+
+                // Step 3: Populate mapped fields
+                doc.NewDocumentName = migrationInfo.NewName;
+                doc.NewDocumentCode = migrationInfo.NewCode;
+                doc.IsActive = migrationInfo.IsActive;
+                doc.NewAlfrescoStatus = migrationInfo.Status;
+                doc.WillReceiveMigrationSuffix = migrationInfo.WillReceiveMigrationSuffix;
+                doc.CodeWillChange = migrationInfo.CodeWillChange;
+
+                // Step 4: Copy TipDosijea and TargetDossierType from parent folder
+                doc.TipDosijea = folder.TipDosijea;
+                doc.TargetDossierType = folder.TargetDossierType;
+                doc.ClientSegment = folder.ClientSegment ?? folder.Segment;
+
+                // Step 5: Determine Source based on TargetDossierType
+                if (folder.TargetDossierType.HasValue)
+                {
+                    var dossierType = (DossierType)folder.TargetDossierType.Value;
+                    doc.Source = SourceDetector.GetSource(dossierType);
+                }
+                else
+                {
+                    doc.Source = "Heimdall"; // Default fallback
+                }
+
+                // Step 6: Copy CoreId from folder if available
+                doc.CoreId = folder.CoreId;
+
+                _fileLogger.LogTrace(
+                    "Document mapped: {OriginalName} -> {NewName}, Code: {OriginalCode} -> {NewCode}, " +
+                    "IsActive: {IsActive}, Status: {Status}, Source: {Source}, TipDosijea: {TipDosijea}",
+                    doc.OriginalDocumentName, doc.NewDocumentName,
+                    doc.OriginalDocumentCode, doc.NewDocumentCode,
+                    doc.IsActive, doc.NewAlfrescoStatus, doc.Source, doc.TipDosijea);
+            }
+            catch (Exception ex)
+            {
+                _fileLogger.LogError(ex,
+                    "Error applying document mapping for document {Name} in folder {FolderName}",
+                    alfrescoEntry.Name, folder.Name);
+
+                // Set safe defaults on error
+                doc.OriginalDocumentName = alfrescoEntry.Name ?? "Unknown";
+                doc.NewDocumentName = alfrescoEntry.Name ?? "Unknown";
+                doc.IsActive = false; // Safe default
+                doc.NewAlfrescoStatus = "poništen";
+                doc.Source = "Heimdall";
+                doc.TipDosijea = folder.TipDosijea;
+                doc.TargetDossierType = folder.TargetDossierType;
+            }
+        }
+
         #endregion
     }
 }

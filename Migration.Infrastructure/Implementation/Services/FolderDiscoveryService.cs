@@ -1,4 +1,6 @@
-﻿using Alfresco.Contracts.Extensions;
+﻿using Alfresco.Contracts.Enums;
+using Alfresco.Contracts.Extensions;
+using Alfresco.Contracts.Mapper;
 using Alfresco.Contracts.Models;
 using Alfresco.Contracts.Options;
 using Alfresco.Contracts.Oracle.Models;
@@ -195,6 +197,9 @@ namespace Migration.Infrastructure.Implementation.Services
             await EnrichFoldersWithClientDataAsync(page.Items, ct).ConfigureAwait(false);
 
             var foldersToInsert = page.Items.ToList().ToFolderStagingListInsert();
+
+            // Apply folder type detection and source mapping (NEW - FAZA 3)
+            ApplyFolderTypeDetectionAndMapping(foldersToInsert, currentType);
 
             // Populate DossierDestFolderId from cache for all folders
             if (_dossierFolderCache.TryGetValue(currentType, out var dossierFolderId))
@@ -757,6 +762,117 @@ namespace Migration.Infrastructure.Implementation.Services
                     "Enriched {EnrichedCount} folders with ClientAPI data (Errors: {ErrorCount})",
                     enrichmentCount, errorCount);
             }
+        }
+
+        /// <summary>
+        /// Applies folder type detection and source mapping to folders (FAZA 3 - NEW)
+        /// Uses DossierTypeDetector and SourceDetector from Alfresco.Contracts.Mappers
+        /// </summary>
+        private void ApplyFolderTypeDetectionAndMapping(List<FolderStaging> folders, string currentFolderType)
+        {
+            _fileLogger.LogDebug("Applying folder type detection and mapping to {Count} folders from DOSSIER-{Type}",
+                folders.Count, currentFolderType);
+
+            var detectedCount = 0;
+            var unknownCount = 0;
+            var flOrPlResolvedCount = 0;
+
+            foreach (var folder in folders)
+            {
+                try
+                {
+                    // Step 1: Extract TipDosijea from Alfresco properties or infer from folder structure
+                    // For now, we'll use a simple heuristic based on currentFolderType
+                    string? tipDosijea = InferTipDosijeaFromFolderType(currentFolderType);
+                    folder.TipDosijea = tipDosijea;
+
+                    // Step 2: Detect DossierType using DossierTypeDetector
+                    var dossierType = DossierTypeDetector.DetectFromTipDosijea(tipDosijea);
+
+                    // Step 3: If ClientFLorPL, resolve using ClientSegment
+                    if (dossierType == DossierType.ClientFLorPL)
+                    {
+                        // Use Segment from ClientProperties if available
+                        var clientSegment = folder.Segment ?? folder.ClientType;
+                        folder.ClientSegment = clientSegment;
+
+                        if (!string.IsNullOrWhiteSpace(clientSegment))
+                        {
+                            dossierType = DossierTypeDetector.ResolveFLorPL(clientSegment);
+                            flOrPlResolvedCount++;
+
+                            _fileLogger.LogDebug(
+                                "Resolved FL/PL for folder {Name}: ClientSegment={Segment} -> DossierType={DossierType}",
+                                folder.Name, clientSegment, dossierType);
+                        }
+                        else
+                        {
+                            _fileLogger.LogWarning(
+                                "Folder {Name} has TipDosijea='Dosije klijenta FL/PL' but missing ClientSegment - setting to Unknown",
+                                folder.Name);
+                            dossierType = DossierType.Unknown;
+                        }
+                    }
+
+                    // Step 4: Set TargetDossierType
+                    folder.TargetDossierType = (int)dossierType;
+
+                    // Step 5: Determine Source using SourceDetector
+                    folder.Source = SourceDetector.GetSource(dossierType);
+
+                    if (dossierType == DossierType.Unknown)
+                    {
+                        unknownCount++;
+                        _fileLogger.LogWarning(
+                            "Folder {Name} could not be classified - TipDosijea={TipDosijea}, marking as Unknown",
+                            folder.Name, tipDosijea);
+                    }
+                    else
+                    {
+                        detectedCount++;
+                    }
+
+                    _fileLogger.LogTrace(
+                        "Folder {Name}: TipDosijea={TipDosijea}, TargetDossierType={TargetType}, Source={Source}",
+                        folder.Name, folder.TipDosijea, dossierType, folder.Source);
+                }
+                catch (Exception ex)
+                {
+                    unknownCount++;
+                    folder.TargetDossierType = (int)DossierType.Unknown;
+                    folder.Source = "Heimdall"; // Default fallback
+
+                    _fileLogger.LogError(ex,
+                        "Error detecting folder type for {Name}, marking as Unknown",
+                        folder.Name);
+                }
+            }
+
+            _fileLogger.LogInformation(
+                "Folder type detection completed: {DetectedCount} detected, {UnknownCount} unknown, {ResolvedCount} FL/PL resolved",
+                detectedCount, unknownCount, flOrPlResolvedCount);
+        }
+
+        /// <summary>
+        /// Infers TipDosijea from DOSSIER folder type
+        /// This is a heuristic mapping based on folder structure
+        /// </summary>
+        private string? InferTipDosijeaFromFolderType(string folderType)
+        {
+            // Mapping based on analysis document:
+            // FL -> may be "Dosije klijenta FL / PL" or "Dosije paket računa"
+            // PL -> "Dosije klijenta PL" or "Dosije klijenta FL / PL"
+            // ACC -> "Dosije paket računa"
+            // D -> "Dosije depozita"
+
+            return folderType?.ToUpperInvariant() switch
+            {
+                "FL" => "Dosije klijenta FL / PL",  // Will be resolved later using ClientSegment
+                "PL" => "Dosije klijenta PL",
+                "ACC" => "Dosije paket računa",
+                "D" => "Dosije depozita",
+                _ => null
+            };
         }
 
 

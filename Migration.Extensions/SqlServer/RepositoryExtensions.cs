@@ -67,7 +67,6 @@ namespace Migration.Extensions.SqlServer
             var sql = $@"UPDATE DocStaging
                         SET Status = '{MigrationStatus.Ready.ToDbString()}',
                             ErrorMsg = 'Reset from stuck IN PROGRESS state',
-                            RetryCount = ISNULL(RetryCount, 0) + 1,
                             UpdatedAt = GETUTCDATE()
                         WHERE Status = '{MigrationStatus.InProgress.ToDbString()}'
                           AND UpdatedAt < DATEADD(MINUTE, -{totalMinutes}, GETUTCDATE())";
@@ -133,7 +132,7 @@ namespace Migration.Extensions.SqlServer
             var sql = $@"UPDATE FolderStaging
                         SET Status = '{MigrationStatus.Ready.ToDbString()}',
                             Error = 'Reset from stuck IN PROGRESS state',
-                            RetryCount = ISNULL(RetryCount, 0) + 1,
+                            
                             UpdatedAt = GETUTCDATE()
                         WHERE Status = '{MigrationStatus.InProgress.ToDbString()}'
                           AND UpdatedAt < DATEADD(MINUTE, -{totalMinutes}, GETUTCDATE())";

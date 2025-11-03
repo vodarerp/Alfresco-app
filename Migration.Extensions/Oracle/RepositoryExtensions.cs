@@ -91,8 +91,7 @@ namespace Migration.Extensions.Oracle
             // Oracle syntax: SYSTIMESTAMP - INTERVAL 'n' MINUTE
             var sql = $@"UPDATE DocStaging
                         SET Status = '{MigrationStatus.Ready.ToDbString()}',
-                            ErrorMsg = 'Reset from stuck IN PROGRESS state',
-                            RetryCount = NVL(RetryCount, 0) + 1,
+                            ErrorMsg = 'Reset from stuck IN PROGRESS state'
                             UpdatedAt = SYSTIMESTAMP
                         WHERE Status = '{MigrationStatus.InProgress.ToDbString()}'
                           AND UpdatedAt < SYSTIMESTAMP - INTERVAL '{totalMinutes}' MINUTE";
@@ -176,8 +175,7 @@ namespace Migration.Extensions.Oracle
             // Oracle syntax: SYSTIMESTAMP - INTERVAL 'n' MINUTE
             var sql = $@"UPDATE FolderStaging
                         SET Status = '{MigrationStatus.Ready.ToDbString()}',
-                            Error = 'Reset from stuck IN PROGRESS state',
-                            RetryCount = NVL(RetryCount, 0) + 1,
+                            Error = 'Reset from stuck IN PROGRESS state',                           
                             UpdatedAt = SYSTIMESTAMP
                         WHERE Status = '{MigrationStatus.InProgress.ToDbString()}'
                           AND UpdatedAt < SYSTIMESTAMP - INTERVAL '{totalMinutes}' MINUTE";

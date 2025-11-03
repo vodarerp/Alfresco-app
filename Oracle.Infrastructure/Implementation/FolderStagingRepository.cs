@@ -16,7 +16,7 @@ namespace Oracle.Infrastructure.Implementation
         {
             var sql = @"update FolderStaging
                         set status = 'ERROR',
-                            RETRYCOUNT = NVL(RETRYCOUNT, 0) + 1,
+                           
                             error = :error,
                             updatedAt = SYSTIMESTAMP
                         where id = :id";

@@ -22,7 +22,7 @@ namespace SqlServer.Infrastructure.Implementation
         {
             var sql = @"UPDATE DocStaging
                         SET status = 'ERROR',
-                            RETRYCOUNT = ISNULL(RETRYCOUNT, 0) + 1,
+                           
                             ERRORMSG = @error,
                             updatedAt = SYSDATETIMEOFFSET()
                         WHERE id = @id";

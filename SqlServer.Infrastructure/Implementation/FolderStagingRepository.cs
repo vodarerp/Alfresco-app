@@ -16,7 +16,7 @@ namespace SqlServer.Infrastructure.Implementation
         {
             var sql = @"UPDATE FolderStaging
                         SET status = 'ERROR',
-                            RETRYCOUNT = ISNULL(RETRYCOUNT, 0) + 1,
+                           
                             error = @error,
                             updatedAt = SYSDATETIMEOFFSET()
                         WHERE id = @id";

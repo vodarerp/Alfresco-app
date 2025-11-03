@@ -22,7 +22,7 @@ namespace Oracle.Infrastructure.Implementation
         {
             var sql = @"update DocStaging
                         set status = 'ERROR',
-                            RETRYCOUNT = NVL(RETRYCOUNT, 0) + 1,
+                            
                             ERRORMSG = :error,
                             updatedAt = SYSTIMESTAMP
                         where id = :id";
