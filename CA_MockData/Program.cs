@@ -195,13 +195,12 @@ public static class Program
 
     private static HttpClient CreateHttpClient(Config cfg)
     {
-        var baseUrl = "http://localhost:8080/";
         var http = new HttpClient
         {
             BaseAddress = new Uri(cfg.BaseUrl),
             Timeout = TimeSpan.FromMinutes(5)
         };
-        var token = Convert.ToBase64String(Encoding.UTF8.GetBytes($"admin:admin"));
+        var token = Convert.ToBase64String(Encoding.UTF8.GetBytes($"{cfg.Username}:{cfg.Password}"));
         http.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Basic", token);
         return http;
     }
@@ -488,190 +487,195 @@ public static class Program
     }
 
     /// <summary>
+    /// Document name to document type code mapping from Excel migration data.
+    /// Documents will be created with original names (without "_migracija" suffix).
+    /// The migration process will add the suffix based on DocumentNameMapper logic.
+    /// </summary>
+    private static readonly Dictionary<string, string?> DocumentTypeMapping = new()
+    {
+        ["Personal Notice"] = "00253",
+        ["Admission Card"] = "00135",
+        ["KYC Questionnaire"] = "00130",
+        ["Communication Consent"] = "00141",
+        ["Application For Issuing Debit Card PI"] = "00139",
+        ["Specimen card"] = "00099",
+        ["Specimen card for LE"] = "00100",
+        ["Specimen Card for Authorized Person"] = "00101",
+        ["Account Package"] = "00102",
+        ["Pre-Contract Info"] = "00109",
+        ["Current Accounts Contract"] = "00110",
+        ["RSD Instruction for Resident"] = "00117",
+        ["Travel Insurance"] = "00122",
+        ["Request for Accounts Closure"] = "00124",
+        ["Request for Package Accounts Closure"] = "00125",
+        ["Offer With Saving Accounts"] = "00233",
+        ["Saving Accounts Contract"] = "00113",
+        ["Mandatory Elements with Saving Accounts"] = "00241",
+        ["Card Return Request"] = "00138",
+        ["GL Transaction"] = "00143",
+        ["SMS info modify request"] = "00103",
+        ["SMS ca edit client phone change"] = "00178",
+        ["Card Accounts Change"] = "00133",
+        ["Card Reissuing"] = "00134",
+        ["GDPR Revoke"] = "00121",
+        ["Card Blocking Request"] = "00136",
+        ["SMS card alarm change"] = "00104",
+        ["Card Limit Change"] = "00132",
+        ["Request For Cancellation of Authorization"] = "00127",
+        ["FX Transaction"] = "00142",
+        ["Deblocking Card Request"] = "00137",
+        ["Contact Data Change Email"] = "00156",
+        ["Credit Bureau Reports Consent"] = "00237",
+        ["Family insurance"] = "00123",
+        ["Contact Data Change Phone"] = "00155",
+        ["Travel Insurance Generali"] = "00766",
+
+        // NaN -> null (deposit documents without codes)
+        ["PiPonuda"] = null,
+        ["PiAnuitetniPlan"] = null,
+        ["PiObavezniElementiUgovora"] = null,
+        ["ZahtevZaOtvaranjeRacunaOrocenogDepozita"] = null,
+        ["PiVazećiUgovorOrocenihDepozitaOstaleValute"] = null,
+        ["Request For Opening Private Account"] = "00105",
+        ["Contract Foreign Exchange Account For Receive Of Funds From The Sale Financial Instruments RSD"] = "00129",
+        ["KYC Questionnaire MDOC"] = "00130",
+        ["PiVazeciUgovorOrocenihDepozitiDinarskiTekuci"] = null,
+        ["Contract Dedicated Account For Purchase Of Financial Instruments RSD"] = "00128",
+        ["PiVazeciUgovorOrocenihDepozitaNa36Meseci"] = null,
+        ["PiVazeciUgovorOrocenihDepozitaNa24MesecaRSD"] = null,
+        ["PiVazeciUgovorOrocenihDepozitaNa25Meseci"] = null,
+    };
+
+    /// <summary>
     /// Generates test case documents based on TestCase-migracija.txt requirements.
     /// Creates a variety of documents to cover all test scenarios.
+    /// Uses DocumentTypeMapping dictionary for accurate names and codes.
     /// </summary>
     private static List<TestDocument> GenerateTestCaseDocuments(string clientType, int coreId, int folderIndex)
     {
         var documents = new List<TestDocument>();
         var random = new Random(coreId);
 
-        // Test Cases 1-2: Mix of active and inactive documents
-        // Some with "_migracija" suffix (inactive), some without (active)
+        // Track document names to avoid duplicates
+        var usedFileNames = new HashSet<string>();
 
+        // Helper function to create document from dictionary entry
+        void AddDocument(string documentName, int? versionNumber = null)
+        {
+            if (!DocumentTypeMapping.TryGetValue(documentName, out var docTypeCode))
+            {
+                Console.WriteLine($"[WARNING] Document '{documentName}' not found in DocumentTypeMapping");
+                return;
+            }
+
+            // Skip documents with null codes (deposit documents without proper mapping)
+            if (string.IsNullOrEmpty(docTypeCode))
+            {
+                Console.WriteLine($"[INFO] Skipping document '{documentName}' - no document type code assigned");
+                return;
+            }
+
+            // Sanitize filename: replace spaces and special characters with underscores
+            var baseFileName = documentName.Replace(" ", "_").Replace("/", "_");
+            var fileName = baseFileName + ".pdf";
+
+            // If duplicate, add version number or unique suffix
+            if (usedFileNames.Contains(fileName))
+            {
+                if (versionNumber.HasValue)
+                {
+                    fileName = $"{baseFileName}_v{versionNumber.Value}.pdf";
+                }
+                else
+                {
+                    // Add incremental suffix
+                    int counter = 1;
+                    while (usedFileNames.Contains(fileName))
+                    {
+                        fileName = $"{baseFileName}_{counter}.pdf";
+                        counter++;
+                    }
+                }
+            }
+
+            usedFileNames.Add(fileName);
+
+            var props = CreateDocumentProps(clientType, coreId, docTypeCode, documentName, "validiran", random);
+
+            // Add version label if specified
+            if (versionNumber.HasValue)
+            {
+                props["ecm:versionLabel"] = $"{versionNumber.Value}.0";
+                props["ecm:versionType"] = versionNumber.Value == 1 ? "Initial" : "Revision";
+            }
+
+            documents.Add(new TestDocument
+            {
+                Name = fileName,
+                Properties = props
+            });
+        }
+
+        // Generate documents based on client type
         if (clientType == "ACC")
         {
             // Test Case 3: Dosije paket računa documents
-            documents.Add(new TestDocument
-            {
-                Name = "Current_Accounts_Contract.pdf",
-                Properties = CreateDocumentProps(clientType, coreId, "00001", "Current Accounts Contract", "validiran", random)
-            });
-
-            documents.Add(new TestDocument
-            {
-                Name = "Saving_Accounts_Contract.pdf",
-                Properties = CreateDocumentProps(clientType, coreId, "00002", "Saving Accounts Contract", "validiran", random)
-            });
-
-            documents.Add(new TestDocument
-            {
-                Name = $"TEKUCI_DEVIZNI_RACUN_{coreId}001.pdf",
-                Properties = CreateDocumentProps(clientType, coreId, "00003", $"TEKUCI DEVIZNI RACUN {coreId}001", "validiran", random)
-            });
-
-            // Test Case 1: Inactive document with "_migracija" suffix
-            documents.Add(new TestDocument
-            {
-                Name = "Account_Package_migracija.pdf",
-                Properties = CreateDocumentProps(clientType, coreId, "00004", "Account Package", "poništen", random)
-            });
-
-            documents.Add(new TestDocument
-            {
-                Name = "Specimen_card.pdf",
-                Properties = CreateDocumentProps(clientType, coreId, "00005", "Specimen card", "validiran", random)
-            });
+            AddDocument("Current Accounts Contract");
+            AddDocument("Saving Accounts Contract");
+            AddDocument("Account Package");
+            AddDocument("Specimen card");
+            AddDocument("Pre-Contract Info");
+            AddDocument("RSD Instruction for Resident");
+            AddDocument("Request for Package Accounts Closure");
+            AddDocument("Contact Data Change Email");
+            AddDocument("Contact Data Change Phone");
         }
         else if (clientType == "FL")
         {
             // Test Case 4: Dosije fizičkog lica documents
-            documents.Add(new TestDocument
-            {
-                Name = "Personal_Notice.pdf",
-                Properties = CreateDocumentProps(clientType, coreId, "00010", "Personal Notice", "validiran", random)
-            });
-
-            documents.Add(new TestDocument
-            {
-                Name = "KYC_Questionnaire_MDOC.pdf",
-                Properties = CreateDocumentProps(clientType, coreId, "00011", "KYC Questionnaire MDOC", "validiran", random)
-            });
-
-            // Test Case 1: Inactive document with "_migracija"
-            documents.Add(new TestDocument
-            {
-                Name = "Communication_Consent_migracija.pdf",
-                Properties = CreateDocumentProps(clientType, coreId, "00012", "Communication Consent", "poništen", random)
-            });
-
-            documents.Add(new TestDocument
-            {
-                Name = "Credit_Bureau_Reports_Consent.pdf",
-                Properties = CreateDocumentProps(clientType, coreId, "00013", "Credit Bureau Reports Consent", "validiran", random)
-            });
-
-            // Test Case 12: KDP za fizička lica (00099) - should be marked inactive if retention policy is "nova verzija"
-            documents.Add(new TestDocument
-            {
-                Name = "KDP_za_fizicka_lica.pdf",
-                Properties = CreateDocumentProps(clientType, coreId, "00099", "KDP za fizička lica", "validiran", random)
-            });
-
-            // Test Case 13: KDP za ovlašćena lica (00101)
-            documents.Add(new TestDocument
-            {
-                Name = "KDP_za_ovlascena_lica.pdf",
-                Properties = CreateDocumentProps(clientType, coreId, "00101", "KDP za ovlašćena lica", "validiran", random)
-            });
-
-            // Test Case 16: KDP vlasnika za FL (00824) - requires contract number
-            var contractNumber = $"{coreId}{random.Next(100, 999)}";
-            var kdpProps = CreateDocumentProps(clientType, coreId, "00824", "KDP vlasnika za FL", "validiran", random);
-            kdpProps["ecm:contractNumber"] = contractNumber;
-            documents.Add(new TestDocument
-            {
-                Name = "KDP_vlasnika_za_FL.pdf",
-                Properties = kdpProps
-            });
+            AddDocument("Personal Notice");
+            AddDocument("KYC Questionnaire");
+            AddDocument("KYC Questionnaire MDOC");
+            AddDocument("Communication Consent");
+            AddDocument("Credit Bureau Reports Consent");
+            AddDocument("Specimen card");
+            AddDocument("Specimen Card for Authorized Person");
+            AddDocument("Family insurance");
+            AddDocument("Travel Insurance");
+            AddDocument("Admission Card");
+            AddDocument("Application For Issuing Debit Card PI");
+            AddDocument("Pre-Contract Info");
+            AddDocument("Contact Data Change Email");
+            AddDocument("Contact Data Change Phone");
 
             // Test Case 10: Multiple versions of the same document
-            for (int version = 1; version <= 3; version++)
+            for (int version = 1; version <= 2; version++)
             {
-                var versionProps = CreateDocumentProps(clientType, coreId, "00020", "Family Insurance", "validiran", random);
-                versionProps["ecm:versionLabel"] = $"{version}.0";
-                versionProps["ecm:versionType"] = version == 1 ? "Initial" : "Revision";
-                documents.Add(new TestDocument
-                {
-                    Name = $"Family_Insurance_v{version}.pdf",
-                    Properties = versionProps
-                });
+                AddDocument("Family insurance", version);
             }
         }
         else if (clientType == "PL")
         {
             // Test Case 5: Dosije pravnog lica documents
-            documents.Add(new TestDocument
-            {
-                Name = "KYC_Questionnaire_for_LE.pdf",
-                Properties = CreateDocumentProps(clientType, coreId, "00030", "KYC Questionnaire for LE", "validiran", random)
-            });
-
-            documents.Add(new TestDocument
-            {
-                Name = "APR_Certificate.pdf",
-                Properties = CreateDocumentProps(clientType, coreId, "00031", "APR Certificate", "validiran", random)
-            });
-
-            documents.Add(new TestDocument
-            {
-                Name = "Current_Account_Contract_for_LE.pdf",
-                Properties = CreateDocumentProps(clientType, coreId, "00032", "Current Account Contract for LE", "validiran", random)
-            });
-
-            // Test Case 1: Inactive with "_migracija"
-            documents.Add(new TestDocument
-            {
-                Name = "Specimen_card_for_LE_migracija.pdf",
-                Properties = CreateDocumentProps(clientType, coreId, "00033", "Specimen card for LE", "poništen", random)
-            });
-
-            // Test Case 14: KDP za pravna lica (00100)
-            documents.Add(new TestDocument
-            {
-                Name = "KDP_za_pravna_lica.pdf",
-                Properties = CreateDocumentProps(clientType, coreId, "00100", "KDP za pravna lica", "validiran", random)
-            });
-
-            // Test Case 4: Documents that should be in PL dossier
-            documents.Add(new TestDocument
-            {
-                Name = "Communication_Consent_LE.pdf",
-                Properties = CreateDocumentProps(clientType, coreId, "00034", "Communication Consent", "validiran", random)
-            });
-
-            documents.Add(new TestDocument
-            {
-                Name = "Personal_Notice_LE.pdf",
-                Properties = CreateDocumentProps(clientType, coreId, "00035", "Personal Notice", "validiran", random)
-            });
+            AddDocument("KYC Questionnaire");
+            AddDocument("Current Accounts Contract");
+            AddDocument("Specimen card for LE");
+            AddDocument("Communication Consent");
+            AddDocument("Personal Notice");
+            AddDocument("Card Limit Change");
+            AddDocument("GDPR Revoke");
+            AddDocument("GL Transaction");
+            AddDocument("FX Transaction");
+            AddDocument("Pre-Contract Info");
+            AddDocument("Contact Data Change Email");
+            AddDocument("Contact Data Change Phone");
 
             // Test Case 10: Multiple versions
             for (int version = 1; version <= 2; version++)
             {
-                var versionProps = CreateDocumentProps(clientType, coreId, "00036", "Card Limit Change", "validiran", random);
-                versionProps["ecm:versionLabel"] = $"{version}.0";
-                versionProps["ecm:versionType"] = version == 1 ? "Initial" : "Revision";
-                documents.Add(new TestDocument
-                {
-                    Name = $"Card_Limit_Change_v{version}.pdf",
-                    Properties = versionProps
-                });
+                AddDocument("Card Limit Change", version);
             }
         }
-
-        // Add some general active documents for all types (Test Case 2)
-        documents.Add(new TestDocument
-        {
-            Name = "Pre-Contract_Info.pdf",
-            Properties = CreateDocumentProps(clientType, coreId, "00050", "Pre-Contract Info", "validiran", random)
-        });
-
-        documents.Add(new TestDocument
-        {
-            Name = "Account_Package_RSD_Instruction.pdf",
-            Properties = CreateDocumentProps(clientType, coreId, "00051", "Account Package RSD Instruction for Resident", "validiran", random)
-        });
 
         return documents;
     }
@@ -973,14 +977,12 @@ public static class Program
         properties["ecm:coreId"] = coreId.ToString();
         properties["ecm:docClientId"] = coreId.ToString();
 
-        // Test Cases 1-2: Document status based on name suffix
-        // Documents with "_migracija" suffix should be "poništen" (cancelled)
-        // Documents without suffix should be "validiran" (validated)
-        bool isMigrationDoc = documentName.Contains("_migracija", StringComparison.OrdinalIgnoreCase);
-        string docStatus = isMigrationDoc ? "poništen" : "validiran";
+        // Test Cases 1-2: All documents are created as "validiran" (active)
+        // The migration process will determine which ones should become "poništen" based on DocumentNameMapper
+        string docStatus = "validiran";
 
         properties["ecm:docStatus"] = docStatus;
-        properties["ecm:status"] = docStatus == "validiran" ? "ACTIVE" : "INACTIVE";
+        properties["ecm:status"] = "ACTIVE";
 
         // Tip dokumenta (Document Type)
         var docTypes = new[] { "00001", "00002", "00003", "00099", "00100", "00101", "00824" };

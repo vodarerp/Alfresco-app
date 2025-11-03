@@ -64,5 +64,61 @@ namespace Alfresco.Contracts.Mapper
 
             return DossierType.Unknown;
         }
+
+        /// <summary>
+        /// Vraća naziv destination foldera za dati DossierType
+        /// Koristi se za kreiranje parent foldera u novom Alfresco-u
+        /// </summary>
+        public static string GetDestinationFolderName(DossierType dossierType)
+        {
+            return dossierType switch
+            {
+                DossierType.AccountPackage => "300 Dosije paket računa",
+                DossierType.ClientPL => "400 Dosije pravnog lica",
+                DossierType.ClientFL => "500 Dosije fizičkog lica",
+                DossierType.Deposit => "700 Dosije depozita",
+                DossierType.Unknown => "999 Dosije - Unknown",
+                DossierType.Other => "999 Dosije - Unknown", // Fallback
+                DossierType.ClientFLorPL => throw new InvalidOperationException(
+                    "Cannot get folder name for unresolved ClientFLorPL type. Must resolve to ClientFL or ClientPL first."),
+                _ => "999 Dosije - Unknown"
+            };
+        }
+
+        /// <summary>
+        /// Mapira DOSSIER folder type (FL/PL/ACC/D) iz starog Alfresco-a -> DossierType enum
+        /// Ovo se koristi za određivanje koje parent foldere treba kreirati
+        /// </summary>
+        public static DossierType MapDossierFolderTypeToDossierType(string folderType)
+        {
+            return folderType?.ToUpperInvariant() switch
+            {
+                "FL" => DossierType.ClientFLorPL,  // Treba razrešiti kasnije pomoću ClientSegment
+                "PL" => DossierType.ClientPL,
+                "ACC" => DossierType.AccountPackage,
+                "D" => DossierType.Deposit,
+                _ => DossierType.Unknown
+            };
+        }
+
+        /// <summary>
+        /// Vraća sve moguće DossierType vrednosti koje mogu nastati iz datog folder type-a
+        /// Za FL vraća i ClientFL i ClientPL jer mogu biti oba
+        /// </summary>
+        public static IEnumerable<DossierType> GetPossibleDossierTypes(string folderType)
+        {
+            var baseType = MapDossierFolderTypeToDossierType(folderType);
+
+            if (baseType == DossierType.ClientFLorPL)
+            {
+                // FL folder može sadržati i fizička i pravna lica
+                yield return DossierType.ClientFL;
+                yield return DossierType.ClientPL;
+            }
+            else if (baseType != DossierType.Other && baseType != DossierType.ClientFLorPL)
+            {
+                yield return baseType;
+            }
+        }
     }
 }

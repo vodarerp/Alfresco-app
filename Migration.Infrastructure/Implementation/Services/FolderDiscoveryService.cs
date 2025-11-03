@@ -201,20 +201,47 @@ namespace Migration.Infrastructure.Implementation.Services
             // Apply folder type detection and source mapping (NEW - FAZA 3)
             ApplyFolderTypeDetectionAndMapping(foldersToInsert, currentType);
 
-            // Populate DossierDestFolderId from cache for all folders
-            if (_dossierFolderCache.TryGetValue(currentType, out var dossierFolderId))
+            // Populate DossierDestFolderId from cache using TargetDossierType
+            var successCount = 0;
+            var failCount = 0;
+
+            foreach (var folder in foldersToInsert)
             {
-                foreach (var folder in foldersToInsert)
+                var dossierTypeCode = folder.TargetDossierType.ToString();
+
+                if (_dossierFolderCache.TryGetValue(dossierTypeCode, out var parentFolderId))
                 {
-                    folder.DossierDestFolderId = dossierFolderId;
+                    folder.DossierDestFolderId = parentFolderId;
+                    successCount++;
+
+                    _fileLogger.LogTrace("Folder {Name}: DossierDestFolderId={ParentId} (Type {Code})",
+                        folder.Name, parentFolderId, dossierTypeCode);
                 }
-                _fileLogger.LogDebug("Populated DossierDestFolderId={DossierFolderId} for {Count} folders",
-                    dossierFolderId, foldersToInsert.Count);
+                else
+                {
+                    failCount++;
+                    _fileLogger.LogWarning(
+                        "Parent folder {Code} not found in cache for folder {Name}! Falling back to Unknown.",
+                        dossierTypeCode, folder.Name);
+
+                    // Fallback to Unknown (999)
+                    if (_dossierFolderCache.TryGetValue("999", out var unknownFolderId))
+                    {
+                        folder.DossierDestFolderId = unknownFolderId;
+                        folder.TargetDossierType = (int)DossierType.Unknown;
+                    }
+                    else
+                    {
+                        _fileLogger.LogError(
+                            "Unknown folder (999) also not in cache! This should not happen. Folder {Name} will have null DossierDestFolderId.",
+                            folder.Name);
+                    }
+                }
             }
-            else
-            {
-                _fileLogger.LogWarning("DOSSIER-{Type} not found in cache! This should not happen.", currentType);
-            }
+
+            _fileLogger.LogDebug(
+                "Populated DossierDestFolderId for {SuccessCount}/{TotalCount} folders ({FailCount} fallbacks to Unknown)",
+                successCount, foldersToInsert.Count, failCount);
 
             var inserted = await InsertFoldersAsync(foldersToInsert, ct).ConfigureAwait(false);
 
@@ -638,59 +665,94 @@ namespace Migration.Infrastructure.Implementation.Services
         }
 
         /// <summary>
-        /// Pre-creates all DOSSIER destination folders SEQUENTIALLY to avoid race conditions
-        /// in DocumentDiscoveryService parallel processing
+        /// Pre-creates all parent destination folders (300/400/500/700/999) SEQUENTIALLY
+        /// to avoid race conditions during DocumentDiscoveryService parallel processing
         /// </summary>
         private async Task EnsureDossierFoldersExistAsync(IEnumerable<string> folderTypes, CancellationToken ct)
         {
-            _fileLogger.LogInformation("Pre-creating DOSSIER destination folders to avoid race conditions...");
-            _dbLogger.LogInformation("Starting DOSSIER folder pre-creation");
+            _fileLogger.LogInformation("Pre-creating parent destination folders (300/400/500/700/999)...");
+            _dbLogger.LogInformation("Starting parent folder pre-creation");
+
+            // Determine which DossierTypes are needed based on discovered folderTypes
+            var neededDossierTypes = new HashSet<DossierType>();
 
             foreach (var folderType in folderTypes)
             {
-                // Check cache first
-                if (_dossierFolderCache.ContainsKey(folderType))
+                // Get all possible DossierTypes for this folder type
+                // For FL, this returns both ClientFL (500) and ClientPL (400)
+                var possibleTypes = DossierTypeDetector.GetPossibleDossierTypes(folderType);
+                foreach (var type in possibleTypes)
                 {
-                    _fileLogger.LogDebug("DOSSIER-{Type} already exists in cache", folderType);
+                    neededDossierTypes.Add(type);
+                }
+            }
+
+            // Always ensure Unknown folder exists as fallback
+            neededDossierTypes.Add(DossierType.Unknown);
+
+            _fileLogger.LogInformation("Will create {Count} parent folders: {Types}",
+                neededDossierTypes.Count,
+                string.Join(", ", neededDossierTypes.Select(t => $"{(int)t} ({t})")));
+
+            // Create each parent folder sequentially
+            foreach (var dossierType in neededDossierTypes.OrderBy(t => (int)t))
+            {
+                // Skip unresolved types (should not happen at this point)
+                if (dossierType == DossierType.ClientFLorPL || dossierType == DossierType.Other)
+                {
+                    _fileLogger.LogWarning("Skipping unresolved DossierType: {Type}", dossierType);
                     continue;
                 }
 
-                var dossierFolderName = $"DOSSIER-{folderType}";
-                _fileLogger.LogInformation("Creating destination folder: {FolderName}", dossierFolderName);
+                var dossierTypeCode = ((int)dossierType).ToString();
+
+                // Check cache first
+                if (_dossierFolderCache.ContainsKey(dossierTypeCode))
+                {
+                    _fileLogger.LogDebug("Parent folder {Code} already exists in cache", dossierTypeCode);
+                    continue;
+                }
+
+                var folderName = DossierTypeDetector.GetDestinationFolderName(dossierType);
+                _fileLogger.LogInformation("Creating parent folder: {FolderName} (Code: {Code})",
+                    folderName, dossierTypeCode);
 
                 try
                 {
-                    // Create/resolve the DOSSIER folder under RootDestinationFolderId
-                    var dossierFolderId = await _resolver.ResolveAsync(
+                    // Create/resolve the parent folder under RootDestinationFolderId
+                    var parentFolderId = await _resolver.ResolveAsync(
                         _options.Value.RootDestinationFolderId,
-                        dossierFolderName,
+                        folderName,
                         ct).ConfigureAwait(false);
 
-                    // Cache the folder ID
-                    _dossierFolderCache[folderType] = dossierFolderId;
+                    // Cache the folder ID by DossierType code (300/400/500/700/999)
+                    _dossierFolderCache[dossierTypeCode] = parentFolderId;
 
                     _fileLogger.LogInformation(
-                        "Successfully created/resolved DOSSIER-{Type} -> {FolderId}",
-                        folderType, dossierFolderId);
+                        "Successfully created/resolved parent folder {Code} ({Name}) -> {FolderId}",
+                        dossierTypeCode, folderName, parentFolderId);
                     _dbLogger.LogInformation(
-                        "Created DOSSIER-{Type} destination folder",
-                        folderType);
+                        "Created parent folder {Code} ({Name})",
+                        dossierTypeCode, folderName);
                 }
                 catch (Exception ex)
                 {
-                    _fileLogger.LogError("Failed to create DOSSIER-{Type}: {Error}", folderType, ex.Message);
+                    _fileLogger.LogError("Failed to create parent folder {Code} ({Name}): {Error}",
+                        dossierTypeCode, folderName, ex.Message);
                     _dbLogger.LogError(ex,
-                        "Failed to create DOSSIER-{Type} destination folder", folderType);
-                    _uiLogger.LogError("Failed to create DOSSIER-{Type}", folderType);
+                        "Failed to create parent folder {Code} ({Name})",
+                        dossierTypeCode, folderName);
+                    _uiLogger.LogError("Failed to create parent folder {Code}", dossierTypeCode);
                     throw;
                 }
             }
 
             _fileLogger.LogInformation(
-                "Successfully pre-created {Count} DOSSIER destination folders",
-                _dossierFolderCache.Count);
+                "Successfully pre-created {Count} parent destination folders: {Folders}",
+                _dossierFolderCache.Count,
+                string.Join(", ", _dossierFolderCache.Keys.OrderBy(k => k)));
             _dbLogger.LogInformation(
-                "Pre-created {Count} DOSSIER folders",
+                "Pre-created {Count} parent folders",
                 _dossierFolderCache.Count);
         }
 
