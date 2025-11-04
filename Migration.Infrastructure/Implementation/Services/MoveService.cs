@@ -29,6 +29,7 @@ namespace Migration.Infrastructure.Implementation.Services
         private readonly IMoveReader _moveReader;
         private readonly IMoveExecutor _moveExecutor;
         private readonly IDocStagingRepository _docRepo;
+        private readonly IDocumentResolver _resolver;
         private readonly IAlfrescoWriteApi _write;
         private readonly IOptions<MigrationOptions> _options;
         private readonly IServiceProvider _sp;
@@ -45,11 +46,19 @@ namespace Migration.Infrastructure.Implementation.Services
 
         private readonly ILogger _uiLogger;
 
-        public MoveService(IMoveReader moveService, IMoveExecutor moveExecutor, IDocStagingRepository docRepo, IAlfrescoWriteApi write, IOptions<MigrationOptions> options, IServiceProvider sp, ILoggerFactory logger)
+        // Folder cache: Key = "TargetDossierType_DossierDestFolderId", Value = Folder ID in Alfresco
+        // Example: "500_PI102206" -> "abc-123-def-456"
+        private readonly ConcurrentDictionary<string, string> _folderCache = new();
+
+        // Semaphore for folder creation synchronization per cache key
+        private readonly ConcurrentDictionary<string, SemaphoreSlim> _folderLocks = new();
+
+        public MoveService(IMoveReader moveService, IMoveExecutor moveExecutor, IDocStagingRepository docRepo, IDocumentResolver resolver, IAlfrescoWriteApi write, IOptions<MigrationOptions> options, IServiceProvider sp, ILoggerFactory logger)
         {
             _moveReader = moveService;
             _moveExecutor = moveExecutor;
             _docRepo = docRepo;
+            _resolver = resolver;
             _write = write;
             _options = options;
             _sp = sp;
@@ -100,38 +109,33 @@ namespace Migration.Infrastructure.Implementation.Services
                 },
                 async (doc, token) =>
                 {
-                    //var threadId = Environment.CurrentManagedThreadId;
-                    //activeThreads.TryAdd(threadId, 0);
-                    //activeThreads[threadId]++;
-
-                    //// ✅ LOG START SA THREAD INFO
-                    //_fileLogger.LogInformation(
-                    //    "[Thread {ThreadId}] START processing document {DocId}",
-                    //    threadId, doc.Id);
                     try
                     {
-                        _fileLogger.LogDebug("Moving document {DocId} from {NodeId} to {ToPath}", doc.Id, doc.NodeId, doc.ToPath);
-                        var res = await MoveSingleDocumentAsync(doc.Id, doc.NodeId, doc.ToPath, token).ConfigureAwait(false);
+                        _fileLogger.LogDebug("Processing document {DocId} (NodeId: {NodeId})", doc.Id, doc.NodeId);
+
+                        // Pass entire DocStaging object to MoveSingleDocumentAsync
+                        var res = await MoveSingleDocumentAsync(doc, token).ConfigureAwait(false);
+
                         if (res)
                         {
                             successfulDocs.Add(doc.Id);
                             Interlocked.Increment(ref doneCount);
                             Interlocked.Increment(ref _totalMoved);
-                            _fileLogger.LogDebug("Successfully moved document {DocId}", doc.Id);
+                            _fileLogger.LogDebug("Successfully migrated document {DocId}", doc.Id);
                         }
                         else
                         {
-                            _fileLogger.LogWarning("Move returned false for document {DocId} ({NodeId})", doc.Id, doc.NodeId);
-                            _dbLogger.LogWarning("Move returned false for document {DocId} ({NodeId})", doc.Id, doc.NodeId);
-                            errors.Add((doc.Id, new InvalidOperationException("Move returned false")));
+                            _fileLogger.LogWarning("Migration returned false for document {DocId} ({NodeId})", doc.Id, doc.NodeId);
+                            _dbLogger.LogWarning("Migration returned false for document {DocId} ({NodeId})", doc.Id, doc.NodeId);
+                            errors.Add((doc.Id, new InvalidOperationException("Migration returned false")));
                         }
                     }
                     catch (Exception ex)
                     {
-                        _fileLogger.LogError("Failed to move document {DocId} - Error: {Error}", doc.Id, ex.Message);
+                        _fileLogger.LogError("Failed to migrate document {DocId} - Error: {Error}", doc.Id, ex.Message);
                         _dbLogger.LogError(ex,
-                            "Failed to move document {DocId} ({NodeId}) to {ToPath}",
-                            doc.Id, doc.NodeId, doc.ToPath);
+                            "Failed to migrate document {DocId} ({NodeId})",
+                            doc.Id, doc.NodeId);
                         errors.Add((doc.Id, ex));
                     }
                 });
@@ -456,49 +460,71 @@ namespace Migration.Infrastructure.Implementation.Services
 
         }
 
-        private async Task<bool> MoveSingleDocumentAsync(long docId, string nodeId, string destNodeId,CancellationToken ct)
+        /// <summary>
+        /// Migrates single document from old to new Alfresco
+        ///
+        /// Process:
+        /// 1. Create/Get destination folder (with caching)
+        /// 2. Move document to destination folder
+        /// 3. Update document properties in new Alfresco
+        ///
+        /// Per Analiza_migracije_v2.md: All metadata prepared by DocumentDiscoveryService
+        /// </summary>
+        private async Task<bool> MoveSingleDocumentAsync(DocStaging doc, CancellationToken ct)
         {
             using var scope = _fileLogger.BeginScope(new Dictionary<string, object>
             {
-                ["DocumentId"] = docId,
-                ["NodeId"] = nodeId,
-                ["DestFolderId"] = destNodeId
+                ["DocumentId"] = doc.Id,
+                ["NodeId"] = doc.NodeId,
+                ["DossierDestId"] = doc.DossierDestFolderId ?? "null",
+                ["TargetDossierType"] = doc.TargetDossierType?.ToString() ?? "null"
             });
 
-            _fileLogger.LogDebug("Moving document {DocId}", docId);
-
-            var moved = await _moveExecutor.MoveAsync(nodeId, destNodeId, ct).ConfigureAwait(false);
-
-            if (!moved)
-            {
-                throw new InvalidOperationException(
-                    $"Move operation returned false for document {docId}");
-            }
-
-            //await UpdateDocumentStatusAsync(
-            //    docId,
-            //    MigrationStatus.Done.ToDbString(),
-            //    null,
-            //    ct);
-
-            return moved;
-        }
-
-        private async Task UpdateDocumentStatusAsync(long docId, string status, string? errorMsg, CancellationToken ct)
-        {
-            await using var scope = _sp.CreateAsyncScope();
-            var uow = scope.ServiceProvider.GetRequiredService<IUnitOfWork>();
-            var docRepo = scope.ServiceProvider.GetRequiredService<IDocStagingRepository>();
-
-            await uow.BeginAsync(ct: ct).ConfigureAwait(false);
             try
             {
-                await docRepo.SetStatusAsync(docId, status, errorMsg, ct).ConfigureAwait(false);
-                await uow.CommitAsync(ct: ct).ConfigureAwait(false);
+                // ========================================
+                // STEP 1: Create/Get destination folder
+                // ========================================
+                _fileLogger.LogDebug("Creating destination folder for document {DocId}", doc.Id);
+                var destFolderId = await CreateOrGetDestinationFolder(doc, ct).ConfigureAwait(false);
+
+                _fileLogger.LogInformation("Destination folder for document {DocId}: {FolderId}",
+                    doc.Id, destFolderId);
+
+                // ========================================
+                // STEP 2: Move document to destination folder
+                // ========================================
+                _fileLogger.LogDebug("Moving document {DocId} (NodeId: {NodeId}) to folder {FolderId}",
+                    doc.Id, doc.NodeId, destFolderId);
+
+                var moved = await _moveExecutor.MoveAsync(doc.NodeId, destFolderId, ct).ConfigureAwait(false);
+
+                if (!moved)
+                {
+                    throw new InvalidOperationException(
+                        $"Move operation returned false for document {doc.Id} (NodeId: {doc.NodeId})");
+                }
+
+                _fileLogger.LogInformation("Document {DocId} successfully moved to {FolderId}", doc.Id, destFolderId);
+
+                // ========================================
+                // STEP 3: Update document properties in NEW Alfresco
+                // ========================================
+                _fileLogger.LogDebug("Updating properties for document {DocId}", doc.Id);
+                var properties = BuildDocumentProperties(doc);
+
+                await _write.UpdateNodePropertiesAsync(doc.NodeId, properties, ct).ConfigureAwait(false);
+
+                _fileLogger.LogInformation("Document {DocId} properties updated successfully ({Count} properties)",
+                    doc.Id, properties.Count);
+
+                return true;
             }
-            catch
+            catch (Exception ex)
             {
-                await uow.RollbackAsync(ct: ct).ConfigureAwait(false);
+                _fileLogger.LogError(ex,
+                    "Failed to migrate document {DocId} (NodeId: {NodeId})",
+                    doc.Id, doc.NodeId);
                 throw;
             }
         }
@@ -720,6 +746,223 @@ namespace Migration.Infrastructure.Implementation.Services
                 batchCounter - 1, _totalMoved, _totalFailed);
 
             return completedSuccessfully;
+        }
+
+        /// <summary>
+        /// Determines parent folder name based on TargetDossierType
+        /// Per Analiza_migracije_v2.md:
+        /// - ClientFL (500) → "DOSSIERS-PI"
+        /// - ClientPL (400) → "DOSSIERS-LE"
+        /// - AccountPackage (300) → "DOSSIERS-ACC"
+        /// - Deposit (700) → "DOSSIERS-D"
+        /// - Unknown (999) → "DOSSIERS-UNKNOWN"
+        /// </summary>
+        private string GetParentFolderName(int? targetDossierType)
+        {
+            if (!targetDossierType.HasValue)
+            {
+                _fileLogger.LogWarning("TargetDossierType is null, defaulting to DOSSIERS-UNKNOWN");
+                return "DOSSIERS-UNKNOWN";
+            }
+
+            var dossierType = (DossierType)targetDossierType.Value;
+
+            var folderName = dossierType switch
+            {
+                DossierType.ClientFL => "DOSSIERS-PI",       // 500
+                DossierType.ClientPL => "DOSSIERS-LE",       // 400
+                DossierType.AccountPackage => "DOSSIERS-ACC", // 300
+                DossierType.Deposit => "DOSSIERS-D",         // 700
+                _ => "DOSSIERS-UNKNOWN"                      // 999 or other
+            };
+
+            _fileLogger.LogTrace("Mapped DossierType {DossierType} ({Code}) → Parent folder '{FolderName}'",
+                dossierType, targetDossierType.Value, folderName);
+
+            return folderName;
+        }
+
+        /// <summary>
+        /// Creates or gets destination folder for document migration with caching
+        ///
+        /// Process:
+        /// 1. Check cache first (key = "TargetDossierType_DossierDestFolderId")
+        /// 2. Acquire lock per cache key to prevent race conditions
+        /// 3. Double-check cache (another thread might have created folder while waiting for lock)
+        /// 4. Create/Get parent folder (e.g., "DOSSIERS-PI")
+        /// 5. Create/Get individual dossier folder (e.g., "PI102206")
+        /// 6. Cache the result
+        ///
+        /// Returns: Folder ID in new Alfresco where document should be moved
+        /// </summary>
+        private async Task<string> CreateOrGetDestinationFolder(DocStaging doc, CancellationToken ct)
+        {
+            // ========================================
+            // Step 1: Check cache first (fast path - no locking)
+            // ========================================
+            var cacheKey = $"{doc.TargetDossierType}_{doc.DossierDestFolderId}";
+
+            if (_folderCache.TryGetValue(cacheKey, out var cachedFolderId))
+            {
+                _fileLogger.LogTrace("Cache HIT for key '{CacheKey}' → Folder ID: {FolderId}",
+                    cacheKey, cachedFolderId);
+                return cachedFolderId;
+            }
+
+            _fileLogger.LogDebug("Cache MISS for key '{CacheKey}', acquiring lock to create folder...", cacheKey);
+
+            // ========================================
+            // Step 2: Acquire lock for this specific cache key
+            // ========================================
+            var folderLock = _folderLocks.GetOrAdd(cacheKey, _ => new SemaphoreSlim(1, 1));
+
+            await folderLock.WaitAsync(ct).ConfigureAwait(false);
+            try
+            {
+                // ========================================
+                // Step 3: Double-check cache (another thread might have created folder while we were waiting)
+                // ========================================
+                if (_folderCache.TryGetValue(cacheKey, out cachedFolderId))
+                {
+                    _fileLogger.LogTrace("Cache HIT after lock (folder created by another thread) for key '{CacheKey}' → Folder ID: {FolderId}",
+                        cacheKey, cachedFolderId);
+                    return cachedFolderId;
+                }
+
+                _fileLogger.LogDebug("Creating destination folder for key '{CacheKey}'...", cacheKey);
+
+                // ========================================
+                // Step 4: Create/Get parent folder (DOSSIERS-PI, DOSSIERS-LE, etc.)
+                // ========================================
+                var parentFolderName = GetParentFolderName(doc.TargetDossierType);
+
+                _fileLogger.LogDebug("Creating parent folder '{ParentFolderName}' under root {RootId}",
+                    parentFolderName, _options.Value.RootDestinationFolderId);
+
+                var parentFolderId = await _resolver.ResolveAsync(
+                    _options.Value.RootDestinationFolderId,
+                    parentFolderName,
+                    ct).ConfigureAwait(false);
+
+                _fileLogger.LogInformation("Parent folder '{ParentFolderName}' → ID: {ParentFolderId}",
+                    parentFolderName, parentFolderId);
+
+                // ========================================
+                // Step 5: Create/Get individual dossier folder (PI102206, LE500342, etc.)
+                // ========================================
+                var dossierId = doc.DossierDestFolderId;
+
+                if (string.IsNullOrWhiteSpace(dossierId))
+                {
+                    _fileLogger.LogError("DossierDestFolderId is empty for document {DocId}, cannot create destination folder", doc.Id);
+                    throw new InvalidOperationException($"DossierDestFolderId is empty for document {doc.Id}");
+                }
+
+                _fileLogger.LogDebug("Creating dossier folder '{DossierId}' under parent {ParentFolderId}",
+                    dossierId, parentFolderId);
+
+                var dossierProperties = BuildDossierProperties(doc);
+
+                var dossierFolderId = await _resolver.ResolveAsync(
+                    parentFolderId,
+                    dossierId,
+                    dossierProperties,
+                    ct).ConfigureAwait(false);
+
+                _fileLogger.LogInformation("Dossier folder '{DossierId}' → ID: {DossierFolderId}",
+                    dossierId, dossierFolderId);
+
+                // ========================================
+                // Step 6: Cache the result
+                // ========================================
+                _folderCache.TryAdd(cacheKey, dossierFolderId);
+                _fileLogger.LogTrace("Cached folder ID {FolderId} for key '{CacheKey}'", dossierFolderId, cacheKey);
+
+                // Prevent cache from growing too large
+                if (_folderCache.Count > 50000)
+                {
+                    _fileLogger.LogWarning("Folder cache exceeded 50,000 entries, clearing cache");
+                    _folderCache.Clear();
+                }
+
+                return dossierFolderId;
+            }
+            finally
+            {
+                folderLock.Release();
+            }
+        }
+
+        /// <summary>
+        /// Builds Alfresco properties for dossier folder
+        /// </summary>
+        private Dictionary<string, object> BuildDossierProperties(DocStaging doc)
+        {
+            var properties = new Dictionary<string, object>();
+
+            // ecm:coreId
+            if (!string.IsNullOrWhiteSpace(doc.CoreId))
+                properties["ecm:coreId"] = doc.CoreId;
+
+            // ecm:docClientType (PI, LE, etc.)
+            if (!string.IsNullOrWhiteSpace(doc.ClientSegment))
+                properties["ecm:docClientType"] = doc.ClientSegment;
+
+            // ecm:docDossierType ("Dosije klijenta FL", "Dosije klijenta PL", etc.)
+            if (!string.IsNullOrWhiteSpace(doc.TipDosijea))
+                properties["ecm:docDossierType"] = doc.TipDosijea;
+
+            _fileLogger.LogTrace("Built dossier properties: {Count} properties", properties.Count);
+
+            return properties;
+        }
+
+        /// <summary>
+        /// Builds Alfresco properties for migrated document
+        /// Per Analiza_migracije_v2.md and application property mapping
+        /// </summary>
+        private Dictionary<string, object> BuildDocumentProperties(DocStaging doc)
+        {
+            var properties = new Dictionary<string, object>
+            {
+                // ========================================
+                // Core properties (ALWAYS set)
+                // ========================================
+                ["cm:title"] = doc.DocDescription ?? doc.Name ?? "Unknown",
+                ["cm:description"] = doc.DocDescription ?? "",
+                ["ecm:docDesc"] = doc.DocDescription ?? "",
+                ["ecm:coreId"] = doc.CoreId ?? "",
+                ["ecm:status"] = doc.NewAlfrescoStatus ?? "validiran",
+                ["ecm:docType"] = doc.DocumentType ?? "",
+                ["ecm:docDossierType"] = doc.TipDosijea ?? "",
+                ["ecm:docClientType"] = doc.ClientSegment ?? "",
+                ["ecm:source"] = doc.Source ?? "Heimdall"
+            };
+
+            // ========================================
+            // Optional properties (set if available)
+            // ========================================
+
+            // ecm:docCreationDate - Original creation date (NOT migration date!)
+            if (doc.OriginalCreatedAt.HasValue)
+                properties["ecm:docCreationDate"] = doc.OriginalCreatedAt.Value.ToString("o");
+
+            // ecm:docAccountNumbers - Account numbers (for KDP documents)
+            if (!string.IsNullOrWhiteSpace(doc.AccountNumbers))
+                properties["ecm:docAccountNumbers"] = doc.AccountNumbers;
+
+            // ecm:brojUgovora - Contract number
+            if (!string.IsNullOrWhiteSpace(doc.ContractNumber))
+                properties["ecm:brojUgovora"] = doc.ContractNumber;
+
+            // ecm:tipProizvoda - Product type
+            if (!string.IsNullOrWhiteSpace(doc.ProductType))
+                properties["ecm:tipProizvoda"] = doc.ProductType;
+
+            _fileLogger.LogTrace("Built document properties: {Count} properties for document {DocId}",
+                properties.Count, doc.Id);
+
+            return properties;
         }
 
         #endregion

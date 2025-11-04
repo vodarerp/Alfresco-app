@@ -4,6 +4,7 @@ using Migration.Abstraction.Interfaces;
 //using Oracle.Abstraction.Interfaces;
 using SqlServer.Abstraction.Interfaces;
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
@@ -18,6 +19,13 @@ namespace Migration.Infrastructure.Implementation.Document
         private readonly IAlfrescoWriteApi _write;
         private readonly IFolderManager _folderManager;
         private readonly ILogger<DocumentResolver> _logger;
+
+        // Thread-safe cache: Key = "parentId_folderName", Value = folder ID
+        // Example: "abc-123_DOSSIERS-LE" -> "def-456-ghi-789"
+        private readonly ConcurrentDictionary<string, string> _folderCache = new();
+
+        // Semaphore for folder creation synchronization per cache key
+        private readonly ConcurrentDictionary<string, SemaphoreSlim> _folderLocks = new();
 
         public DocumentResolver(
             IDocStagingRepository doc,
@@ -39,18 +47,69 @@ namespace Migration.Infrastructure.Implementation.Document
 
         public async Task<string> ResolveAsync(string destinationRootId, string newFolderName, Dictionary<string, object>? properties, CancellationToken ct)
         {
-            var folderID = await _read.GetFolderByRelative(destinationRootId, newFolderName, ct).ConfigureAwait(false);
+            // ========================================
+            // Step 1: Check cache first (fast path - no locking)
+            // ========================================
+            var cacheKey = $"{destinationRootId}_{newFolderName}";
 
-            if (string.IsNullOrEmpty(folderID))
+            if (_folderCache.TryGetValue(cacheKey, out var cachedFolderId))
             {
-                // If properties are provided, try to create folder with properties first
+                _logger.LogTrace("Cache HIT for folder '{FolderName}' under parent '{ParentId}' → FolderId: {FolderId}",
+                    newFolderName, destinationRootId, cachedFolderId);
+                return cachedFolderId;
+            }
+
+            _logger.LogDebug("Cache MISS for folder '{FolderName}', acquiring lock...", newFolderName);
+
+            // ========================================
+            // Step 2: Acquire lock for this specific cache key
+            // ========================================
+            var folderLock = _folderLocks.GetOrAdd(cacheKey, _ => new SemaphoreSlim(1, 1));
+
+            await folderLock.WaitAsync(ct).ConfigureAwait(false);
+            try
+            {
+                // ========================================
+                // Step 3: Double-check cache (another thread might have created folder while we were waiting)
+                // ========================================
+                if (_folderCache.TryGetValue(cacheKey, out cachedFolderId))
+                {
+                    _logger.LogTrace("Cache HIT after lock (folder created by another thread) for '{FolderName}' → FolderId: {FolderId}",
+                        newFolderName, cachedFolderId);
+                    return cachedFolderId;
+                }
+
+                // ========================================
+                // Step 4: Check if folder exists in Alfresco
+                // ========================================
+                _logger.LogDebug("Checking if folder '{FolderName}' exists under parent '{ParentId}'...",
+                    newFolderName, destinationRootId);
+
+                var folderID = await _read.GetFolderByRelative(destinationRootId, newFolderName, ct).ConfigureAwait(false);
+
+                if (!string.IsNullOrEmpty(folderID))
+                {
+                    _logger.LogDebug("Folder '{FolderName}' already exists in Alfresco. FolderId: {FolderId}",
+                        newFolderName, folderID);
+
+                    // Cache the existing folder ID
+                    _folderCache.TryAdd(cacheKey, folderID);
+                    return folderID;
+                }
+
+                // ========================================
+                // Step 5: Create folder (with or without properties)
+                // ========================================
+                _logger.LogDebug("Creating folder '{FolderName}' under parent '{ParentId}'...",
+                    newFolderName, destinationRootId);
+
                 if (properties != null && properties.Count > 0)
                 {
                     try
                     {
                         _logger.LogDebug(
-                            "Attempting to create folder '{FolderName}' with {PropertyCount} properties under parent '{ParentId}'",
-                            newFolderName, properties.Count, destinationRootId);
+                            "Attempting to create folder '{FolderName}' with {PropertyCount} properties",
+                            newFolderName, properties.Count);
 
                         folderID = await _write.CreateFolderAsync(destinationRootId, newFolderName, properties, ct).ConfigureAwait(false);
 
@@ -60,12 +119,12 @@ namespace Migration.Infrastructure.Implementation.Document
                     }
                     catch (Exception ex)
                     {
-                        _logger.LogError(ex,
-                            "Failed to create folder '{FolderName}' with properties under parent '{ParentId}'. " +
-                            "Error: {ErrorType} - {ErrorMessage}. Attempting to create without properties.",
-                            newFolderName, destinationRootId, ex.GetType().Name, ex.Message);
+                        _logger.LogWarning(ex,
+                            "Failed to create folder '{FolderName}' with properties. " +
+                            "Error: {ErrorType} - {ErrorMessage}. Attempting without properties.",
+                            newFolderName, ex.GetType().Name, ex.Message);
 
-                        // Try to create without properties as fallback
+                        // Fallback: Try without properties
                         try
                         {
                             folderID = await _write.CreateFolderAsync(destinationRootId, newFolderName, null, ct).ConfigureAwait(false);
@@ -93,17 +152,19 @@ namespace Migration.Infrastructure.Implementation.Document
                         "Successfully created folder '{FolderName}' without properties. FolderId: {FolderId}",
                         newFolderName, folderID);
                 }
+
+                // ========================================
+                // Step 6: Cache the result
+                // ========================================
+                _folderCache.TryAdd(cacheKey, folderID);
+                _logger.LogTrace("Cached folder ID {FolderId} for key '{CacheKey}'", folderID, cacheKey);
+
+                return folderID;
             }
-            else
+            finally
             {
-                _logger.LogDebug(
-                    "Folder '{FolderName}' already exists under parent '{ParentId}'. FolderId: {FolderId}",
-                    newFolderName, destinationRootId, folderID);
+                folderLock.Release();
             }
-
-            return folderID;
-
-            //throw new NotImplementedException();
         }
     }
 }

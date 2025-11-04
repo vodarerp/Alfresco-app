@@ -224,6 +224,90 @@ namespace Alfresco.Client.Implementation
 
         }
 
+        public async Task<bool> UpdateNodePropertiesAsync(string nodeId, Dictionary<string, object> properties, CancellationToken ct = default)
+        {
+            try
+            {
+                _logger.LogDebug("Updating properties for node {NodeId} ({Count} properties)", nodeId, properties.Count);
+
+                var jsonSerializerSettings = new JsonSerializerSettings
+                {
+                    NullValueHandling = NullValueHandling.Ignore,
+                    ContractResolver = new Newtonsoft.Json.Serialization.CamelCasePropertyNamesContractResolver()
+                };
+
+                // Build request body
+                // Per Alfresco REST API: PUT /nodes/{nodeId}
+                // Body: { "properties": { "ecm:status": "validiran", ... } }
+                var body = new
+                {
+                    properties = properties
+                };
+
+                var json = JsonConvert.SerializeObject(body, jsonSerializerSettings);
+                _logger.LogTrace("Update properties request body: {Json}", json);
+
+                using var content = new StringContent(json, Encoding.UTF8, "application/json");
+                using var response = await _client.PutAsync(
+                    $"/alfresco/api/-default-/public/alfresco/versions/1/nodes/{nodeId}",
+                    content,
+                    ct).ConfigureAwait(false);
+
+                if (response.IsSuccessStatusCode)
+                {
+                    _logger.LogDebug("Successfully updated properties for node {NodeId}", nodeId);
+                    return true;
+                }
+
+                // Handle error response
+                var errorContent = await response.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
+
+                _logger.LogWarning(
+                    "Failed to update properties for node {NodeId}: {StatusCode} - {Error}",
+                    nodeId, response.StatusCode, errorContent);
+
+                // Try to parse error response
+                try
+                {
+                    var errorResponse = JsonConvert.DeserializeObject<AlfrescoErrorResponse>(errorContent);
+
+                    if (errorResponse?.Error != null)
+                    {
+                        // Check if it's a property error (unknown property, etc.)
+                        if (IsPropertyError(errorResponse))
+                        {
+                            _logger.LogError(
+                                "Property error updating node {NodeId}: {ErrorKey} - {BriefSummary}",
+                                nodeId, errorResponse.Error.ErrorKey, errorResponse.Error.BriefSummary);
+
+                            throw new AlfrescoPropertyException(
+                                $"Failed to update properties for node {nodeId}: {errorResponse.Error.BriefSummary}",
+                                errorResponse.Error.ErrorKey,
+                                errorResponse.Error.BriefSummary,
+                                errorResponse.Error.LogId);
+                        }
+                    }
+                }
+                catch (JsonException)
+                {
+                    // If we can't parse error response, just log and return false
+                    _logger.LogWarning("Could not parse error response for node {NodeId}", nodeId);
+                }
+
+                return false;
+            }
+            catch (AlfrescoPropertyException)
+            {
+                // Re-throw property exceptions
+                throw;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error updating properties for node {NodeId}", nodeId);
+                throw;
+            }
+        }
+
         #region Helper Methods
 
         /// <summary>
