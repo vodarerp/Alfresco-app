@@ -1,7 +1,7 @@
 using System;
 using System.Collections.Generic;
 
-namespace Migration.Infrastructure.Implementation.Helpers
+namespace Alfresco.Contracts.Mapper
 {
     /// <summary>
     /// Maps ecm:opisDokumenta (document description) to ecm:tipDokumenta (document type code)

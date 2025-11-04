@@ -1,7 +1,7 @@
 using System;
 using System.Linq;
 
-namespace Migration.Infrastructure.Implementation.Helpers
+namespace Alfresco.Contracts.Mapper
 {
     /// <summary>
     /// Handles dossier ID format conversion between old and new Alfresco systems

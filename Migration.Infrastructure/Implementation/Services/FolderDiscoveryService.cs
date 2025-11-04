@@ -29,7 +29,6 @@ namespace Migration.Infrastructure.Implementation.Services
     {
         private readonly IFolderIngestor _ingestor;
         private readonly IFolderReader _reader;
-        private readonly IDocumentResolver _resolver;
         private readonly IOptions<MigrationOptions> _options;
         private MultiFolderDiscoveryCursor? _multiFolderCursor = null;
         private readonly IServiceProvider _sp;
@@ -45,15 +44,11 @@ namespace Migration.Infrastructure.Implementation.Services
         // Metrics tracking
         private long _totalInserted = 0;
 
-        // Cache for DOSSIER folder IDs: folderType -> destinationFolderId
-        private readonly Dictionary<string, string> _dossierFolderCache = new();
-
         private const string ServiceName = "FolderDiscovery";
 
         public FolderDiscoveryService(
             IFolderIngestor ingestor,
             IFolderReader reader,
-            IDocumentResolver resolver,
             IOptions<MigrationOptions> options,
             IServiceProvider sp,
             IUnitOfWork unitOfWork,
@@ -62,7 +57,6 @@ namespace Migration.Infrastructure.Implementation.Services
         {
             _ingestor = ingestor;
             _reader = reader;
-            _resolver = resolver;
             _options = options;
             _sp = sp;
             _unitOfWork = unitOfWork;
@@ -116,9 +110,6 @@ namespace Migration.Infrastructure.Implementation.Services
                 _fileLogger.LogInformation("Found {Count} DOSSIER subfolders: {Types}",
                     subfolders.Count, string.Join(", ", subfolders.Keys));
                 _dbLogger.LogInformation("Found {Count} DOSSIER subfolders", subfolders.Count);
-
-                // PRE-CREATE all DOSSIER destination folders SEQUENTIALLY to avoid race conditions
-                await EnsureDossierFoldersExistAsync(subfolders.Keys, ct).ConfigureAwait(false);
 
                 currentMultiCursor = new MultiFolderDiscoveryCursor
                 {
@@ -197,51 +188,6 @@ namespace Migration.Infrastructure.Implementation.Services
             await EnrichFoldersWithClientDataAsync(page.Items, ct).ConfigureAwait(false);
 
             var foldersToInsert = page.Items.ToList().ToFolderStagingListInsert();
-
-            // Apply folder type detection and source mapping (NEW - FAZA 3)
-            ApplyFolderTypeDetectionAndMapping(foldersToInsert, currentType);
-
-            // Populate DossierDestFolderId from cache using TargetDossierType
-            var successCount = 0;
-            var failCount = 0;
-
-            foreach (var folder in foldersToInsert)
-            {
-                var dossierTypeCode = folder.TargetDossierType.ToString();
-
-                if (_dossierFolderCache.TryGetValue(dossierTypeCode, out var parentFolderId))
-                {
-                    folder.DossierDestFolderId = parentFolderId;
-                    successCount++;
-
-                    _fileLogger.LogTrace("Folder {Name}: DossierDestFolderId={ParentId} (Type {Code})",
-                        folder.Name, parentFolderId, dossierTypeCode);
-                }
-                else
-                {
-                    failCount++;
-                    _fileLogger.LogWarning(
-                        "Parent folder {Code} not found in cache for folder {Name}! Falling back to Unknown.",
-                        dossierTypeCode, folder.Name);
-
-                    // Fallback to Unknown (999)
-                    if (_dossierFolderCache.TryGetValue("999", out var unknownFolderId))
-                    {
-                        folder.DossierDestFolderId = unknownFolderId;
-                        folder.TargetDossierType = (int)DossierType.Unknown;
-                    }
-                    else
-                    {
-                        _fileLogger.LogError(
-                            "Unknown folder (999) also not in cache! This should not happen. Folder {Name} will have null DossierDestFolderId.",
-                            folder.Name);
-                    }
-                }
-            }
-
-            _fileLogger.LogDebug(
-                "Populated DossierDestFolderId for {SuccessCount}/{TotalCount} folders ({FailCount} fallbacks to Unknown)",
-                successCount, foldersToInsert.Count, failCount);
 
             var inserted = await InsertFoldersAsync(foldersToInsert, ct).ConfigureAwait(false);
 
@@ -665,98 +611,6 @@ namespace Migration.Infrastructure.Implementation.Services
         }
 
         /// <summary>
-        /// Pre-creates all parent destination folders (300/400/500/700/999) SEQUENTIALLY
-        /// to avoid race conditions during DocumentDiscoveryService parallel processing
-        /// </summary>
-        private async Task EnsureDossierFoldersExistAsync(IEnumerable<string> folderTypes, CancellationToken ct)
-        {
-            _fileLogger.LogInformation("Pre-creating parent destination folders (300/400/500/700/999)...");
-            _dbLogger.LogInformation("Starting parent folder pre-creation");
-
-            // Determine which DossierTypes are needed based on discovered folderTypes
-            var neededDossierTypes = new HashSet<DossierType>();
-
-            foreach (var folderType in folderTypes)
-            {
-                // Get all possible DossierTypes for this folder type
-                // For FL, this returns both ClientFL (500) and ClientPL (400)
-                var possibleTypes = DossierTypeDetector.GetPossibleDossierTypes(folderType);
-                foreach (var type in possibleTypes)
-                {
-                    neededDossierTypes.Add(type);
-                }
-            }
-
-            // Always ensure Unknown folder exists as fallback
-            neededDossierTypes.Add(DossierType.Unknown);
-
-            _fileLogger.LogInformation("Will create {Count} parent folders: {Types}",
-                neededDossierTypes.Count,
-                string.Join(", ", neededDossierTypes.Select(t => $"{(int)t} ({t})")));
-
-            // Create each parent folder sequentially
-            foreach (var dossierType in neededDossierTypes.OrderBy(t => (int)t))
-            {
-                // Skip unresolved types (should not happen at this point)
-                if (dossierType == DossierType.ClientFLorPL || dossierType == DossierType.Other)
-                {
-                    _fileLogger.LogWarning("Skipping unresolved DossierType: {Type}", dossierType);
-                    continue;
-                }
-
-                var dossierTypeCode = ((int)dossierType).ToString();
-
-                // Check cache first
-                if (_dossierFolderCache.ContainsKey(dossierTypeCode))
-                {
-                    _fileLogger.LogDebug("Parent folder {Code} already exists in cache", dossierTypeCode);
-                    continue;
-                }
-
-                var folderName = DossierTypeDetector.GetDestinationFolderName(dossierType);
-                _fileLogger.LogInformation("Creating parent folder: {FolderName} (Code: {Code})",
-                    folderName, dossierTypeCode);
-
-                try
-                {
-                    // Create/resolve the parent folder under RootDestinationFolderId
-                    var parentFolderId = await _resolver.ResolveAsync(
-                        _options.Value.RootDestinationFolderId,
-                        folderName,
-                        ct).ConfigureAwait(false);
-
-                    // Cache the folder ID by DossierType code (300/400/500/700/999)
-                    _dossierFolderCache[dossierTypeCode] = parentFolderId;
-
-                    _fileLogger.LogInformation(
-                        "Successfully created/resolved parent folder {Code} ({Name}) -> {FolderId}",
-                        dossierTypeCode, folderName, parentFolderId);
-                    _dbLogger.LogInformation(
-                        "Created parent folder {Code} ({Name})",
-                        dossierTypeCode, folderName);
-                }
-                catch (Exception ex)
-                {
-                    _fileLogger.LogError("Failed to create parent folder {Code} ({Name}): {Error}",
-                        dossierTypeCode, folderName, ex.Message);
-                    _dbLogger.LogError(ex,
-                        "Failed to create parent folder {Code} ({Name})",
-                        dossierTypeCode, folderName);
-                    _uiLogger.LogError("Failed to create parent folder {Code}", dossierTypeCode);
-                    throw;
-                }
-            }
-
-            _fileLogger.LogInformation(
-                "Successfully pre-created {Count} parent destination folders: {Folders}",
-                _dossierFolderCache.Count,
-                string.Join(", ", _dossierFolderCache.Keys.OrderBy(k => k)));
-            _dbLogger.LogInformation(
-                "Pre-created {Count} parent folders",
-                _dossierFolderCache.Count);
-        }
-
-        /// <summary>
         /// Enriches folders with ClientAPI data if Alfresco properties are missing
         /// </summary>
         private async Task EnrichFoldersWithClientDataAsync(IReadOnlyList<ListEntry> folders, CancellationToken ct)
@@ -825,118 +679,6 @@ namespace Migration.Infrastructure.Implementation.Services
                     enrichmentCount, errorCount);
             }
         }
-
-        /// <summary>
-        /// Applies folder type detection and source mapping to folders (FAZA 3 - NEW)
-        /// Uses DossierTypeDetector and SourceDetector from Alfresco.Contracts.Mappers
-        /// </summary>
-        private void ApplyFolderTypeDetectionAndMapping(List<FolderStaging> folders, string currentFolderType)
-        {
-            _fileLogger.LogDebug("Applying folder type detection and mapping to {Count} folders from DOSSIER-{Type}",
-                folders.Count, currentFolderType);
-
-            var detectedCount = 0;
-            var unknownCount = 0;
-            var flOrPlResolvedCount = 0;
-
-            foreach (var folder in folders)
-            {
-                try
-                {
-                    // Step 1: Extract TipDosijea from Alfresco properties or infer from folder structure
-                    // For now, we'll use a simple heuristic based on currentFolderType
-                    string? tipDosijea = InferTipDosijeaFromFolderType(currentFolderType);
-                    folder.TipDosijea = tipDosijea;
-
-                    // Step 2: Detect DossierType using DossierTypeDetector
-                    var dossierType = DossierTypeDetector.DetectFromTipDosijea(tipDosijea);
-
-                    // Step 3: If ClientFLorPL, resolve using ClientSegment
-                    if (dossierType == DossierType.ClientFLorPL)
-                    {
-                        // Use Segment from ClientProperties if available
-                        var clientSegment = folder.Segment ?? folder.ClientType;
-                        folder.ClientSegment = clientSegment;
-
-                        if (!string.IsNullOrWhiteSpace(clientSegment))
-                        {
-                            dossierType = DossierTypeDetector.ResolveFLorPL(clientSegment);
-                            flOrPlResolvedCount++;
-
-                            _fileLogger.LogDebug(
-                                "Resolved FL/PL for folder {Name}: ClientSegment={Segment} -> DossierType={DossierType}",
-                                folder.Name, clientSegment, dossierType);
-                        }
-                        else
-                        {
-                            _fileLogger.LogWarning(
-                                "Folder {Name} has TipDosijea='Dosije klijenta FL/PL' but missing ClientSegment - setting to Unknown",
-                                folder.Name);
-                            dossierType = DossierType.Unknown;
-                        }
-                    }
-
-                    // Step 4: Set TargetDossierType
-                    folder.TargetDossierType = (int)dossierType;
-
-                    // Step 5: Determine Source using SourceDetector
-                    folder.Source = SourceDetector.GetSource(dossierType);
-
-                    if (dossierType == DossierType.Unknown)
-                    {
-                        unknownCount++;
-                        _fileLogger.LogWarning(
-                            "Folder {Name} could not be classified - TipDosijea={TipDosijea}, marking as Unknown",
-                            folder.Name, tipDosijea);
-                    }
-                    else
-                    {
-                        detectedCount++;
-                    }
-
-                    _fileLogger.LogTrace(
-                        "Folder {Name}: TipDosijea={TipDosijea}, TargetDossierType={TargetType}, Source={Source}",
-                        folder.Name, folder.TipDosijea, dossierType, folder.Source);
-                }
-                catch (Exception ex)
-                {
-                    unknownCount++;
-                    folder.TargetDossierType = (int)DossierType.Unknown;
-                    folder.Source = "Heimdall"; // Default fallback
-
-                    _fileLogger.LogError(ex,
-                        "Error detecting folder type for {Name}, marking as Unknown",
-                        folder.Name);
-                }
-            }
-
-            _fileLogger.LogInformation(
-                "Folder type detection completed: {DetectedCount} detected, {UnknownCount} unknown, {ResolvedCount} FL/PL resolved",
-                detectedCount, unknownCount, flOrPlResolvedCount);
-        }
-
-        /// <summary>
-        /// Infers TipDosijea from DOSSIER folder type
-        /// This is a heuristic mapping based on folder structure
-        /// </summary>
-        private string? InferTipDosijeaFromFolderType(string folderType)
-        {
-            // Mapping based on analysis document:
-            // FL -> may be "Dosije klijenta FL / PL" or "Dosije paket računa"
-            // PL -> "Dosije klijenta PL" or "Dosije klijenta FL / PL"
-            // ACC -> "Dosije paket računa"
-            // D -> "Dosije depozita"
-
-            return folderType?.ToUpperInvariant() switch
-            {
-                "FL" => "Dosije klijenta FL / PL",  // Will be resolved later using ClientSegment
-                "PL" => "Dosije klijenta PL",
-                "ACC" => "Dosije paket računa",
-                "D" => "Dosije depozita",
-                _ => null
-            };
-        }
-
 
         #endregion
 
