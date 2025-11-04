@@ -45,7 +45,7 @@ namespace Alfresco.Client.Implementation
 
         public async Task<NodeChildrenResponse> GetNodeChildrenAsync(string nodeId, CancellationToken ct = default)
         {
-            using var getResponse = await _client.GetAsync($"/alfresco/api/-default-/public/alfresco/versions/1/nodes/{nodeId}/children", ct).ConfigureAwait(false);
+            using var getResponse = await _client.GetAsync($"/alfresco/api/-default-/public/alfresco/versions/1/nodes/{nodeId}/children?include=properties", ct).ConfigureAwait(false);
             var body = await getResponse.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
             if (!getResponse.IsSuccessStatusCode)
                 throw new AlfrescoException("Neuspešan odgovor pri čitanju root čvora.", (int)getResponse.StatusCode, body); // izbaciti

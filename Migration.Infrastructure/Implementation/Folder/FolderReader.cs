@@ -174,7 +174,7 @@ namespace Migration.Infrastructure.Implementation.Folder
             var sb = new StringBuilder();
             sb.Append("SELECT * FROM cmis:folder ")
               .Append($"WHERE cmis:parentId = '{rootId}' ")
-              .Append("AND cmis:name LIKE 'DOSSIER-%' ");
+              .Append("AND cmis:name LIKE 'DOSSIERS-%' ");
 
             var req = new PostSearchRequest()
             {
@@ -198,11 +198,11 @@ namespace Migration.Infrastructure.Implementation.Folder
             foreach (var folder in folders)
             {
                 var folderName = folder.Entry?.Name;
-                if (string.IsNullOrEmpty(folderName) || !folderName.StartsWith("DOSSIER-", StringComparison.OrdinalIgnoreCase))
+                if (string.IsNullOrEmpty(folderName) || !folderName.StartsWith("DOSSIERS-", StringComparison.OrdinalIgnoreCase))
                     continue;
 
                 // Extract type from folder name (e.g., "DOSSIER-PL" -> "PL")
-                var type = folderName.Substring("DOSSIER-".Length);
+                var type = folderName.Substring("DOSSIERS-".Length);
 
                 // If folderTypes is specified, filter by those types
                 if (folderTypes != null && folderTypes.Count > 0)
@@ -214,7 +214,7 @@ namespace Migration.Infrastructure.Implementation.Folder
                 // Add to result dictionary
                 var folderId = $"workspace://SpacesStore/{folder.Entry?.Id}";
                 result[type] = folderId;
-                _fileLogger.LogDebug("Added DOSSIER-{Type} folder: {FolderId}", type, folderId);
+                _fileLogger.LogDebug("Added DOSSIERS-{Type} folder: {FolderId}", type, folderId);
             }
 
             _fileLogger.LogInformation("Found {Count} matching DOSSIER subfolders in root {RootId}", result.Count, rootId);

@@ -12,7 +12,6 @@ using Microsoft.Extensions.Options;
 using Migration.Abstraction.Interfaces;
 using Migration.Abstraction.Interfaces.Wrappers;
 using Migration.Abstraction.Models;
-using Migration.Infrastructure.Implementation.Helpers;
 //using Oracle.Abstraction.Interfaces;
 using SqlServer.Abstraction.Interfaces;
 using System.Collections.Concurrent;
@@ -30,8 +29,6 @@ namespace Migration.Infrastructure.Implementation.Services
         private readonly IDocStagingRepository _docRepo;
         private readonly IFolderStagingRepository _folderRepo;
         private readonly IDocumentReader _reader;
-        private readonly IDocumentResolver _resolver;
-        private readonly IAlfrescoReadApi _alfrescoReadApi;
         private readonly IOptions<MigrationOptions> _options;
         private readonly IServiceProvider _sp;
         //private readonly ILogger<DocumentDiscoveryService> _logger;
@@ -40,21 +37,18 @@ namespace Migration.Infrastructure.Implementation.Services
         private readonly ILogger _fileLogger;
         private readonly ILogger _uiLogger;
 
-        private readonly ConcurrentDictionary<string, string> _resolvedFoldersCache = new();
         private long _totalProcessed = 0;
         private long _totalFailed = 0;
         private int _batchCounter = 0;
 
         private const string ServiceName = "DocumentDiscovery";
 
-        public DocumentDiscoveryService(IDocumentIngestor ingestor, IDocumentReader reader, IDocumentResolver resolver, IDocStagingRepository docRepo, IFolderStagingRepository folderRepo, IAlfrescoReadApi alfrescoReadApi, IOptions<MigrationOptions> options, IServiceProvider sp, IUnitOfWork unitOfWork,ILoggerFactory logger)
+        public DocumentDiscoveryService(IDocumentIngestor ingestor, IDocumentReader reader, IDocStagingRepository docRepo, IFolderStagingRepository folderRepo, IOptions<MigrationOptions> options, IServiceProvider sp, IUnitOfWork unitOfWork,ILoggerFactory logger)
         {
             _ingestor = ingestor;
             _reader = reader;
-            _resolver = resolver;
             _docRepo = docRepo;
             _folderRepo = folderRepo;
-            _alfrescoReadApi = alfrescoReadApi;
             _options = options;
             _sp = sp;
             _dbLogger = logger.CreateLogger("DbLogger");
@@ -593,19 +587,16 @@ namespace Migration.Infrastructure.Implementation.Services
             _fileLogger.LogInformation("Found {Count} documents in folder {FolderId} ({Name})",
                 documents.Count, folder.Id, folder.Name);
 
-            _fileLogger.LogDebug("Resolving destination folder for {FolderId}", folder.Id);
-            var desFolderId = await ResolveDestinationFolder(folder, ct).ConfigureAwait(false);
-            _fileLogger.LogInformation("Resolved destination folder: {DestFolderId} for source folder {FolderId}", desFolderId, folder.Id);
-
             var docsToInsert = new List<DocStaging>(documents.Count);
 
             foreach (var d in documents)
             {
                 var item = d.Entry.ToDocStagingInsert();
-                item.ToPath = desFolderId;
+                // ToPath will be determined by MoveService based on document properties
+                item.ToPath = string.Empty; // Will be populated by MoveService
                 item.Status = MigrationStatus.Ready.ToDbString();
 
-                // FAZA 3: Apply document mapping using mappers from Faze 1
+                // Apply document mapping using mappers from Faza 1
                 ApplyDocumentMapping(item, folder, d.Entry);
 
                 docsToInsert.Add(item);
@@ -675,106 +666,6 @@ namespace Migration.Infrastructure.Implementation.Services
             //throw new NotImplementedException();
         }
 
-        private async Task<string> ResolveDestinationFolder(FolderStaging folder, CancellationToken ct)
-        {
-            var normalizedName = folder.Name?.NormalizeName()
-                    ?? throw new InvalidOperationException($"Folder {folder.Id} has null name");
-
-            string parentPath = string.Empty;
-
-            // FIRST: Try to use DossierDestFolderId populated by FolderDiscoveryService
-            if (!string.IsNullOrEmpty(folder.DossierDestFolderId))
-            {
-                parentPath = folder.DossierDestFolderId;
-                _fileLogger.LogDebug("Using pre-populated DossierDestFolderId={DossierDestFolderId} for folder {FolderId}",
-                    parentPath, folder.Id);
-            }
-            else
-            {
-                // FALLBACK: Use cache or build parent path (for backwards compatibility)
-                _fileLogger.LogWarning("DossierDestFolderId is null for folder {FolderId}, falling back to legacy path resolution", folder.Id);
-
-                var cacheKey = $"node:{folder.ParentId}";
-
-                if(_resolvedFoldersCache.TryGetValue(cacheKey, out var cachedId))
-                {
-                    _fileLogger.LogDebug("Using cached destination folder ID for ParentId {ParentId}", folder.ParentId);
-                    parentPath = cachedId;
-                }
-                else
-                {
-                    // Build parent path (DOSSIER folder) and cache it BEFORE resolving child
-                    parentPath = await BuildParentPathFromDossierAsync(folder, ct).ConfigureAwait(false);
-
-                    // Cache the parent path immediately so subsequent folders with same parent use it
-                    if (!string.IsNullOrEmpty(parentPath))
-                    {
-                        _resolvedFoldersCache.TryAdd(cacheKey, parentPath);
-                        _fileLogger.LogDebug("Cached parent destination folder ID {ParentPath} for ParentId {ParentId}",
-                            parentPath, folder.ParentId);
-                    }
-                }
-            }
-
-            if (string.IsNullOrEmpty(parentPath))
-            {
-                _fileLogger.LogWarning("Could not determine parent path for folder {FolderId}, using root destination", folder.Id);
-                var properties = folder.ToAlfrescoProperties();
-                var fallbackId = await _resolver.ResolveAsync(_options.Value.RootDestinationFolderId, normalizedName, properties, ct).ConfigureAwait(false);
-                return fallbackId;
-            }
-
-            // Now resolve the target folder under the parent (DOSSIER folder)
-            // Include ClientProperties from FolderStaging when creating the folder
-            var alfrescoProperties = folder.ToAlfrescoProperties();
-            var newFolderId = await _resolver.ResolveAsync(parentPath, normalizedName, alfrescoProperties, ct).ConfigureAwait(false);
-
-            _fileLogger.LogDebug("Resolved destination folder '{Name}' -> {Id} under parent {ParentPath}",
-                normalizedName, newFolderId, parentPath);
-
-            if (_resolvedFoldersCache.Count > 10000)
-            {
-                _resolvedFoldersCache.Clear();
-                _fileLogger.LogWarning("Cache cleared due to size limit (10000 entries)");
-            }
-
-            return newFolderId;
-        }
-
-        /// <summary>
-        /// Builds the parent path from DOSSIER folder down to the folder's immediate parent
-        /// Returns list ordered from DOSSIER folder to immediate parent
-        /// </summary>
-        
-        private async Task<string> BuildParentPathFromDossierAsync(FolderStaging folder, CancellationToken ct)
-        {
-            string toRet = "";
-
-            // Get the parent folder from Alfresco (should be DOSSIER-{folderType})
-            _fileLogger.LogDebug("Getting parent folder info from Alfresco for ParentId {ParentId}", folder.ParentId);
-            var nodeResponse = await _alfrescoReadApi.GetNodeByIdAsync(folder.ParentId!, ct).ConfigureAwait(false);
-
-            if (nodeResponse?.Entry == null)
-            {
-                _fileLogger.LogWarning("Could not retrieve parent folder from Alfresco for ParentId {ParentId}, folder {FolderId}",
-                    folder.ParentId, folder.Id);
-                return toRet;
-            }
-
-            var parentFolderName = nodeResponse.Entry.Name;
-            _fileLogger.LogDebug("Parent folder name from Alfresco: '{ParentName}' for folder {FolderId}",
-                parentFolderName, folder.Id);
-
-            // Resolve/create the DOSSIER folder under RootDestinationFolderId
-            // This creates: RootDestinationFolderId/DOSSIER-{folderType}
-            toRet = await _resolver.ResolveAsync(_options.Value.RootDestinationFolderId, parentFolderName!, ct).ConfigureAwait(false);
-
-            _fileLogger.LogInformation(
-                "Built parent path: DOSSIER folder '{ParentName}' resolved to {ParentFolderId} under root {RootId}",
-                parentFolderName, toRet, _options.Value.RootDestinationFolderId);
-
-            return toRet;
-        }
         //private async Task<List<(string NormalizedName, string DestinationId)>?> BuildParentPathFromDossierAsync(FolderStaging folder, CancellationToken ct)
         //{
         //    if (string.IsNullOrEmpty(folder.ParentId))
@@ -1148,77 +1039,235 @@ namespace Migration.Infrastructure.Implementation.Services
         //}
 
         /// <summary>
-        /// Applies document mapping using mappers from FAZA 1
-        /// Populates: OriginalDocumentName, NewDocumentName, OriginalDocumentCode, NewDocumentCode,
-        /// TipDosijea, TargetDossierType, ClientSegment, OldAlfrescoStatus, NewAlfrescoStatus,
-        /// WillReceiveMigrationSuffix, CodeWillChange, Source, IsActive
+        /// Applies document mapping using mappers from FAZA 1 (Per Analiza_migracije_v2.md)
+        ///
+        /// NEW APPROACH - COMPLETE METADATA PREPARATION:
+        /// - Extracts ALL ecm:* properties from old Alfresco document
+        /// - Uses ecm:opisDokumenta (NOT document name) for status detection
+        /// - Uses OpisToTipMapper to map ecm:opisDokumenta → ecm:tipDokumenta
+        /// - Uses DestinationRootFolderDeterminator for per-document destination
+        /// - Uses DocumentStatusDetector.ShouldBeActiveByOpis() for status
+        /// - Prepares ALL Alfresco properties so MoveService ONLY copies documents
+        ///
+        /// Populates ALL DocStaging fields needed for migration
         /// </summary>
         private void ApplyDocumentMapping(DocStaging doc, FolderStaging folder, Entry alfrescoEntry)
         {
             try
             {
-                // Step 1: Extract document name and code from Alfresco properties
-                // TODO: Read from alfrescoEntry.Properties["bank:nazivDokumenta"] and ["bank:tipDokumenta"]
-                // For now, use Name as fallback
-                string originalDocumentName = alfrescoEntry.Name ?? "Unknown";
-                string? originalDocumentCode = null; // Will be read from properties
+                // ========================================
+                // Step 1: Extract ALL ecm:* properties from old Alfresco
+                // Property names per application that creates documents:
+                // - cm:title, cm:description
+                // - ecm:docDesc, ecm:coreId, ecm:status, ecm:docType
+                // - ecm:docDossierType, ecm:docClientType, ecm:source
+                // - ecm:docCreationDate
+                // ========================================
+                string? docDesc = null;              // ecm:docDesc (Document description)
+                string? existingDocType = null;      // ecm:docType (Document type code)
+                string? existingStatus = null;       // ecm:status (Document status)
+                string? coreIdFromDoc = null;        // ecm:coreId (Core ID)
+                string? docDossierType = null;       // ecm:docDossierType (Tip dosijea)
+                string? docClientType = null;        // ecm:docClientType (Client type: PI/LE)
+                string? sourceFromDoc = null;        // ecm:source (Source system)
+                DateTime? docCreationDate = null;    // ecm:docCreationDate (Original creation date)
+                string? cmTitle = null;              // cm:title (Document title)
+                string? cmDescription = null;        // cm:description (Document description)
 
-                // Try to read from Alfresco custom properties if available
+                // Additional properties (may not be present in all documents)
+                string? contractNumber = null;       // ecm:brojUgovora
+                string? productType = null;          // ecm:tipProizvoda
+                string? accountNumbers = null;       // ecm:docAccountNumbers
+
                 if (alfrescoEntry.Properties != null)
                 {
-                    if (alfrescoEntry.Properties.TryGetValue("bank:nazivDokumenta", out var nazivObj))
-                        originalDocumentName = nazivObj?.ToString() ?? originalDocumentName;
+                    // ========================================
+                    // Core document properties (ACTUAL property names from application)
+                    // ========================================
 
-                    if (alfrescoEntry.Properties.TryGetValue("bank:tipDokumenta", out var tipObj))
-                        originalDocumentCode = tipObj?.ToString();
+                    // ecm:docDesc - Document description (KEY PROPERTY for mapping)
+                    if (alfrescoEntry.Properties.TryGetValue("ecm:docDesc", out var docDescObj))
+                        docDesc = docDescObj?.ToString();
 
-                    // Read old status
-                    if (alfrescoEntry.Properties.TryGetValue("bank:status", out var statusObj))
-                        doc.OldAlfrescoStatus = statusObj?.ToString();
+                    // ecm:docType - Document type code (e.g., "00099", "00824")
+                    if (alfrescoEntry.Properties.TryGetValue("ecm:docType", out var docTypeObj))
+                        existingDocType = docTypeObj?.ToString();
+
+                    // ecm:status - Document status ("validiran", "poništen")
+                    if (alfrescoEntry.Properties.TryGetValue("ecm:status", out var statusObj))
+                        existingStatus = statusObj?.ToString();
+
+                    // ecm:coreId - Core ID
+                    if (alfrescoEntry.Properties.TryGetValue("ecm:coreId", out var coreIdObj))
+                        coreIdFromDoc = coreIdObj?.ToString();
+
+                    // ecm:docDossierType - Tip dosijea ("Dosije klijenta FL", "Dosije klijenta PL")
+                    if (alfrescoEntry.Properties.TryGetValue("ecm:docDossierType", out var dossierTypeObj))
+                        docDossierType = dossierTypeObj?.ToString();
+
+                    // ecm:docClientType - Client type ("PI", "LE")
+                    if (alfrescoEntry.Properties.TryGetValue("ecm:docClientType", out var clientTypeObj))
+                        docClientType = clientTypeObj?.ToString();
+
+                    // ecm:source - Source system ("Heimdall", "DUT", etc.)
+                    if (alfrescoEntry.Properties.TryGetValue("ecm:source", out var sourceObj))
+                        sourceFromDoc = sourceObj?.ToString();
+
+                    // ecm:docCreationDate - Original creation date
+                    if (alfrescoEntry.Properties.TryGetValue("ecm:docCreationDate", out var creationDateObj))
+                    {
+                        if (creationDateObj is DateTime dt)
+                            docCreationDate = dt;
+                        else if (DateTime.TryParse(creationDateObj?.ToString(), out var parsedDate))
+                            docCreationDate = parsedDate;
+                    }
+
+                    // cm:title - Document title
+                    if (alfrescoEntry.Properties.TryGetValue("cm:title", out var titleObj))
+                        cmTitle = titleObj?.ToString();
+
+                    // cm:description - Document description
+                    if (alfrescoEntry.Properties.TryGetValue("cm:description", out var descObj))
+                        cmDescription = descObj?.ToString();
+
+                    // ========================================
+                    // Additional properties (may not be present)
+                    // ========================================
+
+                    // ecm:brojUgovora - Contract number
+                    if (alfrescoEntry.Properties.TryGetValue("ecm:brojUgovora", out var contractObj))
+                        contractNumber = contractObj?.ToString();
+
+                    // ecm:tipProizvoda - Product type
+                    if (alfrescoEntry.Properties.TryGetValue("ecm:tipProizvoda", out var productObj))
+                        productType = productObj?.ToString();
+
+                    // ecm:docAccountNumbers - Account numbers
+                    if (alfrescoEntry.Properties.TryGetValue("ecm:docAccountNumbers", out var accountsObj))
+                        accountNumbers = accountsObj?.ToString();
                 }
 
-                doc.OriginalDocumentName = originalDocumentName;
-                doc.OriginalDocumentCode = originalDocumentCode;
+                // ========================================
+                // Populate extracted properties
+                // ========================================
+                doc.DocDescription = docDesc;                        // ecm:docDesc
+                doc.OriginalDocumentCode = existingDocType;          // ecm:docType
+                doc.OldAlfrescoStatus = existingStatus;              // ecm:status
+                doc.ContractNumber = contractNumber;                 // ecm:brojUgovora
+                doc.ProductType = productType;                       // ecm:tipProizvoda
+                doc.AccountNumbers = accountNumbers;                 // ecm:docAccountNumbers
+                doc.OriginalCreatedAt = docCreationDate ?? alfrescoEntry.CreatedAt.DateTime;
 
-                // Step 2: Get migration info using DocumentStatusDetector
-                var migrationInfo = DocumentStatusDetector.GetMigrationInfo(
-                    originalDocumentName,
-                    originalDocumentCode,
-                    doc.OldAlfrescoStatus);
+                // Category fields - Not populated (no category properties in old documents)
+                doc.CategoryCode = null;
+                doc.CategoryName = null;
 
-                // Step 3: Populate mapped fields
-                doc.NewDocumentName = migrationInfo.NewName;
-                doc.NewDocumentCode = migrationInfo.NewCode;
-                doc.IsActive = migrationInfo.IsActive;
-                doc.NewAlfrescoStatus = migrationInfo.Status;
-                doc.WillReceiveMigrationSuffix = migrationInfo.WillReceiveMigrationSuffix;
-                doc.CodeWillChange = migrationInfo.CodeWillChange;
+                // Use folder's TipDosijea if document doesn't have it, otherwise use document's value
+                doc.TipDosijea = docDossierType ?? folder.TipDosijea;
 
-                // Step 4: Copy TipDosijea and TargetDossierType from parent folder
-                doc.TipDosijea = folder.TipDosijea;
-                doc.TargetDossierType = folder.TargetDossierType;
-                doc.ClientSegment = folder.ClientSegment ?? folder.Segment;
+                // Use coreId from document if available, otherwise use folder's CoreId
+                doc.CoreId = coreIdFromDoc ?? folder.CoreId;
 
-                // Step 5: Determine Source based on TargetDossierType
-                if (folder.TargetDossierType.HasValue)
+                // Use clientSegment from document if available (ecm:docClientType)
+                doc.ClientSegment = docClientType ?? folder.ClientSegment ?? folder.Segment;
+
+                // ========================================
+                // Step 2: Map ecm:docDesc → ecm:docType using OpisToTipMapper
+                // ========================================
+                string? mappedDocType = null;
+                if (!string.IsNullOrWhiteSpace(docDesc))
                 {
-                    var dossierType = (DossierType)folder.TargetDossierType.Value;
-                    doc.Source = SourceDetector.GetSource(dossierType);
-                }
-                else
-                {
-                    doc.Source = "Heimdall"; // Default fallback
+                    mappedDocType = OpisToTipMapper.GetTipDokumenta(docDesc);
+
+                    if (!string.IsNullOrWhiteSpace(mappedDocType))
+                    {
+                        _fileLogger.LogTrace("Mapped ecm:docDesc '{Opis}' → ecm:docType '{Tip}'",
+                            docDesc, mappedDocType);
+                    }
+                    else
+                    {
+                        _fileLogger.LogDebug("No mapping found for ecm:docDesc '{Opis}', using existing docType",
+                            docDesc);
+                    }
                 }
 
-                // Step 6: Copy CoreId from folder if available
-                doc.CoreId = folder.CoreId;
+                // Use mapped value if available, otherwise keep existing
+                doc.DocumentType = mappedDocType ?? existingDocType;
+
+                // ========================================
+                // Step 3: Determine document status using NEW method (ecm:docDesc)
+                // ========================================
+                var statusInfo = DocumentStatusDetector.GetStatusInfoByOpis(docDesc, existingStatus);
+
+                doc.IsActive = statusInfo.IsActive;
+                doc.NewAlfrescoStatus = statusInfo.Status;
 
                 _fileLogger.LogTrace(
-                    "Document mapped: {OriginalName} -> {NewName}, Code: {OriginalCode} -> {NewCode}, " +
-                    "IsActive: {IsActive}, Status: {Status}, Source: {Source}, TipDosijea: {TipDosijea}",
-                    doc.OriginalDocumentName, doc.NewDocumentName,
-                    doc.OriginalDocumentCode, doc.NewDocumentCode,
-                    doc.IsActive, doc.NewAlfrescoStatus, doc.Source, doc.TipDosijea);
+                    "Status determination: ecm:docDesc '{Opis}', Old Status: '{OldStatus}' → " +
+                    "IsActive: {IsActive}, New Status: '{NewStatus}', HasMigrationSuffix: {HasSuffix}",
+                    docDesc, existingStatus, statusInfo.IsActive, statusInfo.Status,
+                    statusInfo.HasMigrationSuffixInOpis);
+
+                // ========================================
+                // Step 5: PER-DOCUMENT destination determination
+                // ========================================
+                var destinationType = DestinationRootFolderDeterminator.DetermineAndResolve(
+                    doc.DocumentType,      // ecm:tipDokumenta (mapped or existing)
+                    doc.TipDosijea,        // ecm:tipDosijea (from folder)
+                    doc.ClientSegment);    // ecm:clientSegment
+
+                doc.TargetDossierType = (int)destinationType;
+
+                _fileLogger.LogTrace(
+                    "Destination determination: TipDokumenta: '{TipDok}', TipDosijea: '{TipDos}', " +
+                    "ClientSegment: '{Segment}' → TargetDossierType: {DestType}",
+                    doc.DocumentType, doc.TipDosijea, doc.ClientSegment, destinationType);
+
+                // ========================================
+                // Step 6: Determine Source
+                // Use source from document if available (ecm:source), otherwise use SourceDetector
+                // ========================================
+                doc.Source = sourceFromDoc ?? SourceDetector.GetSource(destinationType);
+
+                // ========================================
+                // Step 7: Format destination dossier ID
+                // ========================================
+                if (!string.IsNullOrWhiteSpace(folder.Name))
+                {
+                    // Convert: PI-102206 → PI102206 (remove hyphen)
+                    doc.DossierDestFolderId = DossierIdFormatter.ConvertToNewFormat(folder.Name);
+                }
+
+                // ========================================
+                // Step 8: Determine document version
+                // ========================================
+                // Per Analiza_migracije_v2.md:
+                // - Unsigned documents: version 1.1
+                // - Signed documents: version 1.2
+                // For now, default to 1.1 (unsigned)
+                // TODO: Implement signed document detection logic
+                doc.Version = 1.1m; // Default: unsigned
+                doc.IsSigned = false;
+
+                // Check if document name contains "signed" or "potpisano"
+                if (!string.IsNullOrWhiteSpace(alfrescoEntry.Name))
+                {
+                    var nameLower = alfrescoEntry.Name.ToLowerInvariant();
+                    if (nameLower.Contains("signed") ||
+                        nameLower.Contains("potpisano") ||
+                        nameLower.Contains("potpisan"))
+                    {
+                        doc.Version = 1.2m; // Signed
+                        doc.IsSigned = true;
+                    }
+                }
+
+                _fileLogger.LogTrace(
+                    "Document mapping complete: Opis: '{Opis}', TipDokumenta: '{Tip}', " +
+                    "IsActive: {IsActive}, Status: '{Status}', Source: '{Source}', " +
+                    "DestType: {DestType}, DossierDestId: '{DossierId}', Version: {Version}",
+                    doc.DocDescription, doc.DocumentType, doc.IsActive, doc.NewAlfrescoStatus,
+                    doc.Source, destinationType, doc.DossierDestFolderId, doc.Version);
             }
             catch (Exception ex)
             {
@@ -1227,13 +1276,16 @@ namespace Migration.Infrastructure.Implementation.Services
                     alfrescoEntry.Name, folder.Name);
 
                 // Set safe defaults on error
-                doc.OriginalDocumentName = alfrescoEntry.Name ?? "Unknown";
-                doc.NewDocumentName = alfrescoEntry.Name ?? "Unknown";
-                doc.IsActive = false; // Safe default
+                doc.DocDescription = null;
+                doc.DocumentType = null;
+                doc.IsActive = false; // Safe default - inactive
                 doc.NewAlfrescoStatus = "poništen";
                 doc.Source = "Heimdall";
                 doc.TipDosijea = folder.TipDosijea;
-                doc.TargetDossierType = folder.TargetDossierType;
+                doc.TargetDossierType = (int)DossierType.Unknown;
+                doc.ClientSegment = folder.ClientSegment ?? folder.Segment;
+                doc.CoreId = folder.CoreId;
+                doc.DossierDestFolderId = folder.Name?.Replace("-", "");
             }
         }
 

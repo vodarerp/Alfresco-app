@@ -152,6 +152,15 @@ namespace Alfresco.Contracts.Oracle.Models
         /// </summary>
         public string? DocDescription { get; set; }
 
+        /// <summary>
+        /// Destination dossier folder ID in NEW format (without hyphen)
+        /// Examples: "PI102206" (converted from "PI-102206"), "LE500342", "ACC13001926"
+        /// Per Analiza_migracije_v2.md: Used by MoveService to determine destination path
+        /// Format: {Prefix}{CoreId} where prefix is PI, LE, ACC, D (for deposits)
+        /// For deposits: "DE{CoreId}-{ProductType}_{ContractNumber}" (e.g., "DE500342-00008_12345")
+        /// </summary>
+        public string? DossierDestFolderId { get; set; }
+
     }
 }
 
