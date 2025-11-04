@@ -144,6 +144,14 @@ namespace Alfresco.Contracts.Oracle.Models
         public bool WillReceiveMigrationSuffix { get; set; }  // Da li dobija "-migracija" sufiks
         public bool CodeWillChange { get; set; }               // Da li se šifra menja
 
+        /// <summary>
+        /// ecm:opisDokumenta - Document description used for mapping to DocumentType
+        /// Examples: "KYC Questionnaire MDOC", "Communication Consent", "KYC upitnik - migracija"
+        /// Per Analiza_migracije_v2.md: Key property for OpisToTipMapper
+        /// Also used by DocumentStatusDetector to check for "-migracija" suffix
+        /// </summary>
+        public string? DocDescription { get; set; }
+
     }
 }
 
