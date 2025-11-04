@@ -26,8 +26,8 @@ public static class Program
             MaxRetries = 5,
             RetryBaseDelayMs = 100,
             UseNewFolderStructure = true,           // Enable new folder structure
-            ClientTypes = new[] { "PL", "FL", "ACC" },
-            StartingCoreId = 10000000,
+            ClientTypes = new[] { "PI", "LE" },  // NOTE: ACC dossiers are created DURING migration, not as old dossiers
+            StartingCoreId = 102206,                // Start from realistic CoreId
             AddFolderProperties = true             // Set to true after deploying bankContentModel.xml
         };
 
@@ -54,7 +54,8 @@ public static class Program
             Console.WriteLine("Creating dosie folder structure...");
             foreach (var clientType in cfg.ClientTypes)
             {
-                var dosieFolderName = $"DOSSIER-{clientType}";
+                // Use correct naming: DOSSIERS-PI, DOSSIERS-LE, DOSSIERS-ACC
+                var dosieFolderName = $"DOSSIERS-{clientType}";
                 try
                 {
                     var dosieFolderId = await GetOrCreateFolderAsync(http, cfg, cfg.RootParentId, dosieFolderName, cts.Token);
@@ -101,8 +102,9 @@ public static class Program
                             // Distribute folders across client types
                             var clientType = cfg.ClientTypes[i % cfg.ClientTypes.Length];
                             var coreId = cfg.StartingCoreId + i;
-                            folderName = $"{clientType}-{coreId}TTT"; // e.g., PL-10000000, FL-10000001
-                            parentId = dosieFolders[clientType]; // dosie-PL, dosie-FL, etc.
+                            // IMPORTANT: Create OLD format WITH "-" for migration testing
+                            folderName = $"{clientType}-{coreId}"; // e.g., PI-102206, LE-500342, ACC-13001926
+                            parentId = dosieFolders[clientType]; // DOSSIERS-PI, DOSSIERS-LE, etc.
                         }
                         else
                         {
@@ -487,63 +489,49 @@ public static class Program
     }
 
     /// <summary>
-    /// Document name to document type code mapping from Excel migration data.
-    /// Documents will be created with original names (without "_migracija" suffix).
-    /// The migration process will add the suffix based on DocumentNameMapper logic.
+    /// Document name to document type code mapping from Analiza_migracije_v2.md
+    /// Uses exact ecm:opisDokumenta -> ecm:tipDokumenta mappings
     /// </summary>
     private static readonly Dictionary<string, string?> DocumentTypeMapping = new()
     {
-        ["Personal Notice"] = "00253",
-        ["Admission Card"] = "00135",
-        ["KYC Questionnaire"] = "00130",
-        ["Communication Consent"] = "00141",
-        ["Application For Issuing Debit Card PI"] = "00139",
-        ["Specimen card"] = "00099",
-        ["Specimen card for LE"] = "00100",
-        ["Specimen Card for Authorized Person"] = "00101",
-        ["Account Package"] = "00102",
-        ["Pre-Contract Info"] = "00109",
+        // ENGLESKI OPISI (iz starog Alfresca) - from Analiza_migracije_v2.md
+        ["Personal Notice"] = "00849",
+        ["KYC Questionnaire"] = "00841",
+        ["KYC Questionnaire MDOC"] = "00841",
+        ["KYC Questionnaire for LE"] = "00841",
+        ["Communication Consent"] = "00842",
+        ["Specimen card"] = "00824",
+        ["Specimen card for LE"] = "00827",
+        ["Specimen Card for Authorized Person"] = "00825",
+        ["Account Package"] = "00834",
+        ["Account Package RSD Instruction for Resident"] = "00834",
+        ["Pre-Contract Info"] = "00838",
+        ["GL Transaction"] = "00844",
+        ["SMS info modify request"] = "00835",
+        ["SMS card alarm change"] = "00836",
+        ["FX Transaction"] = "00843",
+        ["GDPR Revoke"] = "00840",
+        ["Contact Data Change Email"] = "00847",
+        ["Contact Data Change Phone"] = "00846",
         ["Current Accounts Contract"] = "00110",
-        ["RSD Instruction for Resident"] = "00117",
-        ["Travel Insurance"] = "00122",
-        ["Request for Accounts Closure"] = "00124",
-        ["Request for Package Accounts Closure"] = "00125",
-        ["Offer With Saving Accounts"] = "00233",
-        ["Saving Accounts Contract"] = "00113",
-        ["Mandatory Elements with Saving Accounts"] = "00241",
-        ["Card Return Request"] = "00138",
-        ["GL Transaction"] = "00143",
-        ["SMS info modify request"] = "00103",
-        ["SMS ca edit client phone change"] = "00178",
-        ["Card Accounts Change"] = "00133",
-        ["Card Reissuing"] = "00134",
-        ["GDPR Revoke"] = "00121",
-        ["Card Blocking Request"] = "00136",
-        ["SMS card alarm change"] = "00104",
-        ["Card Limit Change"] = "00132",
-        ["Request For Cancellation of Authorization"] = "00127",
-        ["FX Transaction"] = "00142",
-        ["Deblocking Card Request"] = "00137",
-        ["Contact Data Change Email"] = "00156",
-        ["Credit Bureau Reports Consent"] = "00237",
-        ["Family insurance"] = "00123",
-        ["Contact Data Change Phone"] = "00155",
-        ["Travel Insurance Generali"] = "00766",
+        ["Current Account Contract for LE"] = "00110",
+        ["Current Accounts Contract for LE"] = "00117",
 
-        // NaN -> null (deposit documents without codes)
-        ["PiPonuda"] = null,
-        ["PiAnuitetniPlan"] = null,
-        ["PiObavezniElementiUgovora"] = null,
-        ["ZahtevZaOtvaranjeRacunaOrocenogDepozita"] = null,
-        ["PiVazećiUgovorOrocenihDepozitaOstaleValute"] = null,
-        ["Request For Opening Private Account"] = "00105",
-        ["Contract Foreign Exchange Account For Receive Of Funds From The Sale Financial Instruments RSD"] = "00129",
-        ["KYC Questionnaire MDOC"] = "00130",
-        ["PiVazeciUgovorOrocenihDepozitiDinarskiTekuci"] = null,
-        ["Contract Dedicated Account For Purchase Of Financial Instruments RSD"] = "00128",
-        ["PiVazeciUgovorOrocenihDepozitaNa36Meseci"] = null,
-        ["PiVazeciUgovorOrocenihDepozitaNa24MesecaRSD"] = null,
-        ["PiVazeciUgovorOrocenihDepozitaNa25Meseci"] = null,
+        // DEPOSIT DOKUMENTI
+        ["Ugovor o oročenom depozitu"] = "00008",
+        ["Ponuda"] = "00889",
+        ["Plan isplate depozita"] = "00879",
+        ["Obavezni elementi Ugovora"] = "00882",
+        ["PiVazeciUgovorOroceniDepozitDvojezicniRSD"] = "00008",
+        ["PiVazeciUgovorOroceniDepozitOstaleValute"] = "00008",
+        ["PiVazeciUgovorOroceniDepozitDinarskiTekuci"] = "00008",
+        ["PiVazeciUgovorOroceniDepozitNa36Meseci"] = "00008",
+        ["PiVazeciUgovorOroceniDepozitNa24MesecaRSD"] = "00008",
+        ["PiVazeciUgovorOroceniDepozitNa25Meseci"] = "00008",
+        ["PiPonuda"] = "00889",
+        ["PiAnuitetniPlan"] = "00879",
+        ["PiObavezniElementiUgovora"] = "00882",
+        ["ZahtevZaOtvaranjeRacunaOrocenogDepozita"] = "00890",
     };
 
     /// <summary>
@@ -560,7 +548,7 @@ public static class Program
         var usedFileNames = new HashSet<string>();
 
         // Helper function to create document from dictionary entry
-        void AddDocument(string documentName, int? versionNumber = null)
+        void AddDocument(string documentName, int? versionNumber = null, bool addMigrationSuffix = false)
         {
             if (!DocumentTypeMapping.TryGetValue(documentName, out var docTypeCode))
             {
@@ -600,7 +588,9 @@ public static class Program
 
             usedFileNames.Add(fileName);
 
-            var props = CreateDocumentProps(clientType, coreId, docTypeCode, documentName, "validiran", random);
+            // TC 1 & 2: Add "-migracija" suffix to ecm:opisDokumenta for testing
+            var opisDokumenta = addMigrationSuffix ? $"{documentName} - migracija" : documentName;
+            var props = CreateDocumentProps(clientType, coreId, docTypeCode, opisDokumenta, "validiran", random);
 
             // Add version label if specified
             if (versionNumber.HasValue)
@@ -617,52 +607,32 @@ public static class Program
         }
 
         // Generate documents based on client type
-        if (clientType == "ACC")
-        {
-            // Test Case 3: Dosije paket računa documents
-            AddDocument("Current Accounts Contract");
-            AddDocument("Saving Accounts Contract");
-            AddDocument("Account Package");
-            AddDocument("Specimen card");
-            AddDocument("Pre-Contract Info");
-            AddDocument("RSD Instruction for Resident");
-            AddDocument("Request for Package Accounts Closure");
-            AddDocument("Contact Data Change Email");
-            AddDocument("Contact Data Change Phone");
-        }
-        else if (clientType == "FL")
+        // NOTE: ACC (Account Package) documents are NOT generated here
+        // ACC dossiers are created DURING migration process
+        if (clientType == "PI")
         {
             // Test Case 4: Dosije fizičkog lica documents
             AddDocument("Personal Notice");
             AddDocument("KYC Questionnaire");
             AddDocument("KYC Questionnaire MDOC");
             AddDocument("Communication Consent");
-            AddDocument("Credit Bureau Reports Consent");
             AddDocument("Specimen card");
             AddDocument("Specimen Card for Authorized Person");
-            AddDocument("Family insurance");
-            AddDocument("Travel Insurance");
-            AddDocument("Admission Card");
-            AddDocument("Application For Issuing Debit Card PI");
             AddDocument("Pre-Contract Info");
             AddDocument("Contact Data Change Email");
             AddDocument("Contact Data Change Phone");
 
-            // Test Case 10: Multiple versions of the same document
-            for (int version = 1; version <= 2; version++)
-            {
-                AddDocument("Family insurance", version);
-            }
+            // TC 1 & 2: Add documents with "-migracija" suffix (should become "poništen")
+            AddDocument("KYC Questionnaire", addMigrationSuffix: true);
+            AddDocument("Personal Notice", addMigrationSuffix: true);
         }
-        else if (clientType == "PL")
+        else if (clientType == "LE")
         {
             // Test Case 5: Dosije pravnog lica documents
-            AddDocument("KYC Questionnaire");
+            AddDocument("KYC Questionnaire for LE");
             AddDocument("Current Accounts Contract");
             AddDocument("Specimen card for LE");
             AddDocument("Communication Consent");
-            AddDocument("Personal Notice");
-            AddDocument("Card Limit Change");
             AddDocument("GDPR Revoke");
             AddDocument("GL Transaction");
             AddDocument("FX Transaction");
@@ -670,11 +640,13 @@ public static class Program
             AddDocument("Contact Data Change Email");
             AddDocument("Contact Data Change Phone");
 
-            // Test Case 10: Multiple versions
-            for (int version = 1; version <= 2; version++)
-            {
-                AddDocument("Card Limit Change", version);
-            }
+            // TC 3: Add Account Package document (will be migrated to DOSSIERS-ACC)
+            // Migration should detect "Account Package" and move to ACC folder
+            AddDocument("Account Package");
+
+            // TC 1 & 2: Add documents with "-migracija" suffix (should become "poništen")
+            AddDocument("Communication Consent", addMigrationSuffix: true);
+            AddDocument("KYC Questionnaire for LE", addMigrationSuffix: true);
         }
 
         return documents;
@@ -697,99 +669,40 @@ public static class Program
         properties["cm:title"] = docTypeName;
         properties["cm:description"] = $"Test document {docTypeName} for {clientType} client {coreId}";
 
+        // CRITICAL: ecm:opisDokumenta - ključ za mapiranje u migraciji
+        properties["ecm:docDesc"] = docTypeName;
+
         // Core ID
         properties["ecm:coreId"] = coreId.ToString();
-        properties["ecm:docClientId"] = coreId.ToString();
-        properties["ecm:bnkClientId"] = coreId.ToString();
 
         // Document status (Test Cases 1-2)
-        properties["ecm:docStatus"] = docStatus;
-        properties["ecm:status"] = docStatus == "validiran" ? "ACTIVE" : "INACTIVE";
-        properties["ecm:active"] = docStatus == "validiran";
+        properties["ecm:status"] = docStatus;
 
-        // Document type
-        properties["ecm:docTypeCode"] = docTypeCode;
+        // Document type (ecm:tipDokumenta)
         properties["ecm:docType"] = docTypeCode;
-        properties["ecm:bnkTypeId"] = docTypeCode;
-        properties["ecm:typeId"] = docTypeCode;
-        properties["ecm:docTypeName"] = docTypeName;
 
-        // Dossier type (Test Cases 3-5)
-        string docDossierType;
-        if (clientType == "ACC")
+        // Dossier type (Test Cases 4-5)
+        string tipDosijea;
+        if (clientType == "PI")
         {
-            docDossierType = "300"; // Dosije paket računa
+            tipDosijea = "Dosije klijenta FL"; // TC 4
         }
-        else if (clientType == "FL")
+        else // LE
         {
-            docDossierType = "500"; // Dosije fizičkog lica
+            tipDosijea = "Dosije klijenta PL"; // TC 5
         }
-        else // PL
-        {
-            docDossierType = "400"; // Dosije pravnog lica
-        }
-        properties["ecm:docDossierType"] = docDossierType;
+        properties["ecm:docDossierType"] = tipDosijea;//docDossierType
 
-        // Client type
-        properties["ecm:clientType"] = clientType;
+        // Client segment (CRITICAL for migration) 
         properties["ecm:docClientType"] = clientType;
-        properties["ecm:bnkClientType"] = clientType;
 
-        // Source (Test Case 6)
+        // Source (will be set by migration, but can add for reference)
+        // Note: Migration will set this based on destination folder
         properties["ecm:source"] = "Heimdall";
-        properties["ecm:bnkSource"] = "Heimdall";
-        properties["ecm:docSourceId"] = random.Next(1000, 9999).ToString();
-
-        // Version information (Test Case 10)
-        properties["ecm:versionLabel"] = "1.0";
-        properties["ecm:versionType"] = "Major";
-
-        // Category
-        properties["ecm:docCategoryId"] = "CAT001";
-        properties["ecm:docCategoryName"] = "Category CAT001";
-
-        // Description
-        properties["ecm:docDesc"] = $"Document {docTypeName} for client {coreId}";
-        properties["ecm:opis"] = properties["ecm:docDesc"];
-
-        // Creator
-        properties["ecm:creator"] = "Migration System";
-        properties["ecm:createdByName"] = "Migration System";
-        properties["ecm:kreiraoId"] = random.Next(1000, 9999).ToString();
-        properties["ecm:ojKreiranId"] = $"OJ-{random.Next(100, 999)}";
 
         // Dates
         var creationDate = DateTime.UtcNow.AddDays(-random.Next(1, 365));
-        properties["ecm:datumKreiranja"] = creationDate.ToString("o");
-
-        // Status fields
-        properties["ecm:statusOdobravanjaId"] = "2"; // Approved
-        properties["ecm:stepenZavodjenjaId"] = random.Next(1, 4).ToString();
-        properties["ecm:nivoArhiviranja"] = random.Next(1, 4).ToString();
-        properties["ecm:creationType"] = "Migration";
-
-        // Boolean flags
-        properties["ecm:exported"] = false;
-        properties["ecm:storniran"] = false;
-        properties["ecm:kompletiran"] = true;
-        properties["ecm:ibUDelovodniku"] = false;
-        properties["ecm:poslataOriginalnaDokumentacija"] = false;
-
-        // Other fields
-        properties["ecm:editabilityStatus"] = "Read-only";
-        properties["ecm:staff"] = "N";
-        properties["ecm:docStaff"] = "N";
-        properties["ecm:opuUser"] = $"OPU-{random.Next(100, 999)}";
-        properties["ecm:segment"] = clientType == "PL" ? "Corporate" : "Retail";
-        properties["ecm:residency"] = "Resident";
-        properties["ecm:bnkResidence"] = "Resident";
-        properties["ecm:bnkMTBR"] = $"MTBR-{random.Next(1000, 9999)}";
-        properties["ecm:bnkOfficeId"] = $"OFF-{random.Next(100, 999)}";
-        properties["ecm:bnkTypeOfProduct"] = clientType == "PL" ? "00010" : "00008";
-        properties["ecm:productType"] = properties["ecm:bnkTypeOfProduct"];
-        properties["ecm:collaborator"] = "Branch 001";
-        properties["ecm:barclex"] = $"BX{random.Next(10000, 99999)}";
-        properties["ecm:lastThumbnailModification"] = DateTime.UtcNow.ToString("o");
+        properties["ecm:docCreationDate"] = creationDate.ToString("o");
 
         return properties;
     }
@@ -815,23 +728,17 @@ public static class Program
         string uniqueFolderId;
         string dossierType;
 
-        if (clientType == "ACC")
-        {
-            // Test Case 21: ACC-{CoreId} for account package dossiers
-            uniqueFolderId = $"ACC-{coreId}";
-            dossierType = "300"; // Dosije paket računa
-        }
-        else if (clientType == "FL")
+        if (clientType == "PI")
         {
             // Test Case 19: PI-{CoreId} for natural persons
             uniqueFolderId = $"PI-{coreId}";
-            dossierType = "500"; // Dosije fizičkog lica
+            dossierType = "Dosije klijenta FL";
         }
-        else // PL
+        else // LE
         {
             // Test Case 20: LE-{CoreId} for legal entities
             uniqueFolderId = $"LE-{coreId}";
-            dossierType = "400"; // Dosije pravnog lica
+            dossierType = "Dosije klijenta PL";
         }
 
         properties["ecm:uniqueFolderId"] = uniqueFolderId;
@@ -848,30 +755,26 @@ public static class Program
         properties["ecm:coreId"] = coreId.ToString();
 
         // Naziv klijenta (Client Name)
-        if (clientType == "PL")
+        if (clientType == "LE")
         {
             var companies = new[] { "Privredno Društvo", "DOO Kompanija", "AD Firma", "JP Preduzeće", "OD Organizacija" };
             properties["ecm:clientName"] = $"{companies[random.Next(companies.Length)]} {coreId}";
         }
-        else if (clientType == "FL")
+        else // PI
         {
             var firstNames = new[] { "Petar", "Marko", "Ana", "Jovana", "Milan", "Nikola", "Stefan", "Milica" };
             var lastNames = new[] { "Petrović", "Jovanović", "Nikolić", "Marković", "Đorđević", "Stojanović" };
             properties["ecm:clientName"] = $"{firstNames[random.Next(firstNames.Length)]} {lastNames[random.Next(lastNames.Length)]}";
         }
-        else // ACC
-        {
-            properties["ecm:clientName"] = $"Account Package Client {coreId}";
-        }
 
         properties["ecm:naziv"] = properties["ecm:clientName"]; // Same as clientName
 
         // MBR/JMBG (Company ID / Personal ID)
-        if (clientType == "PL")
+        if (clientType == "LE")
         {
             properties["ecm:mbrJmbg"] = (10000000 + random.Next(90000000)).ToString(); // MBR (8 digits)
         }
-        else if (clientType == "FL")
+        else if (clientType == "PI")
         {
             var jmbg = (1000000000000L + random.Next(1000000000)).ToString(); // JMBG (13 digits)
             properties["ecm:mbrJmbg"] = jmbg;
@@ -901,12 +804,12 @@ public static class Program
         properties["ecm:segment"] = segments[random.Next(segments.Length)];
 
         // Podtip klijenta (Client Subtype)
-        if (clientType == "PL")
+        if (clientType == "LE")
         {
             var subtypes = new[] { "SME", "Corporate", "Public Sector", "Non-Profit" };
             properties["ecm:clientSubtype"] = subtypes[random.Next(subtypes.Length)];
         }
-        else if (clientType == "FL")
+        else if (clientType == "PI")
         {
             var subtypes = new[] { "Retail", "Premium", "Private Banking", "Standard" };
             properties["ecm:clientSubtype"] = subtypes[random.Next(subtypes.Length)];

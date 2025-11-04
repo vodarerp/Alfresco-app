@@ -25,9 +25,12 @@ namespace CA_MockData
         public bool UseNewFolderStructure { get; set; } = false;
 
         /// <summary>
-        /// Client types to create (PL, FL, ACC). Used only if UseNewFolderStructure = true
+        /// Client types to create (PI, LE). Used only if UseNewFolderStructure = true
+        /// PI = Physical Individual (Fizičko lice)
+        /// LE = Legal Entity (Pravno lice)
+        /// NOTE: ACC (Account Package) is NOT included - those dossiers are created DURING migration
         /// </summary>
-        public string[] ClientTypes { get; set; } = new[] { "PL", "FL", "ACC" };
+        public string[] ClientTypes { get; set; } = new[] { "PI", "LE" };
 
         /// <summary>
         /// Starting CoreId for generating mock data. Default: 10000000
