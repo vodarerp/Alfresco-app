@@ -85,7 +85,7 @@ namespace Migration.Infrastructure.Implementation.Document
                 _logger.LogDebug("Checking if folder '{FolderName}' exists under parent '{ParentId}'...",
                     newFolderName, destinationRootId);
 
-                var folderID = await _read.GetFolderByRelative(destinationRootId, newFolderName, ct).ConfigureAwait(false);
+                var folderID = await _read.GetFolderByRelative(destinationRootId, newFolderName, ct).ConfigureAwait(false); 
 
                 if (!string.IsNullOrEmpty(folderID))
                 {
