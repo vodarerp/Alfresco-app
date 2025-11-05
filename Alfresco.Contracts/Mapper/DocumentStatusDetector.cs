@@ -140,6 +140,8 @@ namespace Alfresco.Contracts.Mapper
 
         /// <summary>
         /// Vraća kompletne informacije o migraciji dokumenta
+        /// NAPOMENA: Ova metoda koristi staru logiku bazirano na imenu dokumenta.
+        /// Za novu logiku koristiti GetMigrationInfoByDocDesc koja koristi ecm:docDesc
         /// </summary>
         public static DocumentMigrationInfo GetMigrationInfo(
             string originalName,
@@ -169,6 +171,73 @@ namespace Alfresco.Contracts.Mapper
                 CodeWillChange = codeWillChange
             };
         }
+
+        /// <summary>
+        /// Vraća kompletne informacije o migraciji dokumenta koristeći ecm:docDesc
+        /// NOVA LOGIKA: Ime dokumenta može biti random GUID, koristimo ecm:docDesc za mapiranje
+        /// ecm:docDesc sadrži vrednost iz polja Naziv ili NazivDoc iz DocumentMappings liste
+        /// </summary>
+        /// <param name="docDesc">ecm:docDesc - Opis dokumenta (Naziv ili NazivDoc iz liste)</param>
+        /// <param name="originalCode">Originalna šifra dokumenta</param>
+        /// <param name="existingStatus">Postojeći status iz starog Alfresco-a</param>
+        /// <returns>Informacije o migraciji dokumenta</returns>
+        public static DocumentMigrationInfo GetMigrationInfoByDocDesc(
+            string docDesc,
+            string? originalCode = null,
+            string? existingStatus = null)
+        {
+            // Pronađi mapping na osnovu ecm:docDesc (može biti Naziv ili NazivDoc)
+            var mapping = HeimdallDocumentMapper.FindByOriginalName(docDesc);
+
+            // Ako nije pronađen po engleskom nazivu, probaj po srpskom nazivu
+            if (mapping == null)
+            {
+                // Traži u listi sve zapise koji imaju taj NazivDoc
+                mapping = HeimdallDocumentMapper.DocumentMappings
+                    .FirstOrDefault(m => m.NazivDoc.Equals(docDesc?.Trim(), StringComparison.OrdinalIgnoreCase));
+            }
+
+            string newName;
+            string newCode;
+            string tipDosiea = string.Empty;
+
+            if (mapping != null)
+            {
+                // Koristimo vrednost iz NazivDocMigracija kao novi naziv
+                newName = mapping.Value.NazivDocMigracija;
+                newCode = mapping.Value.SifraDocMigracija;
+                tipDosiea = mapping.Value.TipDosiea;
+            }
+            else
+            {
+                // Ako nema mapiranja, ostavi originalne vrednosti
+                newName = docDesc;
+                newCode = originalCode ?? string.Empty;
+            }
+
+            // Određivanje aktivnosti: provera da li novi naziv ima sufiks "- migracija"
+            bool willReceiveSuffix = newName.EndsWith("- migracija", StringComparison.OrdinalIgnoreCase) ||
+                                    newName.EndsWith("– migracija", StringComparison.OrdinalIgnoreCase);
+
+            var isActive = ShouldBeActiveByOpis(newName, existingStatus);
+            var status = GetAlfrescoStatus(isActive);
+
+            var codeWillChange = mapping != null &&
+                                !mapping.Value.SifraDoc.Equals(mapping.Value.SifraDocMigracija, StringComparison.OrdinalIgnoreCase);
+
+            return new DocumentMigrationInfo
+            {
+                OriginalName = docDesc,
+                NewName = newName,
+                OriginalCode = originalCode,
+                NewCode = newCode,
+                IsActive = isActive,
+                Status = status,
+                WillReceiveMigrationSuffix = willReceiveSuffix,
+                CodeWillChange = codeWillChange,
+                TipDosiea = tipDosiea
+            };
+        }
     }
 
     public record DocumentMigrationInfo
@@ -181,6 +250,7 @@ namespace Alfresco.Contracts.Mapper
         public string Status { get; init; } = string.Empty;
         public bool WillReceiveMigrationSuffix { get; init; }
         public bool CodeWillChange { get; init; }
+        public string TipDosiea { get; init; } = string.Empty;
     }
 
     /// <summary>

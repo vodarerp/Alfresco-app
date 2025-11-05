@@ -25,7 +25,9 @@
       "Bash(dotnet sln:*)",
       "Bash(findstr:*)",
       "Bash(timeout /t 5)",
-      "Bash(curl:*)"
+      "Bash(curl:*)",
+      "Bash(if not exist \"C:\\Users\\Nikola Preradov\\source\\repos\\Alfresco\\CA_MockData\\README.md\" echo.)",
+      "Bash(\"C:\\Users\\Nikola Preradov\\source\\repos\\Alfresco\\CA_MockData\\README.md\")"
     ],
     "deny": [],
     "ask": []

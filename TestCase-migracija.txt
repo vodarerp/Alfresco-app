@@ -15,7 +15,7 @@ CoreID 13001926, naziv dokumenta Account Package RSD Instruction for Resident
 CoreID 13000667, naziv dokumenta Pre-Contract Info
 
 3.	Test Case:
-Svaki dokument koji je mapiran na način da u koloni “Tip dosijea” ima vrednost Dosije paket računa, treba da bude migriran u dosije 300 Dosije paket računa.
+Svaki dokument koji je mapiran na način da u koloni “Tip dosijea” ima vrednost Dosije paket računa, treba da bude migriran u dosije DOSSIER-ACC.
 Primeri dokumenata, naziv u Alfresco-u Current Accounts Contract, Saving Accounts Contract, TEKUCI DEVIZNI RACUN 101899001, Prestige Package Tariff for LE.
 CoreID 13001926, naziv dokumenta TEKUCI DEVIZNI RACUN 13001926001
 CoreID 13001926, naziv dokumenta Current Accounts Contract
@@ -24,15 +24,15 @@ CoreID 13000667, naziv dokumenta Specimen card
 CoreID 50034220, naziv dokumenta Specimen card for LE
 
 4.	Test Case:
-Svaki dokument koji je mapiran na način da u koloni “Tip dosijea” ima vrednost Dosije klijenta FL/PL, treba da bude migriran u odgovarajući dosije 500 Dosije fizičkog lica ili dosije 400 Dosije pravnog lica, u zavisnosti od toga da li je reč o fizičkom licu ili biznis klijentu (očekivanje je da će se na osnovu dodatnih atributa CoreID i segment/tip klijenta).
+Svaki dokument koji je mapiran na način da u koloni “Tip dosijea” ima vrednost Dosije klijenta FL/PL, treba da bude migriran u odgovarajući dosije DOSSIER-PI ili dosije DOSSIER-LE, u zavisnosti od toga da li je reč o fizičkom licu ili biznis klijentu (očekivanje je da će se na osnovu dodatnih atributa CoreID i segment/tip klijenta).
 Primeri dokumenata, naziv u Alfresco-u Credit Bureau Reports Consent, Personal Notice, KYC Questionnaire, Communication Consent.
-CoreID 50034220, naziv dokumenta Communication Consent (primera radi za ovaj dokument imajući u vidu da se trenutno nalazi u LE folderu (a ne u PI), znamo da se odnosi na pravno lice, tako da treba da bude migriran u 400 Dosije pravnog lica) 
-CoreID 50034141, naziv dokumenta Personal Notice (primera radi za ovaj dokument imajući u vidu da se trenutno nalazi u LE folderu (a ne u PI), znamo da se odnosi na pravno lice, tako da treba da bude migriran u 400 Dosije pravnog lica)
-CoreID 102206, naziv dokumenta KYC Questionnaire MDOC (primera radi za ovaj dokument imajući u vidu da se trenutno nalazi u PI folderu (a ne u LE), znamo da se odnosi na fizičko lice, tako da treba da bude migriran u 500 Dosije fizičkog lica)
-Dakle, da li je dokument migriran u folder PI ili LE, može takođe da bude od pomoći radi migriranja u ispravan dosije 500 Dosije fizičkog lica ili dosije 400 Dosije pravnog lica
+CoreID 50034220, naziv dokumenta Communication Consent (primera radi za ovaj dokument imajući u vidu da se trenutno nalazi u LE folderu (a ne u PI), znamo da se odnosi na pravno lice, tako da treba da bude migriran u DOSSIER-LE) 
+CoreID 50034141, naziv dokumenta Personal Notice (primera radi za ovaj dokument imajući u vidu da se trenutno nalazi u LE folderu (a ne u PI), znamo da se odnosi na pravno lice, tako da treba da bude migriran u DOSSIER-LE)
+CoreID 102206, naziv dokumenta KYC Questionnaire MDOC (primera radi za ovaj dokument imajući u vidu da se trenutno nalazi u PI folderu (a ne u LE), znamo da se odnosi na fizičko lice, tako da treba da bude migriran u DOSSIER-PI)
+Dakle, da li je dokument migriran u folder PI ili LE, može takođe da bude od pomoći radi migriranja u ispravan dosije DOSSIER-PI ili dosije DOSSIER-LE
 
 5.	Test Case:
-Svaki dokument koji je mapiran na način da u koloni “Tip dosijea” ima vrednost Dosije klijenta PL (dakle, ne sadrži deo FL), treba da bude migriran u dosije 400 Dosije pravnog lica.
+Svaki dokument koji je mapiran na način da u koloni “Tip dosijea” ima vrednost Dosije klijenta PL (dakle, ne sadrži deo FL), treba da bude migriran u dosije DOSSIER-LE.
 Primeri dokumenata, naziv u Alfresco-u KYC Questionnaire for LE, APR Certificate.
 CoreID 50034220, naziv dokumenta KYC Questionnaire for LE
 
@@ -78,7 +78,7 @@ Za tip dokumenata KDP vlasnika za FL 00824, potrebno je nakon migracije iz svih 
 Ovo je bitno zbog finalnog statusa.
 
 17.	Test Case:
-Svaki dokument koji je mapiran na način da u koloni “Tip dosijea” ima vrednost Dosije depozita, treba da bude migriran u dosije 700 Dosije depozita.
+Svaki dokument koji je mapiran na način da u koloni “Tip dosijea” ima vrednost Dosije depozita, treba da bude migriran u dosije DOSSIER-D.
 Primeri dokumenata, naziv u Alfresco-u PiVazeciUgovorOroceniDepozitDvojezicniRSD, ZahtevZaOtvaranjeRacunaOrocenogDepozita.
 
 18.	TestCase:

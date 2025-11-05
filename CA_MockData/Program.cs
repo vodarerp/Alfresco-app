@@ -1,4 +1,5 @@
 ﻿
+using Alfresco.Contracts.Mapper;
 using CA_MockData;
 using System.Diagnostics;
 using System.Net.Http.Headers;
@@ -489,50 +490,41 @@ public static class Program
     }
 
     /// <summary>
-    /// Document name to document type code mapping from Analiza_migracije_v2.md
-    /// Uses exact ecm:opisDokumenta -> ecm:tipDokumenta mappings
+    /// Gets document type code (SifraDocMigracija) from HeimdallDocumentMapper
+    /// Uses the centralized mapping list instead of hardcoded dictionary
     /// </summary>
-    private static readonly Dictionary<string, string?> DocumentTypeMapping = new()
+    private static string? GetDocumentTypeCode(string documentName)
     {
-        // ENGLESKI OPISI (iz starog Alfresca) - from Analiza_migracije_v2.md
-        ["Personal Notice"] = "00849",
-        ["KYC Questionnaire"] = "00841",
-        ["KYC Questionnaire MDOC"] = "00841",
-        ["KYC Questionnaire for LE"] = "00841",
-        ["Communication Consent"] = "00842",
-        ["Specimen card"] = "00824",
-        ["Specimen card for LE"] = "00827",
-        ["Specimen Card for Authorized Person"] = "00825",
-        ["Account Package"] = "00834",
-        ["Account Package RSD Instruction for Resident"] = "00834",
-        ["Pre-Contract Info"] = "00838",
-        ["GL Transaction"] = "00844",
-        ["SMS info modify request"] = "00835",
-        ["SMS card alarm change"] = "00836",
-        ["FX Transaction"] = "00843",
-        ["GDPR Revoke"] = "00840",
-        ["Contact Data Change Email"] = "00847",
-        ["Contact Data Change Phone"] = "00846",
-        ["Current Accounts Contract"] = "00110",
-        ["Current Account Contract for LE"] = "00110",
-        ["Current Accounts Contract for LE"] = "00117",
+        // Try to find by original name (Naziv)
+        var mapping = HeimdallDocumentMapper.FindByOriginalName(documentName);
 
-        // DEPOSIT DOKUMENTI
-        ["Ugovor o oročenom depozitu"] = "00008",
-        ["Ponuda"] = "00889",
-        ["Plan isplate depozita"] = "00879",
-        ["Obavezni elementi Ugovora"] = "00882",
-        ["PiVazeciUgovorOroceniDepozitDvojezicniRSD"] = "00008",
-        ["PiVazeciUgovorOroceniDepozitOstaleValute"] = "00008",
-        ["PiVazeciUgovorOroceniDepozitDinarskiTekuci"] = "00008",
-        ["PiVazeciUgovorOroceniDepozitNa36Meseci"] = "00008",
-        ["PiVazeciUgovorOroceniDepozitNa24MesecaRSD"] = "00008",
-        ["PiVazeciUgovorOroceniDepozitNa25Meseci"] = "00008",
-        ["PiPonuda"] = "00889",
-        ["PiAnuitetniPlan"] = "00879",
-        ["PiObavezniElementiUgovora"] = "00882",
-        ["ZahtevZaOtvaranjeRacunaOrocenogDepozita"] = "00890",
-    };
+        if (mapping != null)
+        {
+            return mapping.Value.SifraDocMigracija;
+        }
+
+        // Try to find by Serbian name (NazivDoc)
+        var mappingBySerbianName = HeimdallDocumentMapper.DocumentMappings
+            .FirstOrDefault(m => m.NazivDoc.Equals(documentName?.Trim(), StringComparison.OrdinalIgnoreCase));
+
+        if (mappingBySerbianName.Naziv != null)
+        {
+            return mappingBySerbianName.SifraDocMigracija;
+        }
+
+        // Document not found in mapper
+        return null;
+    }
+
+    /// <summary>
+    /// Gets all available document names from HeimdallDocumentMapper for testing
+    /// </summary>
+    private static List<string> GetAvailableDocumentNames()
+    {
+        return HeimdallDocumentMapper.DocumentMappings
+            .Select(m => m.Naziv)
+            .ToList();
+    }
 
     /// <summary>
     /// Generates test case documents based on TestCase-migracija.txt requirements.
@@ -547,19 +539,15 @@ public static class Program
         // Track document names to avoid duplicates
         var usedFileNames = new HashSet<string>();
 
-        // Helper function to create document from dictionary entry
+        // Helper function to create document using HeimdallDocumentMapper
         void AddDocument(string documentName, int? versionNumber = null, bool addMigrationSuffix = false)
         {
-            if (!DocumentTypeMapping.TryGetValue(documentName, out var docTypeCode))
-            {
-                Console.WriteLine($"[WARNING] Document '{documentName}' not found in DocumentTypeMapping");
-                return;
-            }
+            // Get document type code from HeimdallDocumentMapper
+            var docTypeCode = GetDocumentTypeCode(documentName);
 
-            // Skip documents with null codes (deposit documents without proper mapping)
             if (string.IsNullOrEmpty(docTypeCode))
             {
-                Console.WriteLine($"[INFO] Skipping document '{documentName}' - no document type code assigned");
+                Console.WriteLine($"[WARNING] Document '{documentName}' not found in HeimdallDocumentMapper");
                 return;
             }
 
@@ -588,9 +576,36 @@ public static class Program
 
             usedFileNames.Add(fileName);
 
-            // TC 1 & 2: Add "-migracija" suffix to ecm:opisDokumenta for testing
-            var opisDokumenta = addMigrationSuffix ? $"{documentName} - migracija" : documentName;
-            var props = CreateDocumentProps(clientType, coreId, docTypeCode, opisDokumenta, "validiran", random);
+            // Get full mapping info from HeimdallDocumentMapper
+            var mapping = HeimdallDocumentMapper.FindByOriginalName(documentName);
+
+            // TC 1 & 2: Determine if document should have "-migracija" suffix
+            // If addMigrationSuffix is true, use NazivDocMigracija, otherwise use original documentName
+            string opisDokumenta;
+            string tipDosiea;
+
+            if (mapping != null)
+            {
+                if (addMigrationSuffix)
+                {
+                    // Use migrated name which should have "- migracija" suffix
+                    opisDokumenta = mapping.Value.NazivDocMigracija;
+                }
+                else
+                {
+                    // Use original name
+                    opisDokumenta = mapping.Value.Naziv;
+                }
+                tipDosiea = mapping.Value.TipDosiea;
+            }
+            else
+            {
+                // Fallback if mapping not found
+                opisDokumenta = addMigrationSuffix ? $"{documentName} - migracija" : documentName;
+                tipDosiea = clientType == "PI" ? "Dosije klijenta FL" : "Dosije klijenta PL";
+            }
+
+            var props = CreateDocumentProps(clientType, coreId, docTypeCode, opisDokumenta, tipDosiea, "validiran", random);
 
             // Add version label if specified
             if (versionNumber.HasValue)
@@ -654,12 +669,14 @@ public static class Program
 
     /// <summary>
     /// Helper method to create document properties with common fields
+    /// Uses data from HeimdallDocumentMapper for accurate mapping
     /// </summary>
     private static Dictionary<string, object> CreateDocumentProps(
         string clientType,
         int coreId,
         string docTypeCode,
         string docTypeName,
+        string tipDosijea,
         string docStatus,
         Random random)
     {
@@ -669,7 +686,8 @@ public static class Program
         properties["cm:title"] = docTypeName;
         properties["cm:description"] = $"Test document {docTypeName} for {clientType} client {coreId}";
 
-        // CRITICAL: ecm:opisDokumenta - ključ za mapiranje u migraciji
+        // CRITICAL: ecm:docDesc - ključ za mapiranje u migraciji
+        // Ovo polje se koristi u DocumentStatusDetector.GetMigrationInfoByDocDesc()
         properties["ecm:docDesc"] = docTypeName;
 
         // Core ID
@@ -681,17 +699,9 @@ public static class Program
         // Document type (ecm:tipDokumenta)
         properties["ecm:docType"] = docTypeCode;
 
-        // Dossier type (Test Cases 4-5)
-        string tipDosijea;
-        if (clientType == "PI")
-        {
-            tipDosijea = "Dosije klijenta FL"; // TC 4
-        }
-        else // LE
-        {
-            tipDosijea = "Dosije klijenta PL"; // TC 5
-        }
-        properties["ecm:docDossierType"] = tipDosijea;//docDossierType
+        // Dossier type (Test Cases 3-5)
+        // This comes from TipDosiea field in HeimdallDocumentMapper
+        properties["ecm:docDossierType"] = tipDosijea;
 
         // Client segment (CRITICAL for migration) 
         properties["ecm:docClientType"] = clientType;

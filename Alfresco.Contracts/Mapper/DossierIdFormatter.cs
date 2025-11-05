@@ -263,5 +263,58 @@ namespace Alfresco.Contracts.Mapper
             var parsed = ParseDepositDossierId(depositDossierId);
             return parsed?.ContractNumber ?? string.Empty;
         }
+
+        /// <summary>
+        /// Converts dossier ID to ACC format based on target dossier type
+        /// Used when documents are migrated to DOSSIER-ACC (Account Package)
+        /// </summary>
+        /// <param name="oldDossierId">Old dossier ID (e.g., "PI-102206", "LE-500342")</param>
+        /// <param name="targetDossierType">Target dossier type (300 = ACC)</param>
+        /// <returns>New dossier ID with correct prefix</returns>
+        /// <example>
+        /// ConvertForTargetType("PI-102206", 300) → "ACC102206"
+        /// ConvertForTargetType("LE-500342", 300) → "ACC500342"
+        /// ConvertForTargetType("PI-102206", 500) → "PI102206" (no change, not ACC)
+        /// </example>
+        public static string ConvertForTargetType(string oldDossierId, int targetDossierType)
+        {
+            if (string.IsNullOrWhiteSpace(oldDossierId))
+                return string.Empty;
+
+            // Extract CoreId from the old dossier ID
+            var coreId = ExtractCoreId(oldDossierId);
+
+            if (string.IsNullOrWhiteSpace(coreId))
+                return ConvertToNewFormat(oldDossierId); // Fallback to simple conversion
+
+            // Determine the new prefix based on target dossier type
+            string newPrefix = targetDossierType switch
+            {
+                300 => "ACC",  // Account Package dossier
+                400 => "LE",   // Legal Entity dossier
+                500 => "PI",   // Physical Individual dossier
+                700 => "DE",   // Deposit dossier
+                _ => ExtractPrefix(oldDossierId) // Keep original prefix for unknown types
+            };
+
+            return CreateNewDossierId(newPrefix, coreId);
+        }
+
+        /// <summary>
+        /// Converts old dossier format to new format with prefix change if needed
+        /// Based on Enums.DossierType enum values
+        /// </summary>
+        /// <param name="oldDossierId">Old dossier ID (e.g., "PI-102206")</param>
+        /// <param name="targetDossierType">Target dossier type from Enums.DossierType</param>
+        /// <returns>New dossier ID with correct prefix and no hyphen</returns>
+        /// <example>
+        /// ConvertWithPrefixChange("PI-102206", Enums.DossierType.AccountPackage) → "ACC102206"
+        /// ConvertWithPrefixChange("LE-500342", Enums.DossierType.AccountPackage) → "ACC500342"
+        /// ConvertWithPrefixChange("PI-102206", Enums.DossierType.ClientFL) → "PI102206"
+        /// </example>
+        public static string ConvertWithPrefixChange(string oldDossierId, Enums.DossierType targetDossierType)
+        {
+            return ConvertForTargetType(oldDossierId, (int)targetDossierType);
+        }
     }
 }

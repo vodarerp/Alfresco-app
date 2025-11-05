@@ -1231,11 +1231,19 @@ namespace Migration.Infrastructure.Implementation.Services
 
                 // ========================================
                 // Step 7: Format destination dossier ID
+                // IMPORTANT: For ACC dosijee, convert PI/LE → ACC prefix
+                // Example: PI-102206 → ACC102206 (if targetType = AccountPackage)
                 // ========================================
                 if (!string.IsNullOrWhiteSpace(folder.Name))
                 {
-                    // Convert: PI-102206 → PI102206 (remove hyphen)
-                    doc.DossierDestFolderId = DossierIdFormatter.ConvertToNewFormat(folder.Name);
+                    // Use new method that changes prefix based on target dossier type
+                    doc.DossierDestFolderId = DossierIdFormatter.ConvertForTargetType(
+                        folder.Name,
+                        doc.TargetDossierType ?? (int)DossierType.Unknown);
+
+                    _fileLogger.LogTrace(
+                        "Converted dossier ID: '{OldId}' (Type: {OldType}) → '{NewId}' (TargetType: {TargetType})",
+                        folder.Name, folder.TipDosijea, doc.DossierDestFolderId, destinationType);
                 }
 
                 // ========================================

@@ -48,6 +48,55 @@ namespace Alfresco.Contracts.Mapper
         }
 
         /// <summary>
+        /// NOVA LOGIKA: Određuje tip dosijea na osnovu ecm:docDesc i mapiranja iz HeimdallDocumentMapper
+        /// ecm:docDesc sadrži vrednost iz polja Naziv ili NazivDoc iz DocumentMappings liste
+        /// Na osnovu tog mapiranja dobijamo TipDosiea i određujemo destination folder
+        /// </summary>
+        /// <param name="docDesc">ecm:docDesc - Opis dokumenta (Naziv ili NazivDoc iz liste)</param>
+        /// <returns>DossierType baziran na TipDosiea iz mapiranja</returns>
+        public static DossierType DetectFromDocDesc(string docDesc)
+        {
+            if (string.IsNullOrWhiteSpace(docDesc))
+                return DossierType.Unknown;
+
+            // Pronađi mapping na osnovu ecm:docDesc
+            var mapping = HeimdallDocumentMapper.FindByOriginalName(docDesc);
+
+            // Ako nije pronađen po engleskom nazivu, probaj po srpskom nazivu
+            if (mapping == null)
+            {
+                mapping = HeimdallDocumentMapper.DocumentMappings
+                    .FirstOrDefault(m => m.NazivDoc.Equals(docDesc?.Trim(), StringComparison.OrdinalIgnoreCase));
+            }
+
+            if (mapping == null)
+                return DossierType.Unknown;
+
+            // Sada koristimo TipDosiea iz mapiranja
+            return DetectFromTipDosijea(mapping.Value.TipDosiea);
+        }
+
+        /// <summary>
+        /// Vraća destination folder name (DOSSIER-ACC, DOSSIER-LE, DOSSIER-PI, DOSSIER-D)
+        /// na osnovu DossierType
+        /// </summary>
+        /// <param name="dossierType">Tip dosijea</param>
+        /// <returns>Naziv destination foldera</returns>
+        public static string GetDossierFolderName(DossierType dossierType)
+        {
+            return dossierType switch
+            {
+                DossierType.AccountPackage => "DOSSIER-ACC",
+                DossierType.ClientPL => "DOSSIER-LE",
+                DossierType.ClientFL => "DOSSIER-PI",
+                DossierType.Deposit => "DOSSIER-D",
+                DossierType.ClientFLorPL => throw new InvalidOperationException(
+                    "Cannot get folder name for unresolved ClientFLorPL type. Must resolve to ClientFL or ClientPL first."),
+                _ => "DOSSIER-UNKNOWN"
+            };
+        }
+
+        /// <summary>
         /// Razrešava FL/PL na osnovu segment/tip klijenta iz ClientAPI-a
         /// </summary>
         public static DossierType ResolveFLorPL(string clientSegment)
