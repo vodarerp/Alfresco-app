@@ -4,6 +4,7 @@ using Microsoft.Data.SqlClient;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
 using Microsoft.Extensions.Options;
+using Migration.Abstraction.Interfaces;
 using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
@@ -32,6 +33,7 @@ namespace Alfresco.App.UserControls
 
         private readonly IAlfrescoReadApi _alfrescoService;
         private readonly IOptions<Alfresco.Contracts.SqlServer.SqlServerOptions> _options;
+        private readonly IDocumentMappingService _mappingService;
 
         #region -HealthItems- property
         private ObservableCollection<HealthItem> _HealthItems = new();
@@ -103,6 +105,8 @@ namespace Alfresco.App.UserControls
             DataContext = this;
             InitializeComponent();
             _alfrescoService = App.AppHost.Services.GetRequiredService<IAlfrescoReadApi>();
+            _mappingService = App.AppHost.Services.GetRequiredService<IDocumentMappingService>();
+
             _options = App.AppHost.Services.GetRequiredService<IOptions<Alfresco.Contracts.SqlServer.SqlServerOptions>>();
 
             this.Loaded += StatusBarUC_Loaded;
@@ -161,9 +165,13 @@ namespace Alfresco.App.UserControls
         }
         #endregion
 
-        private void TextBlock_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
+        private async void TextBlock_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
         {
-            var x = 123;
+            var x = await _mappingService.FindByOriginalNameAsync("Personal Notice");
+            var xx = await _mappingService.GetAllMappingsAsync();
         }
+
+       
+      
     }
 }

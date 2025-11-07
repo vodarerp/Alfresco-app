@@ -20,7 +20,7 @@ public static class Program
             BaseUrl = "http://localhost:8080/",
             Username =  "admin",
             Password = "admin",
-            RootParentId = "9932a531-53d9-4fdf-b2a5-3153d94fdf29",
+            RootParentId = "9a4ccd6b-d245-4f9f-8ccd-6bd2455f9fce",
             FolderCount = 10,
             DocsPerFolder = 3,
             DegreeOfParallelism = 8,
@@ -586,16 +586,10 @@ public static class Program
 
             if (mapping != null)
             {
-                if (addMigrationSuffix)
-                {
-                    // Use migrated name which should have "- migracija" suffix
-                    opisDokumenta = mapping.Value.NazivDocMigracija;
-                }
-                else
-                {
+               
                     // Use original name
-                    opisDokumenta = mapping.Value.Naziv;
-                }
+               opisDokumenta = mapping.Value.Naziv;
+                
                 tipDosiea = mapping.Value.TipDosiea;
             }
             else

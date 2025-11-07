@@ -278,6 +278,17 @@ namespace Alfresco.App
                     services.AddTransient<SqlServer.Abstraction.Interfaces.IFolderStagingRepository, SqlServer.Infrastructure.Implementation.FolderStagingRepository>();
                     services.AddTransient<SqlServer.Abstraction.Interfaces.IMigrationCheckpointRepository, SqlServer.Infrastructure.Implementation.MigrationCheckpointRepository>();
 
+                    // Memory Cache for DocumentMappingRepository (caching individual query results)
+                    services.AddMemoryCache();
+
+                    // DocumentMappings - Database-driven mapping service (replaces HeimdallDocumentMapper)
+                    services.AddScoped<SqlServer.Abstraction.Interfaces.IDocumentMappingRepository, SqlServer.Infrastructure.Implementation.DocumentMappingRepository>();
+                    services.AddScoped<Migration.Abstraction.Interfaces.IDocumentMappingService, Migration.Infrastructure.Implementation.DocumentMappingService>();
+
+                    // Mappers that use DocumentMappingService
+                    services.AddScoped<Migration.Infrastructure.Implementation.OpisToTipMapperV2>();
+                    services.AddScoped<Migration.Infrastructure.Implementation.DocumentStatusDetectorV2>();
+
                     #region oracle DI (commented)
                     //services.AddTransient<IDocStagingRepository, DocStagingRepository>();
                     //services.AddTransient<IFolderStagingRepository, FolderStagingRepository>();

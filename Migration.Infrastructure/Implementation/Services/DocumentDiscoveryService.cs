@@ -30,12 +30,14 @@ namespace Migration.Infrastructure.Implementation.Services
         private readonly IFolderStagingRepository _folderRepo;
         private readonly IDocumentReader _reader;
         private readonly IOptions<MigrationOptions> _options;
+        private readonly IUnitOfWork _unitOfWork;
         private readonly IServiceProvider _sp;
         //private readonly ILogger<DocumentDiscoveryService> _logger;
         //private readonly IUnitOfWork _unitOfWork;
         private readonly ILogger _dbLogger;
         private readonly ILogger _fileLogger;
         private readonly ILogger _uiLogger;
+        private readonly OpisToTipMapperV2 _opisToTipMapper;
 
         private long _totalProcessed = 0;
         private long _totalFailed = 0;
@@ -43,7 +45,16 @@ namespace Migration.Infrastructure.Implementation.Services
 
         private const string ServiceName = "DocumentDiscovery";
 
-        public DocumentDiscoveryService(IDocumentIngestor ingestor, IDocumentReader reader, IDocStagingRepository docRepo, IFolderStagingRepository folderRepo, IOptions<MigrationOptions> options, IServiceProvider sp, IUnitOfWork unitOfWork,ILoggerFactory logger)
+        public DocumentDiscoveryService(
+            IDocumentIngestor ingestor,
+            IDocumentReader reader,
+            IDocStagingRepository docRepo,
+            IFolderStagingRepository folderRepo,
+            IOptions<MigrationOptions> options,
+            IServiceProvider sp,
+            IUnitOfWork unitOfWork,
+            ILoggerFactory logger,
+            OpisToTipMapperV2 opisToTipMapper)
         {
             _ingestor = ingestor;
             _reader = reader;
@@ -54,6 +65,7 @@ namespace Migration.Infrastructure.Implementation.Services
             _dbLogger = logger.CreateLogger("DbLogger");
             _fileLogger = logger.CreateLogger("FileLogger");
             _uiLogger = logger.CreateLogger("UiLogger");
+            _opisToTipMapper = opisToTipMapper ?? throw new ArgumentNullException(nameof(opisToTipMapper));
            // _logger = logger;
             // _unitOfWork = unitOfWork;
         }
@@ -596,8 +608,8 @@ namespace Migration.Infrastructure.Implementation.Services
                 item.ToPath = string.Empty; // Will be populated by MoveService
                 item.Status = MigrationStatus.Ready.ToDbString();
 
-                // Apply document mapping using mappers from Faza 1
-                ApplyDocumentMapping(item, folder, d.Entry);
+                // Apply document mapping using mappers from Faza 1 (database-driven)
+                await ApplyDocumentMappingAsync(item, folder, d.Entry, ct).ConfigureAwait(false);
 
                 docsToInsert.Add(item);
             }
@@ -1044,14 +1056,14 @@ namespace Migration.Infrastructure.Implementation.Services
         /// NEW APPROACH - COMPLETE METADATA PREPARATION:
         /// - Extracts ALL ecm:* properties from old Alfresco document
         /// - Uses ecm:opisDokumenta (NOT document name) for status detection
-        /// - Uses OpisToTipMapper to map ecm:opisDokumenta → ecm:tipDokumenta
+        /// - Uses OpisToTipMapperV2 to map ecm:opisDokumenta → ecm:tipDokumenta (database-driven)
         /// - Uses DestinationRootFolderDeterminator for per-document destination
         /// - Uses DocumentStatusDetector.ShouldBeActiveByOpis() for status
         /// - Prepares ALL Alfresco properties so MoveService ONLY copies documents
         ///
         /// Populates ALL DocStaging fields needed for migration
         /// </summary>
-        private void ApplyDocumentMapping(DocStaging doc, FolderStaging folder, Entry alfrescoEntry)
+        private async Task ApplyDocumentMappingAsync(DocStaging doc, FolderStaging folder, Entry alfrescoEntry, CancellationToken ct)
         {
             try
             {
@@ -1172,12 +1184,12 @@ namespace Migration.Infrastructure.Implementation.Services
                 doc.ClientSegment = docClientType ?? folder.ClientSegment ?? folder.Segment;
 
                 // ========================================
-                // Step 2: Map ecm:docDesc → ecm:docType using OpisToTipMapper
+                // Step 2: Map ecm:docDesc → ecm:docType using OpisToTipMapperV2 (database-driven)
                 // ========================================
                 string? mappedDocType = null;
                 if (!string.IsNullOrWhiteSpace(docDesc))
                 {
-                    mappedDocType = OpisToTipMapper.GetTipDokumenta(docDesc);
+                    mappedDocType = await _opisToTipMapper.GetTipDokumentaAsync(docDesc, ct).ConfigureAwait(false);
 
                     if (!string.IsNullOrWhiteSpace(mappedDocType))
                     {
@@ -1215,6 +1227,32 @@ namespace Migration.Infrastructure.Implementation.Services
                     doc.DocumentType,      // ecm:tipDokumenta (mapped or existing)
                     doc.TipDosijea,        // ecm:tipDosijea (from folder)
                     doc.ClientSegment);    // ecm:clientSegment
+
+                // FALLBACK: If destination type is Unknown, try to determine from folder name prefix
+                if (destinationType == DossierType.Unknown && !string.IsNullOrWhiteSpace(folder.Name))
+                {
+                    var prefix = DossierIdFormatter.ExtractPrefix(folder.Name);
+
+                    var fallbackType = prefix.ToUpperInvariant() switch
+                    {
+                        "PI" => DossierType.ClientFL,      // Personal Individual → FL
+                        "FL" => DossierType.ClientFL,      // Fizičko Lice → FL
+                        "LE" => DossierType.ClientPL,      // Legal Entity → PL
+                        "PL" => DossierType.ClientPL,      // Pravno Lice → PL
+                        "ACC" => DossierType.AccountPackage, // Account Package
+                        "DE" => DossierType.Deposit,       // Deposit
+                        "D" => DossierType.Deposit,        // Deposit (short)
+                        _ => DossierType.Unknown           // Keep Unknown if prefix not recognized
+                    };
+
+                    if (fallbackType != DossierType.Unknown)
+                    {
+                        destinationType = fallbackType;
+                        _fileLogger.LogInformation(
+                            "FALLBACK: Determined TargetDossierType from folder name prefix: '{Prefix}' → {DestType}",
+                            prefix, destinationType);
+                    }
+                }
 
                 doc.TargetDossierType = (int)destinationType;
 
