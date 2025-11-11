@@ -154,6 +154,36 @@ namespace Alfresco.Contracts.Oracle.Models
         public string? Collaborator { get; set; }
 
         /// <summary>
+        /// BarCLEX Name
+        /// Retrieved from ClientAPI
+        /// </summary>
+        public string? BarCLEXName { get; set; }
+
+        /// <summary>
+        /// BarCLEX OPU
+        /// Retrieved from ClientAPI
+        /// </summary>
+        public string? BarCLEXOpu { get; set; }
+
+        /// <summary>
+        /// BarCLEX Group Name
+        /// Retrieved from ClientAPI
+        /// </summary>
+        public string? BarCLEXGroupName { get; set; }
+
+        /// <summary>
+        /// BarCLEX Group Code
+        /// Retrieved from ClientAPI
+        /// </summary>
+        public string? BarCLEXGroupCode { get; set; }
+
+        /// <summary>
+        /// BarCLEX Code
+        /// Retrieved from ClientAPI
+        /// </summary>
+        public string? BarCLEXCode { get; set; }
+
+        /// <summary>
         /// Creator of the folder/document
         /// </summary>
         public string? Creator { get; set; }
@@ -164,7 +194,7 @@ namespace Alfresco.Contracts.Oracle.Models
         public DateTime? ArchivedAt { get; set; }
 
         public string? TipDosijea { get; set; }           // "Dosije paket računa", "Dosije depozita", itd.
-        public int? TargetDossierType { get; set; }       // 300, 400, 500, 700, 999 (DossierType enum vrednost)
+        public string? TargetDossierType { get; set; }       // 300, 400, 500, 700, 999 (DossierType enum vrednost)
 
         public string? ClientSegment { get; set; }        // "PI", "LE", "RETAIL", "SME"
     }

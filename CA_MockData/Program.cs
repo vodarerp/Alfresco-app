@@ -20,7 +20,7 @@ public static class Program
             BaseUrl = "http://localhost:8080/",
             Username =  "admin",
             Password = "admin",
-            RootParentId = "9a4ccd6b-d245-4f9f-8ccd-6bd2455f9fce",
+            RootParentId = "42ac36ae-e9ee-4fff-ac36-aee9ee1fff10",
             FolderCount = 10,
             DocsPerFolder = 3,
             DegreeOfParallelism = 8,
@@ -714,7 +714,7 @@ public static class Program
     /// <summary>
     /// Generates custom properties for a client folder (dossier) based on client type and CoreId.
     /// Properties follow banking content model: ecm:propertyName
-    /// Implements Test Cases from TestCase-migracija.txt
+    /// ONLY generates required properties for migration testing
     /// </summary>
     private static Dictionary<string, object> GenerateFolderProperties(string clientType, int coreId)
     {
@@ -725,40 +725,29 @@ public static class Program
         properties["cm:title"] = $"{clientType} Client {coreId}";
         properties["cm:description"] = $"Mock dossier for {clientType} client with CoreId {coreId}";
 
-        // Banking Content Model (ecm:) properties - requires bankContentModel.xml to be deployed
+        // ========================================
+        // REQUIRED PROPERTIES FOR MIGRATION
+        // Based on provided list
+        // ========================================
 
-        // Jedinstveni identifikator dosijea (Unique Folder Identifier)
-        // Test Cases 19-21: Format based on dossier type
-        string uniqueFolderId;
-        string dossierType;
-
-        if (clientType == "PI")
-        {
-            // Test Case 19: PI-{CoreId} for natural persons
-            uniqueFolderId = $"PI-{coreId}";
-            dossierType = "Dosije klijenta FL";
-        }
-        else // LE
-        {
-            // Test Case 20: LE-{CoreId} for legal entities
-            uniqueFolderId = $"LE-{coreId}";
-            dossierType = "Dosije klijenta PL";
-        }
-
-        properties["ecm:uniqueFolderId"] = uniqueFolderId;
-        properties["ecm:folderId"] = uniqueFolderId; // Same as uniqueFolderId
-
-        // Tip dosijea (Dossier Type) - Test Cases 3-7, 17
-        properties["ecm:bnkDossierType"] = dossierType;
-
-        // Tip klijenta (Client Type) - Test Case 4
-        properties["ecm:clientType"] = clientType;
-        properties["ecm:bnkClientType"] = clientType;
-
-        // Core ID
+        // 1. ecm:coreId
         properties["ecm:coreId"] = coreId.ToString();
 
-        // Naziv klijenta (Client Name)
+        // 2. ecm:jmbg / ecm:mbrJmbg (bnkJmbg)
+        if (clientType == "LE")
+        {
+            var mbr = (10000000 + random.Next(90000000)).ToString(); // MBR (8 digits)
+            properties["ecm:mbrJmbg"] = mbr;
+            properties["ecm:jmbg"] = mbr;
+        }
+        else if (clientType == "PI")
+        {
+            var jmbg = (1000000000000L + random.Next(1000000000)).ToString(); // JMBG (13 digits)
+            properties["ecm:mbrJmbg"] = jmbg;
+            properties["ecm:jmbg"] = jmbg;
+        }
+
+        // 3. ecm:clientName (bnkClientName)
         if (clientType == "LE")
         {
             var companies = new[] { "Privredno Društvo", "DOO Kompanija", "AD Firma", "JP Preduzeće", "OD Organizacija" };
@@ -771,43 +760,11 @@ public static class Program
             properties["ecm:clientName"] = $"{firstNames[random.Next(firstNames.Length)]} {lastNames[random.Next(lastNames.Length)]}";
         }
 
-        properties["ecm:naziv"] = properties["ecm:clientName"]; // Same as clientName
-
-        // MBR/JMBG (Company ID / Personal ID)
-        if (clientType == "LE")
-        {
-            properties["ecm:mbrJmbg"] = (10000000 + random.Next(90000000)).ToString(); // MBR (8 digits)
-        }
-        else if (clientType == "PI")
-        {
-            var jmbg = (1000000000000L + random.Next(1000000000)).ToString(); // JMBG (13 digits)
-            properties["ecm:mbrJmbg"] = jmbg;
-            properties["ecm:jmbg"] = jmbg;
-        }
-
-        // Rezidentnost (Residency)
-        var residencies = new[] { "Resident", "Non-resident" };
-        properties["ecm:residency"] = residencies[random.Next(residencies.Length)];
-        properties["ecm:bnkResidence"] = properties["ecm:residency"];
-
-        // Izvor (Source) - Test Cases 6-7
-        string source;
-        if (dossierType == "700") // Deposit dossier
-        {
-            source = "DUT"; // Test Case 7
-        }
-        else
-        {
-            source = "Heimdall"; // Test Case 6
-        }
-        properties["ecm:source"] = source;
-        properties["ecm:bnkSource"] = source;
-
-        // Segment
+        // 4. ecm:bnkClientType (segment from ClientAPI)
         var segments = new[] { "Retail", "Corporate", "SME", "Premium", "Standard" };
-        properties["ecm:segment"] = segments[random.Next(segments.Length)];
+        properties["ecm:bnkClientType"] = segments[random.Next(segments.Length)];
 
-        // Podtip klijenta (Client Subtype)
+        // 5. ecm:clientSubtype (clientSubType from ClientAPI)
         if (clientType == "LE")
         {
             var subtypes = new[] { "SME", "Corporate", "Public Sector", "Non-Profit" };
@@ -819,45 +776,76 @@ public static class Program
             properties["ecm:clientSubtype"] = subtypes[random.Next(subtypes.Length)];
         }
 
-        // Status - Test Case 11: Očekivanje je da su sva dokumenta aktivna
-        properties["ecm:status"] = "ACTIVE";
+        // 6. ecm:bnkOfficeId (barCLEXOpu from ClientAPI)
+        properties["ecm:bnkOfficeId"] = $"OPU-{random.Next(100, 999)}";
 
-        // Kreator (Creator)
-        var creators = new[] { "Admin User", "Migration System", "System Bot" };
-        properties["ecm:creator"] = creators[random.Next(creators.Length)];
-        properties["ecm:kreiraoId"] = random.Next(1000, 9999).ToString();
-
-        // OJ Kreiran ID (Organizational unit where created)
-        properties["ecm:ojKreiranId"] = $"OJ-{random.Next(100, 999)}";
-
-        // Barclex
-        properties["ecm:barclex"] = $"BX{random.Next(10000, 99999)}";
-
-        // Saradnik (Collaborator)
-        var collaborators = new[] { "Partner Bank A", "Branch 001", "External Consultant", "" };
-        properties["ecm:collaborator"] = collaborators[random.Next(collaborators.Length)];
-
-        // Staff
+        // 7. ecm:staff / ecm:docStaff (staff from ClientAPI)
         var staffIndicators = new[] { "Y", "N", "" };
-        properties["ecm:staff"] = staffIndicators[random.Next(staffIndicators.Length)];
-        properties["ecm:docStaff"] = properties["ecm:staff"];
+        var staffValue = staffIndicators[random.Next(staffIndicators.Length)];
+        properties["ecm:staff"] = staffValue;
+        properties["ecm:docStaff"] = staffValue;
 
-        // Partija (Batch)
-        var year = DateTime.UtcNow.Year;
-        var month = DateTime.UtcNow.Month;
-        properties["ecm:batch"] = $"BATCH-{year}-{month:D2}-{random.Next(1, 10):D3}";
+        // 8. ecm:bnkTypeOfProduct
+        properties["ecm:bnkTypeOfProduct"] = clientType == "LE" ? "00010" : "00008";
 
-        // OPU korisnika (User OPU)
-        properties["ecm:opuUser"] = $"OPU-{random.Next(100, 999)}";
+        // 9. ecm:bnkAccountNumber (keeping for compatibility)
+        properties["ecm:bnkAccountNumber"] = $"{coreId}{random.Next(100, 999)}";
 
-        // OPU/ID realizacije (Realization OPU/ID)
+        // 10. ecm:barclex (barCLEXGroupCode + barCLEXGroupName from ClientAPI)
+        var barclexGroupCode = $"BXG{random.Next(100, 999)}";
+        var barclexGroupName = $"Group-{random.Next(1, 20)}";
+        properties["ecm:barclex"] = $"{barclexGroupCode} - {barclexGroupName}";
+
+        // 11. ecm:collaborator (barCLEXCode + barCLEXName from ClientAPI - mapped as contributor)
+        var barclexCode = $"BXC{random.Next(1000, 9999)}";
+        var barclexName = $"Collaborator-{random.Next(1, 50)}";
+        properties["ecm:collaborator"] = $"{barclexCode} - {barclexName}";
+
+        // 12. ecm:bnkSourceId / ecm:source
+        var source = "Heimdall";
+        properties["ecm:bnkSourceId"] = source;
+        properties["ecm:source"] = source;
+
+        // 13. ecm:opuRealization (bnkRealizationOPUID)
         properties["ecm:opuRealization"] = $"OPU-{random.Next(100, 999)}/ID-{random.Next(1000, 9999)}";
 
-        // Datum kreiranja (Creation Date)
+        // 14. ecm:contractNumber / ecm:bnkNumberOfContract
+        var contractNumber = $"{coreId}_{DateTime.UtcNow:yyyyMMddHHmmss}";
+        properties["ecm:contractNumber"] = contractNumber;
+        properties["ecm:bnkNumberOfContract"] = contractNumber;
+
+        // 15. ecm:residency / ecm:bnkResidence
+        var residencies = new[] { "Resident", "Non-resident" };
+        var residency = residencies[random.Next(residencies.Length)];
+        properties["ecm:residency"] = residency;
+        properties["ecm:bnkResidence"] = residency;
+
+        // 16. ecm:bnkSource
+        properties["ecm:bnkSource"] = source;
+
+        // 17. ecm:status / ecm:bnkStatus
+        properties["ecm:status"] = "ACTIVE";
+        properties["ecm:bnkStatus"] = "ACTIVE";
+
+        // 18. ecm:bnkDossierType
+        string dossierType = clientType == "PI" ? "Dosije klijenta FL" : "Dosije klijenta PL";
+        properties["ecm:bnkDossierType"] = dossierType;
+
+        // Additional properties for compatibility
+        properties["ecm:clientType"] = clientType;
+        properties["ecm:segment"] = properties["ecm:bnkClientType"]; // Same as bnkClientType
+        properties["ecm:productType"] = properties["ecm:bnkTypeOfProduct"];
+
+        // Unique folder identifier
+        string uniqueFolderId = clientType == "PI" ? $"PI-{coreId}" : $"LE-{coreId}";
+        properties["ecm:uniqueFolderId"] = uniqueFolderId;
+        properties["ecm:folderId"] = uniqueFolderId;
+
+        // Creation date
         var creationDate = DateTime.UtcNow.AddDays(-random.Next(30, 730));
         properties["ecm:datumKreiranja"] = creationDate.ToString("o");
 
-        // Aktivan (Active)
+        // Active flag
         properties["ecm:active"] = true;
 
         return properties;

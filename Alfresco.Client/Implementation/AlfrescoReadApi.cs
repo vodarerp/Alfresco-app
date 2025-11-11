@@ -111,5 +111,79 @@ namespace Alfresco.Client.Implementation
             var result = JsonConvert.DeserializeObject<NodeResponse>(body);
             return result ?? throw new AlfrescoException($"Failed to deserialize response for node '{nodeId}'.", 500, body);
         }
+
+        public async Task<bool> FolderExistsAsync(string parentFolderId, string folderName, CancellationToken ct = default)
+        {
+            try
+            {
+                // Get children of the parent folder
+                using var getResponse = await _client.GetAsync(
+                    $"/alfresco/api/-default-/public/alfresco/versions/1/nodes/{parentFolderId}/children?where=(isFolder=true)",
+                    ct).ConfigureAwait(false);
+
+                if (!getResponse.IsSuccessStatusCode)
+                {
+                    return false;
+                }
+
+                var body = await getResponse.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
+                var response = JsonConvert.DeserializeObject<NodeChildrenResponse>(body);
+
+                if (response?.List?.Entries == null)
+                {
+                    return false;
+                }
+
+                // Check if any child folder has the matching name
+                return response.List.Entries.Any(entry =>
+                    entry.Entry?.IsFolder == true &&
+                    string.Equals(entry.Entry.Name, folderName, StringComparison.OrdinalIgnoreCase));
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        public async Task<NodeResponse?> GetFolderByNameAsync(string parentFolderId, string folderName, CancellationToken ct = default)
+        {
+            try
+            {
+                // Get children of the parent folder with properties included
+                using var getResponse = await _client.GetAsync(
+                    $"/alfresco/api/-default-/public/alfresco/versions/1/nodes/{parentFolderId}/children?where=(isFolder=true)&include=properties",
+                    ct).ConfigureAwait(false);
+
+                if (!getResponse.IsSuccessStatusCode)
+                {
+                    return null;
+                }
+
+                var body = await getResponse.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
+                var response = JsonConvert.DeserializeObject<NodeChildrenResponse>(body);
+
+                if (response?.List?.Entries == null)
+                {
+                    return null;
+                }
+
+                // Find the folder with matching name
+                var folderEntry = response.List.Entries.FirstOrDefault(entry =>
+                    entry.Entry?.IsFolder == true &&
+                    string.Equals(entry.Entry.Name, folderName, StringComparison.OrdinalIgnoreCase));
+
+                if (folderEntry?.Entry == null)
+                {
+                    return null;
+                }
+
+                // Return as NodeResponse
+                return new NodeResponse { Entry = folderEntry.Entry };
+            }
+            catch
+            {
+                return null;
+            }
+        }
     }
 }

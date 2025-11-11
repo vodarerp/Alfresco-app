@@ -74,7 +74,12 @@ namespace Migration.Infrastructure.Implementation
                     OpuUser = null,
                     OpuRealization = null,
                     Barclex = null,
-                    Collaborator = null
+                    Collaborator = null,
+                    BarCLEXName = mockClientData.BarCLEXName,
+                    BarCLEXOpu = mockClientData.BarCLEXOpu,
+                    BarCLEXGroupName = mockClientData.BarCLEXGroupName,
+                    BarCLEXGroupCode = mockClientData.BarCLEXGroupCode,
+                    BarCLEXCode = mockClientData.BarCLEXCode
                 };
 
                 _logger.LogInformation(
@@ -252,7 +257,12 @@ namespace Migration.Infrastructure.Implementation
                 OpuUser = null,
                 OpuRealization = null,
                 Barclex = null,
-                Collaborator = null
+                Collaborator = null,
+                BarCLEXName = null,
+                BarCLEXOpu = null,
+                BarCLEXGroupName = null,
+                BarCLEXGroupCode = null,
+                BarCLEXCode = null
             };
         }
 
@@ -348,6 +358,11 @@ namespace Migration.Infrastructure.Implementation
             public bool IsActive { get; set; }
             public decimal CreditLimit { get; set; }
             public string PreferredLanguage { get; set; } = "sr-RS";
+            public string? BarCLEXName { get; set; }
+            public string? BarCLEXOpu { get; set; }
+            public string? BarCLEXGroupName { get; set; }
+            public string? BarCLEXGroupCode { get; set; }
+            public string? BarCLEXCode { get; set; }
         }
 
         #endregion

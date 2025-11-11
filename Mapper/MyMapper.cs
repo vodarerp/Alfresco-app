@@ -36,8 +36,93 @@ namespace Mapper
                 //InsertedAtAlfresco = inEntryi.CreatedAt
             };
 
-            // Map ClientProperties if available
-            if (inEntryi.ClientProperties != null)
+            // Helper to safely get property value from Alfresco Properties dictionary
+            string? GetStringProperty(string key)
+            {
+                if (inEntryi.Properties != null && inEntryi.Properties.TryGetValue(key, out var value))
+                {
+                    return value?.ToString();
+                }
+                return null;
+            }
+
+            // Map properties directly from Alfresco Properties dictionary
+            if (inEntryi.Properties != null && inEntryi.Properties.Count > 0)
+            {
+                // 1. CoreId
+                folderStaging.CoreId = GetStringProperty("ecm:coreId");
+
+                // 2. MBR/JMBG (bnkJmbg)
+                folderStaging.MbrJmbg = GetStringProperty("ecm:mbrJmbg") ?? GetStringProperty("ecm:jmbg");
+
+                // 3. Client Name (bnkClientName)
+                folderStaging.ClientName = GetStringProperty("ecm:clientName");
+
+                // 4. Client Type (mapped from bnkClientType which is "segment" from ClientAPI)
+                folderStaging.ClientType = GetStringProperty("ecm:clientType");
+
+                // 5. Client Subtype (bnkClientSubtype)
+                folderStaging.ClientSubtype = GetStringProperty("ecm:clientSubtype");
+
+                // 6. Residency (bnkResidence)
+                folderStaging.Residency = GetStringProperty("ecm:residency") ?? GetStringProperty("ecm:bnkResidence");
+
+                // 7. Segment (bnkClientType in properties maps to segment)
+                folderStaging.Segment = GetStringProperty("ecm:bnkClientType") ?? GetStringProperty("ecm:segment");
+
+                // 8. Staff (bnkStaff)
+                folderStaging.Staff = GetStringProperty("ecm:staff") ?? GetStringProperty("ecm:docStaff");
+
+                // 9. OPU User
+                folderStaging.OpuUser = GetStringProperty("ecm:opuUser");
+
+                // 10. OPU Realization (bnkRealizationOPUID)
+                folderStaging.OpuRealization = GetStringProperty("ecm:opuRealization");
+
+                // 11. Barclex (bnkBarclex - barCLEXGroupCode + barCLEXGroupName)
+                folderStaging.Barclex = GetStringProperty("ecm:barclex");
+
+                // 12. Collaborator (bnkContributor - barCLEXCode + barCLEXName)
+                folderStaging.Collaborator = GetStringProperty("ecm:collaborator");
+
+                // NEW: BarCLEX properties
+                folderStaging.BarCLEXName = GetStringProperty("ecm:barCLEXName");
+                folderStaging.BarCLEXOpu = GetStringProperty("ecm:barCLEXOpu") ?? GetStringProperty("ecm:bnkOfficeId");
+                folderStaging.BarCLEXGroupName = GetStringProperty("ecm:barCLEXGroupName");
+                folderStaging.BarCLEXGroupCode = GetStringProperty("ecm:barCLEXGroupCode");
+                folderStaging.BarCLEXCode = GetStringProperty("ecm:barCLEXCode");
+
+                // Additional properties
+                folderStaging.ProductType = GetStringProperty("ecm:bnkTypeOfProduct") ?? GetStringProperty("ecm:productType");
+                folderStaging.ContractNumber = GetStringProperty("ecm:contractNumber") ?? GetStringProperty("ecm:bnkNumberOfContract");
+                folderStaging.Batch = GetStringProperty("ecm:batch");
+                folderStaging.Source = GetStringProperty("ecm:source") ?? GetStringProperty("ecm:bnkSource") ?? GetStringProperty("ecm:bnkSourceId");
+                folderStaging.UniqueIdentifier = GetStringProperty("ecm:uniqueFolderId") ?? GetStringProperty("ecm:folderId");
+                folderStaging.TipDosijea = GetStringProperty("ecm:bnkDossierType");
+                folderStaging.Creator = GetStringProperty("ecm:creator") ?? GetStringProperty("ecm:createdByName");
+
+                // NEW: ClientSegment (može biti isti kao Segment ili drugi property)
+                folderStaging.ClientSegment = GetStringProperty("ecm:clientSegment") ?? folderStaging.Segment;
+
+                // NEW: TargetDossierType (destination dossier type for migration)
+                folderStaging.TargetDossierType = GetStringProperty("ecm:targetDossierType");
+
+                // Process Date
+                var processDateStr = GetStringProperty("ecm:depositProcessedDate") ?? GetStringProperty("ecm:datumKreiranja");
+                if (!string.IsNullOrWhiteSpace(processDateStr) && DateTime.TryParse(processDateStr, out var processDate))
+                {
+                    folderStaging.ProcessDate = processDate;
+                }
+
+                // Archived At
+                var archivedAtStr = GetStringProperty("ecm:archiveDate");
+                if (!string.IsNullOrWhiteSpace(archivedAtStr) && DateTime.TryParse(archivedAtStr, out var archivedAt))
+                {
+                    folderStaging.ArchivedAt = archivedAt;
+                }
+            }
+            // Fallback: Map ClientProperties if available (for backward compatibility)
+            else if (inEntryi.ClientProperties != null)
             {
                 folderStaging.CoreId = inEntryi.ClientProperties.CoreId;
                 folderStaging.MbrJmbg = inEntryi.ClientProperties.MbrJmbg;

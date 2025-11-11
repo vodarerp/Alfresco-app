@@ -32,5 +32,10 @@ namespace MockClientAPI.Models
         public bool IsActive { get; set; }
         public decimal CreditLimit { get; set; }
         public string PreferredLanguage { get; set; } = "sr-RS";
+        public string? BarCLEXName { get; set; }
+        public string? BarCLEXOpu { get; set; }
+        public string? BarCLEXGroupName { get; set; }
+        public string? BarCLEXGroupCode { get; set; }
+        public string? BarCLEXCode { get; set; }
     }
 }

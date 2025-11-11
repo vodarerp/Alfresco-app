@@ -67,5 +67,30 @@ namespace Migration.Abstraction.Models
         /// Collaborator/Partner information
         /// </summary>
         public string? Collaborator { get; set; }
+
+        /// <summary>
+        /// BarCLEX Name
+        /// </summary>
+        public string? BarCLEXName { get; set; }
+
+        /// <summary>
+        /// BarCLEX OPU
+        /// </summary>
+        public string? BarCLEXOpu { get; set; }
+
+        /// <summary>
+        /// BarCLEX Group Name
+        /// </summary>
+        public string? BarCLEXGroupName { get; set; }
+
+        /// <summary>
+        /// BarCLEX Group Code
+        /// </summary>
+        public string? BarCLEXGroupCode { get; set; }
+
+        /// <summary>
+        /// BarCLEX Code
+        /// </summary>
+        public string? BarCLEXCode { get; set; }
     }
 }
