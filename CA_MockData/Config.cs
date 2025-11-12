@@ -25,9 +25,10 @@ namespace CA_MockData
         public bool UseNewFolderStructure { get; set; } = false;
 
         /// <summary>
-        /// Client types to create (PI, LE). Used only if UseNewFolderStructure = true
+        /// Client types to create (PI, LE, DE). Used only if UseNewFolderStructure = true
         /// PI = Physical Individual (Fizičko lice)
         /// LE = Legal Entity (Pravno lice)
+        /// DE = Deposit Dossier (Dosije depozita) - created separately with contract number
         /// NOTE: ACC (Account Package) is NOT included - those dossiers are created DURING migration
         /// </summary>
         public string[] ClientTypes { get; set; } = new[] { "PI", "LE" };

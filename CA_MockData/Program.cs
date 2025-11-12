@@ -20,7 +20,7 @@ public static class Program
             BaseUrl = "http://localhost:8080/",
             Username =  "admin",
             Password = "admin",
-            RootParentId = "42ac36ae-e9ee-4fff-ac36-aee9ee1fff10",
+            RootParentId = "6fca48fe-2b6c-4a8f-8a48-fe2b6c3a8f41",
             FolderCount = 10,
             DocsPerFolder = 3,
             DegreeOfParallelism = 8,
@@ -53,9 +53,12 @@ public static class Program
         if (cfg.UseNewFolderStructure)
         {
             Console.WriteLine("Creating dosie folder structure...");
-            foreach (var clientType in cfg.ClientTypes)
+            // Add DE (Deposit) to the list of client types to create folders for
+            var allClientTypes = cfg.ClientTypes.Concat(new[] { "DE" }).ToArray();
+
+            foreach (var clientType in allClientTypes)
             {
-                // Use correct naming: DOSSIERS-PI, DOSSIERS-LE, DOSSIERS-ACC
+                // Use correct naming: DOSSIERS-PI, DOSSIERS-LE, DOSSIERS-DE, DOSSIERS-ACC
                 var dosieFolderName = $"DOSSIERS-{clientType}";
                 try
                 {
@@ -164,6 +167,63 @@ public static class Program
                                 }
 
                                 Interlocked.Increment(ref createdDocument);
+                            }
+
+                            // Create separate Deposit Dossier folders for deposit documents (every 5th folder)
+                            if (cfg.UseNewFolderStructure && i % 5 == 0)
+                            {
+                                // Generate contract number as YYYYMMDD format
+                                var contractDate = DateTime.UtcNow.AddDays(-new Random(coreId).Next(1, 365));
+                                var contractNumber = contractDate.ToString("yyyyMMdd");
+
+                                // Create DE folder: DE-{CoreId}-{ContractNumber}
+                                var depositFolderName = $"DE-{coreId}-{contractNumber}";
+                                var depositParentId = dosieFolders["DE"]; // DOSSIERS-DE folder
+
+                                try
+                                {
+                                    // Generate deposit-specific properties
+                                    var depositProps = GenerateDepositFolderProperties(coreId, contractNumber, clientType);
+
+                                    string depositFolderId;
+                                    try
+                                    {
+                                        depositFolderId = await CreateFolderAsync(http, cfg, depositParentId, depositFolderName, cts.Token, depositProps);
+                                    }
+                                    catch (HttpRequestException ex) when (ex.Message.Contains("400") && depositProps != null)
+                                    {
+                                        Console.WriteLine($"[WARNING] Failed to create deposit folder with properties. Trying without properties...");
+                                        depositFolderId = await CreateFolderAsync(http, cfg, depositParentId, depositFolderName, cts.Token, null);
+                                    }
+
+                                    Console.WriteLine($"[INFO] Created Deposit Dossier: {depositFolderName}");
+
+                                    // Generate deposit documents
+                                    var depositDocs = GenerateDepositDocuments(clientType, coreId, contractNumber, i);
+
+                                    for (var x = 0; x < depositDocs.Count; x++)
+                                    {
+                                        var depositDoc = depositDocs[x];
+                                        using var depositContent = GenerateDoc(i, x + 1000, depositDoc.Name); // Offset to avoid duplicates
+
+                                        try
+                                        {
+                                            await CreateDocumentAsync(http, cfg, depositFolderId, depositDoc.Name, depositContent, cts.Token, depositDoc.Properties);
+                                        }
+                                        catch (HttpRequestException ex) when (ex.Message.Contains("400") && depositDoc.Properties != null)
+                                        {
+                                            Console.WriteLine($"[WARNING] Failed to create deposit document with properties. Trying without properties...");
+                                            depositContent.Position = 0;
+                                            await CreateDocumentAsync(http, cfg, depositFolderId, depositDoc.Name, depositContent, cts.Token, null);
+                                        }
+
+                                        Interlocked.Increment(ref createdDocument);
+                                    }
+                                }
+                                catch (Exception ex)
+                                {
+                                    Console.WriteLine($"[ERROR] Failed to create deposit dossier {depositFolderName}: {ex.Message}");
+                                }
                             }
 
                         }
@@ -659,6 +719,204 @@ public static class Program
         }
 
         return documents;
+    }
+
+    /// <summary>
+    /// Generates deposit documents for Dosije Depozita folders.
+    /// Creates documents based on client type (PI or LE).
+    /// </summary>
+    private static List<TestDocument> GenerateDepositDocuments(string clientType, int coreId, string contractNumber, int folderIndex)
+    {
+        var documents = new List<TestDocument>();
+        var random = new Random(coreId);
+        var usedFileNames = new HashSet<string>();
+
+        // Helper function to create deposit document
+        void AddDepositDocument(string documentName)
+        {
+            var docTypeCode = GetDocumentTypeCode(documentName);
+
+            if (string.IsNullOrEmpty(docTypeCode))
+            {
+                Console.WriteLine($"[WARNING] Deposit document '{documentName}' not found in HeimdallDocumentMapper");
+                return;
+            }
+
+            var baseFileName = documentName.Replace(" ", "_").Replace("/", "_");
+            var fileName = baseFileName + ".pdf";
+
+            if (usedFileNames.Contains(fileName))
+            {
+                int counter = 1;
+                while (usedFileNames.Contains(fileName))
+                {
+                    fileName = $"{baseFileName}_{counter}.pdf";
+                    counter++;
+                }
+            }
+
+            usedFileNames.Add(fileName);
+
+            var mapping = HeimdallDocumentMapper.FindByOriginalName(documentName);
+
+            string opisDokumenta = mapping?.Naziv ?? documentName;
+            string tipDosiea = mapping?.TipDosiea ?? "Dosije depozita";
+
+            // Create deposit-specific properties
+            var props = new Dictionary<string, object>();
+
+            // Standard properties
+            props["cm:title"] = opisDokumenta;
+            props["cm:description"] = $"Deposit document {opisDokumenta} for contract {contractNumber}";
+
+            // CRITICAL: ecm:docDesc - key for migration mapping
+            props["ecm:docDesc"] = opisDokumenta;
+
+            // Core ID
+            props["ecm:coreId"] = coreId.ToString();
+
+            // Document status - all deposit documents are "validiran"
+            props["ecm:status"] = "validiran";
+
+            // Document type
+            props["ecm:docType"] = docTypeCode;
+
+            // Dossier type - Dosije depozita
+            props["ecm:docDossierType"] = "Dosije depozita";
+
+            // Client type
+            props["ecm:docClientType"] = clientType;
+
+            // Source - DUT for deposit documents
+            props["ecm:source"] = "DUT";
+
+            // Contract number - CRITICAL for deposit documents
+            props["ecm:contractNumber"] = contractNumber;
+
+            // Dates
+            var creationDate = DateTime.ParseExact(contractNumber, "yyyyMMdd", null);
+            props["ecm:docCreationDate"] = creationDate.ToString("o");
+
+            documents.Add(new TestDocument
+            {
+                Name = fileName,
+                Properties = props
+            });
+        }
+
+        // Generate deposit documents based on client type
+        if (clientType == "PI")
+        {
+            // Deposit documents for Physical Individuals (FL - Depozitni proizvodi)
+            AddDepositDocument("PiAnuitetniPlan");
+            AddDepositDocument("PiObavezniElementiUgovora");
+        }
+        else if (clientType == "LE")
+        {
+            // Deposit documents for Legal Entities (SB - Depozitni proizvodi)
+            AddDepositDocument("SmeUgovorOroceniDepozitPreduzetnici");
+        }
+
+        return documents;
+    }
+
+    /// <summary>
+    /// Generates properties for Deposit Dossier folders (Dosije depozita).
+    /// Format: DE-{CoreId}-{ContractNumber}
+    /// </summary>
+    private static Dictionary<string, object> GenerateDepositFolderProperties(int coreId, string contractNumber, string clientType)
+    {
+        var properties = new Dictionary<string, object>();
+        var random = new Random(coreId);
+
+        // Standard Content Model properties
+        properties["cm:title"] = $"Deposit Dossier {coreId} - {contractNumber}";
+        properties["cm:description"] = $"Deposit dossier for CoreId {coreId}, Contract {contractNumber}";
+
+        // Unique folder identifier: DE-{CoreId}-{ContractNumber}
+        var uniqueFolderId = $"DE-{coreId}-{contractNumber}";
+        properties["ecm:uniqueFolderId"] = uniqueFolderId;
+        properties["ecm:folderId"] = uniqueFolderId;
+
+        // Dossier type - Dosije depozita
+        properties["ecm:bnkDossierType"] = "Dosije depozita";
+
+        // Core ID
+        properties["ecm:coreId"] = coreId.ToString();
+
+        // Product type (00008 for FL, 00010 for SB)
+        var productType = clientType == "PI" ? "00008" : "00010";
+        properties["ecm:productType"] = productType;
+        properties["ecm:bnkTypeOfProduct"] = productType;
+
+        // Contract number - stored only in bnkNumberOfContract
+        properties["ecm:bnkNumberOfContract"] = contractNumber;
+
+        // Source - DUT for deposit dossiers
+        properties["ecm:source"] = "DUT";
+        properties["ecm:bnkSource"] = "DUT";
+        properties["ecm:bnkSourceId"] = "DUT";
+
+        // Status
+        properties["ecm:status"] = "ACTIVE";
+        properties["ecm:bnkStatus"] = "ACTIVE";
+        properties["ecm:active"] = true;
+
+        // Client type
+        properties["ecm:clientType"] = clientType;
+        properties["ecm:bnkClientType"] = clientType;
+
+        // Client name
+        if (clientType == "PI")
+        {
+            var firstNames = new[] { "Petar", "Marko", "Ana", "Jovana", "Milan" };
+            var lastNames = new[] { "Petrović", "Jovanović", "Nikolić", "Marković" };
+            properties["ecm:clientName"] = $"{firstNames[random.Next(firstNames.Length)]} {lastNames[random.Next(lastNames.Length)]}";
+
+            // JMBG for PI
+            var jmbg = (1000000000000L + random.Next(1000000000)).ToString();
+            properties["ecm:jmbg"] = jmbg;
+            properties["ecm:mbrJmbg"] = jmbg;
+        }
+        else
+        {
+            var companies = new[] { "Privredno Društvo", "DOO Kompanija", "AD Firma" };
+            properties["ecm:clientName"] = $"{companies[random.Next(companies.Length)]} {coreId}";
+
+            // MBR for LE
+            var mbr = (10000000 + random.Next(90000000)).ToString();
+            properties["ecm:mbrJmbg"] = mbr;
+        }
+
+        // Deposit processed date
+        var depositDate = DateTime.ParseExact(contractNumber, "yyyyMMdd", null);
+        properties["ecm:depositProcessedDate"] = depositDate.ToString("o");
+
+        // Creation date
+        properties["ecm:datumKreiranja"] = DateTime.UtcNow.ToString("o");
+
+        // Segment
+        properties["ecm:segment"] = clientType == "PI" ? "Retail" : "Corporate";
+        properties["ecm:bnkClientType"] = properties["ecm:segment"];
+
+        // Office ID
+        properties["ecm:bnkOfficeId"] = $"OPU-{random.Next(100, 999)}";
+
+        // Residence
+        var residency = random.Next(2) == 0 ? "Resident" : "Non-resident";
+        properties["ecm:residency"] = residency;
+        properties["ecm:bnkResidence"] = residency;
+
+        // Creator
+        properties["ecm:creator"] = "DUT Migration System";
+        properties["ecm:kreiraoId"] = random.Next(1000, 9999).ToString();
+
+        // Staff indicator
+        var staffValue = random.Next(2) == 0 ? "Y" : "N";
+        properties["ecm:staff"] = staffValue;
+        properties["ecm:docStaff"] = staffValue;
+
+        return properties;
     }
 
     /// <summary>

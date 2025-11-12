@@ -31,6 +31,7 @@ namespace Migration.Infrastructure.Implementation.Services
         private readonly IDocStagingRepository _docRepo;
         private readonly IDocumentResolver _resolver;
         private readonly IAlfrescoWriteApi _write;
+        private readonly IAlfrescoReadApi _read;
         private readonly IOptions<MigrationOptions> _options;
         private readonly IServiceProvider _sp;
         //private readonly ILogger<MoveService> _fileLogger;
@@ -53,13 +54,14 @@ namespace Migration.Infrastructure.Implementation.Services
         // Semaphore for folder creation synchronization per cache key
         private readonly ConcurrentDictionary<string, SemaphoreSlim> _folderLocks = new();
 
-        public MoveService(IMoveReader moveService, IMoveExecutor moveExecutor, IDocStagingRepository docRepo, IDocumentResolver resolver, IAlfrescoWriteApi write, IOptions<MigrationOptions> options, IServiceProvider sp, ILoggerFactory logger)
+        public MoveService(IMoveReader moveService, IMoveExecutor moveExecutor, IDocStagingRepository docRepo, IDocumentResolver resolver, IAlfrescoWriteApi write, IAlfrescoReadApi read, IOptions<MigrationOptions> options, IServiceProvider sp, ILoggerFactory logger)
         {
             _moveReader = moveService;
             _moveExecutor = moveExecutor;
             _docRepo = docRepo;
             _resolver = resolver;
             _write = write;
+            _read = read;
             _options = options;
             _sp = sp;
             _dbLogger = logger.CreateLogger("DbLogger");
@@ -861,7 +863,22 @@ namespace Migration.Infrastructure.Implementation.Services
                 _fileLogger.LogDebug("Creating dossier folder '{DossierId}' under parent {ParentFolderId}",
                     dossierId, parentFolderId);
 
-                var dossierProperties = BuildDossierProperties(doc);
+                // Read properties from old folder to copy to new folder
+                Dictionary<string, object>? oldFolderProperties = null;
+                try
+                {
+                    var oldFolder = await _read.GetNodeByIdAsync(doc.ParentId, ct).ConfigureAwait(false);
+                    oldFolderProperties = oldFolder?.Entry?.Properties;
+                    _fileLogger.LogDebug("Read {Count} properties from old folder {ParentId}",
+                        oldFolderProperties?.Count ?? 0, doc.ParentId);
+                }
+                catch (Exception ex)
+                {
+                    _fileLogger.LogWarning(ex, "Failed to read properties from old folder {ParentId}, will use minimal properties",
+                        doc.ParentId);
+                }
+
+                var dossierProperties = BuildDossierProperties(doc, oldFolderProperties);
 
                 var dossierFolderId = await _resolver.ResolveAsync(
                     parentFolderId,
@@ -896,23 +913,102 @@ namespace Migration.Infrastructure.Implementation.Services
         /// <summary>
         /// Builds Alfresco properties for dossier folder
         /// </summary>
-        private Dictionary<string, object> BuildDossierProperties(DocStaging doc)
+        private Dictionary<string, object> BuildDossierProperties(DocStaging doc, Dictionary<string, object>? oldFolderProperties)
         {
             var properties = new Dictionary<string, object>();
+
+            // Helper to safely get value from old properties
+            object? GetOldProperty(string key)
+            {
+                if (oldFolderProperties == null)
+                    return null;
+                return oldFolderProperties.TryGetValue(key, out var value) ? value : null;
+            }
+
+            // ========================================
+            // CRITICAL PROPERTIES (from doc or old folder)
+            // ========================================
 
             // ecm:coreId
             if (!string.IsNullOrWhiteSpace(doc.CoreId))
                 properties["ecm:coreId"] = doc.CoreId;
+            else if (GetOldProperty("ecm:coreId") != null)
+                properties["ecm:coreId"] = GetOldProperty("ecm:coreId")!;
 
             // ecm:docClientType (PI, LE, etc.)
             if (!string.IsNullOrWhiteSpace(doc.ClientSegment))
                 properties["ecm:docClientType"] = doc.ClientSegment;
+            else if (GetOldProperty("ecm:docClientType") != null)
+                properties["ecm:docClientType"] = GetOldProperty("ecm:docClientType")!;
 
             // ecm:docDossierType ("Dosije klijenta FL", "Dosije klijenta PL", etc.)
             if (!string.IsNullOrWhiteSpace(doc.TipDosijea))
                 properties["ecm:docDossierType"] = doc.TipDosijea;
+            else if (GetOldProperty("ecm:docDossierType") != null)
+                properties["ecm:docDossierType"] = GetOldProperty("ecm:docDossierType")!;
 
-            _fileLogger.LogTrace("Built dossier properties: {Count} properties", properties.Count);
+            // ========================================
+            // COPY ALL OTHER RELEVANT PROPERTIES FROM OLD FOLDER
+            // ========================================
+
+            if (oldFolderProperties != null)
+            {
+                var propertiesToCopy = new[]
+                {
+                    // Core identification
+                    "ecm:uniqueFolderId", "ecm:folderId",
+
+                    // Client info
+                    "ecm:clientName", "ecm:jmbg", "ecm:mbrJmbg",
+                    "ecm:clientType", "ecm:bnkClientType", "ecm:clientSubtype",
+                    "ecm:segment",
+
+                    // Product and contract info
+                    "ecm:productType", "ecm:bnkTypeOfProduct",
+                    "ecm:contractNumber", "ecm:bnkNumberOfContract",
+                    "ecm:bnkAccountNumber",
+
+                    // Source info
+                    "ecm:source", "ecm:bnkSource", "ecm:bnkSourceId",
+
+                    // Status and flags
+                    "ecm:active", "ecm:status", "ecm:bnkStatus",
+                    "ecm:exported", "ecm:kompletiran",
+
+                    // Staff and collaborator
+                    "ecm:staff", "ecm:docStaff",
+                    "ecm:collaborator", "ecm:barclex",
+
+                    // Office and operational
+                    "ecm:bnkOfficeId", "ecm:opuRealization",
+                    "ecm:ojKreiranId", "ecm:opuUser",
+
+                    // Residence
+                    "ecm:residency", "ecm:bnkResidence",
+
+                    // Dates
+                    "ecm:datumKreiranja", "ecm:depositProcessedDate",
+                    "ecm:archiveDate",
+
+                    // Creator info
+                    "ecm:creator", "ecm:createdByName", "ecm:kreiraoId",
+
+                    // Standard Content Model properties
+                    "cm:title", "cm:description"
+                };
+
+                foreach (var prop in propertiesToCopy)
+                {
+                    var value = GetOldProperty(prop);
+                    if (value != null && !properties.ContainsKey(prop))
+                    {
+                        properties[prop] = value;
+                    }
+                }
+            }
+
+            _fileLogger.LogTrace("Built dossier properties: {Count} properties (from doc: 3, copied from old folder: {Copied})",
+                properties.Count, properties.Count - 3);
 
             return properties;
         }
