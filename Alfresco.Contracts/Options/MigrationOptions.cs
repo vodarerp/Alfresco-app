@@ -56,6 +56,12 @@ namespace Alfresco.Contracts.Options
         public string? NameFilter { get; set; }
 
         /// <summary>
+        /// If true, uses copy instead of move when migrating documents.
+        /// Default: false (use move)
+        /// </summary>
+        public bool UseCopy { get; set; } = false;
+
+        /// <summary>
         /// List of folder types to process (e.g., "PL", "FL", "ACC", "D", "PI").
         /// If null or empty, all folder types will be processed.
         /// Folders are expected to be in subfolders named: DOSSIER-{FolderType}

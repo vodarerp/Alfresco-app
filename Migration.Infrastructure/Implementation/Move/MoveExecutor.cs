@@ -53,5 +53,32 @@ namespace Migration.Infrastructure.Implementation.Move
                 throw;
             }
         }
+
+        public async Task<bool> CopyAsync(string DocumentId, string DestFolderId, CancellationToken ct)
+        {
+            try
+            {
+                _fileLogger.LogDebug("Copying document {DocumentId} to folder {DestFolderId}", DocumentId, DestFolderId);
+
+                var toRet = await _write.CopyDocumentAsync(DocumentId, DestFolderId, null, ct).ConfigureAwait(false);
+
+                if (toRet)
+                {
+                    _fileLogger.LogDebug("Successfully copied document {DocumentId} to {DestFolderId}", DocumentId, DestFolderId);
+                }
+                else
+                {
+                    _fileLogger.LogWarning("Copy operation returned false for document {DocumentId} to {DestFolderId}", DocumentId, DestFolderId);
+                }
+
+                return toRet;
+            }
+            catch (Exception ex)
+            {
+                _fileLogger.LogError("Failed to copy document {DocumentId} to {DestFolderId}: {Error}", DocumentId, DestFolderId, ex.Message);
+                _dbLogger.LogError(ex, "Failed to copy document {DocumentId} to {DestFolderId}", DocumentId, DestFolderId);
+                throw;
+            }
+        }
     }
 }

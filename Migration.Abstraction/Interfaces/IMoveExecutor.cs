@@ -12,6 +12,7 @@ namespace Migration.Abstraction.Interfaces
        // Task<int> ExecuteMoveAsync(int take, CancellationToken ct);
 
         Task<bool> MoveAsync(string DocumentId, string DestFolderId, CancellationToken ct);
+        Task<bool> CopyAsync(string DocumentId, string DestFolderId, CancellationToken ct);
 
     }
 }

@@ -494,20 +494,32 @@ namespace Migration.Infrastructure.Implementation.Services
                     doc.Id, destFolderId);
 
                 // ========================================
-                // STEP 2: Move document to destination folder
+                // STEP 2: Move or Copy document to destination folder
                 // ========================================
-                _fileLogger.LogDebug("Moving document {DocId} (NodeId: {NodeId}) to folder {FolderId}",
-                    doc.Id, doc.NodeId, destFolderId);
+                var useCopy = _options.Value.MoveService.UseCopy;
+                var operationName = useCopy ? "Copying" : "Moving";
 
-                var moved = await _moveExecutor.MoveAsync(doc.NodeId, destFolderId, ct).ConfigureAwait(false);
+                _fileLogger.LogDebug("{Operation} document {DocId} (NodeId: {NodeId}) to folder {FolderId}",
+                    operationName, doc.Id, doc.NodeId, destFolderId);
 
-                if (!moved)
+                bool success;
+                if (useCopy)
                 {
-                    throw new InvalidOperationException(
-                        $"Move operation returned false for document {doc.Id} (NodeId: {doc.NodeId})");
+                    success = await _moveExecutor.CopyAsync(doc.NodeId, destFolderId, ct).ConfigureAwait(false);
+                }
+                else
+                {
+                    success = await _moveExecutor.MoveAsync(doc.NodeId, destFolderId, ct).ConfigureAwait(false);
                 }
 
-                _fileLogger.LogInformation("Document {DocId} successfully moved to {FolderId}", doc.Id, destFolderId);
+                if (!success)
+                {
+                    throw new InvalidOperationException(
+                        $"{(useCopy ? "Copy" : "Move")} operation returned false for document {doc.Id} (NodeId: {doc.NodeId})");
+                }
+
+                _fileLogger.LogInformation("Document {DocId} successfully {Operation} to {FolderId}",
+                    doc.Id, useCopy ? "copied" : "moved", destFolderId);
 
                 // ========================================
                 // STEP 3: Update document properties in NEW Alfresco

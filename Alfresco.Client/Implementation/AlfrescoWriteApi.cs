@@ -224,6 +224,26 @@ namespace Alfresco.Client.Implementation
 
         }
 
+        public async Task<bool> CopyDocumentAsync(string nodeId, string targetFolderId, string? newName, CancellationToken ct = default)
+        {
+            var jsonSerializerSettings = new JsonSerializerSettings
+            {
+                NullValueHandling = NullValueHandling.Ignore,
+                ContractResolver = new Newtonsoft.Json.Serialization.CamelCasePropertyNamesContractResolver()
+            };
+            var body = new
+            {
+                targetParentId = targetFolderId
+            };
+            var json = JsonConvert.SerializeObject(body, jsonSerializerSettings);
+
+            using var content = new StringContent(json, Encoding.UTF8, "application/json");
+            using var res = await _client.PostAsync($"/alfresco/api/-default-/public/alfresco/versions/1/nodes/{nodeId}/copy", content, ct).ConfigureAwait(false);
+
+            return res.IsSuccessStatusCode;
+
+        }
+
         public async Task<bool> UpdateNodePropertiesAsync(string nodeId, Dictionary<string, object> properties, CancellationToken ct = default)
         {
             try
