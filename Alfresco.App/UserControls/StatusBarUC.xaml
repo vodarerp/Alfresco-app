@@ -44,8 +44,8 @@
                 <StackPanel Grid.Column="1" Orientation="Vertical" VerticalAlignment="Center" HorizontalAlignment="Right" Margin="0,0,10,0">
                     <Grid Name="AlfGrid">
                         <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="Auto"/> 
-                            <ColumnDefinition Width="Auto"/> 
+                            <ColumnDefinition Width="Auto"/>
+                            <ColumnDefinition Width="Auto"/>
                         </Grid.ColumnDefinitions>
                         <TextBlock Grid.Column="0" Text="Alfresco Connection: " FontWeight="Bold" VerticalAlignment="Center" MouseLeftButtonDown="TextBlock_MouseLeftButtonDown"/>
                         <TextBlock VerticalAlignment="Center" Grid.Column="1">
@@ -76,6 +76,27 @@
                                     <Setter Property="Foreground" Value="Red"/>
                                     <Style.Triggers>
                                         <DataTrigger Binding="{Binding DbConnected}" Value="True">
+                                            <Setter Property="Text" Value="Connected"/>
+                                            <Setter Property="Foreground" Value="Green"/>
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </TextBlock.Style>
+                        </TextBlock>
+                    </Grid>
+                    <Grid Name="ClientApiConn">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto"/>
+                            <ColumnDefinition Width="Auto"/>
+                        </Grid.ColumnDefinitions>
+                        <TextBlock Grid.Column="0" Text="Client API Connection: " FontWeight="Bold" VerticalAlignment="Center" MouseLeftButtonDown="TextBlock_MouseLeftButtonDown"/>
+                        <TextBlock VerticalAlignment="Center" Grid.Column="1">
+                            <TextBlock.Style>
+                                <Style TargetType="TextBlock">
+                                    <Setter Property="Text" Value="Disconnected"/>
+                                    <Setter Property="Foreground" Value="Red"/>
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding ClientApiConnected}" Value="True">
                                             <Setter Property="Text" Value="Connected"/>
                                             <Setter Property="Foreground" Value="Green"/>
                                         </DataTrigger>

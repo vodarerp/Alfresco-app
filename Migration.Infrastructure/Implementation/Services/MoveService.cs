@@ -968,42 +968,38 @@ namespace Migration.Infrastructure.Implementation.Services
                 var propertiesToCopy = new[]
                 {
                     // Core identification
-                    "ecm:uniqueFolderId", "ecm:folderId",
+                    "ecm:folderId",
 
                     // Client info
-                    "ecm:clientName", "ecm:jmbg", "ecm:mbrJmbg",
-                    "ecm:clientType", "ecm:bnkClientType", "ecm:clientSubtype",
-                    "ecm:segment",
+                    "ecm:clientName", "ecm:jmbg",
+                    "ecm:bnkClientType",
 
                     // Product and contract info
-                    "ecm:productType", "ecm:bnkTypeOfProduct",
-                    "ecm:contractNumber", "ecm:bnkNumberOfContract",
+                    "ecm:bnkTypeOfProduct",
+                    "ecm:bnkNumberOfContract",
                     "ecm:bnkAccountNumber",
 
                     // Source info
-                    "ecm:source", "ecm:bnkSource", "ecm:bnkSourceId",
+                    "ecm:bnkSource", "ecm:bnkSourceId",
 
                     // Status and flags
-                    "ecm:active", "ecm:status", "ecm:bnkStatus",
-                    "ecm:exported", "ecm:kompletiran",
+                    "ecm:active", "ecm:bnkStatus",
 
                     // Staff and collaborator
-                    "ecm:staff", "ecm:docStaff",
-                    "ecm:collaborator", "ecm:barclex",
+                    "ecm:docStaff",
+                    "ecm:barclex",
 
                     // Office and operational
-                    "ecm:bnkOfficeId", "ecm:opuRealization",
-                    "ecm:ojKreiranId", "ecm:opuUser",
+                    "ecm:bnkOfficeId",
 
                     // Residence
-                    "ecm:residency", "ecm:bnkResidence",
+                    "ecm:bnkResidence",
 
                     // Dates
-                    "ecm:datumKreiranja", "ecm:depositProcessedDate",
-                    "ecm:archiveDate",
+                    "ecm:datumKreiranja",
 
                     // Creator info
-                    "ecm:creator", "ecm:createdByName", "ecm:kreiraoId",
+                    "ecm:createdByName", "ecm:kreiraoId",
 
                     // Standard Content Model properties
                     "cm:title", "cm:description"
@@ -1015,6 +1011,25 @@ namespace Migration.Infrastructure.Implementation.Services
                     if (value != null && !properties.ContainsKey(prop))
                     {
                         properties[prop] = value;
+                    }
+                }
+
+                // Properties that need to be renamed (old name -> new name)
+                var propertiesToRename = new Dictionary<string, string>
+                {
+                    { "ecm:collaborator", "ecm:bnkContributor" },
+                    { "ecm:opuRealization", "ecm:bnkRealizationOPUID" },
+                    { "ecm:archiveDate", "ecm:bnkArchiveDate" },
+                    { "ecm:creator", "ecm:bnkCreator" },
+                    { "ecm:clientSubtype", "ecm:bnkClientSubtype" }
+                };
+
+                foreach (var (oldName, newName) in propertiesToRename)
+                {
+                    var value = GetOldProperty(oldName);
+                    if (value != null && !properties.ContainsKey(newName))
+                    {
+                        properties[newName] = value;
                     }
                 }
             }
