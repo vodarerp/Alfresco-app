@@ -30,10 +30,10 @@ BEGIN
 END
 GO
 
-IF EXISTS (SELECT * FROM sys.indexes WHERE name = 'IX_DocumentMappings_NazivDokumenta_migracija' AND object_id = OBJECT_ID('DocumentMappings'))
+IF EXISTS (SELECT * FROM sys.indexes WHERE name = 'IX_DocumentMappings_NazivDokumentaMigracija' AND object_id = OBJECT_ID('DocumentMappings'))
 BEGIN
-    PRINT 'Index IX_DocumentMappings_NazivDokumenta_migracija already exists, dropping...';
-    DROP INDEX IX_DocumentMappings_NazivDokumenta_migracija ON DocumentMappings;
+    PRINT 'Index IX_DocumentMappings_NazivDokumentaMigracija already exists, dropping...';
+    DROP INDEX IX_DocumentMappings_NazivDokumentaMigracija ON DocumentMappings;
 END
 GO
 
@@ -53,8 +53,8 @@ INCLUDE (
     NazivDokumenta,
     TipDosijea,
     TipProizvoda,
-    sifraDokumenta_migracija,
-    NazivDokumenta_migracija,
+    SifraDokumentaMigracija,
+    NazivDokumentaMigracija,
     ExcelFileName,
     ExcelFileSheet
 )
@@ -73,8 +73,8 @@ INCLUDE (
     NazivDokumenta,
     TipDosijea,
     TipProizvoda,
-    sifraDokumenta_migracija,
-    NazivDokumenta_migracija,
+    SifraDokumentaMigracija,
+    NazivDokumentaMigracija,
     ExcelFileName,
     ExcelFileSheet
 )
@@ -93,19 +93,19 @@ INCLUDE (
     sifraDokumenta,
     TipDosijea,
     TipProizvoda,
-    sifraDokumenta_migracija,
-    NazivDokumenta_migracija,
+    SifraDokumentaMigracija,
+    NazivDokumentaMigracija,
     ExcelFileName,
     ExcelFileSheet
 )
 WITH (ONLINE = OFF, FILLFACTOR = 90);
 GO
 
--- 4. Indeks na NazivDokumenta_migracija (migrirani naziv)
+-- 4. Indeks na NazivDokumentaMigracija (migrirani naziv)
 -- Koristi se u FindByMigratedNameAsync()
-PRINT 'Creating index IX_DocumentMappings_NazivDokumenta_migracija...';
-CREATE NONCLUSTERED INDEX IX_DocumentMappings_NazivDokumenta_migracija
-ON DocumentMappings (NazivDokumenta_migracija)
+PRINT 'Creating index IX_DocumentMappings_NazivDokumentaMigracija...';
+CREATE NONCLUSTERED INDEX IX_DocumentMappings_NazivDokumentaMigracija
+ON DocumentMappings (NazivDokumentaMigracija)
 INCLUDE (
     ID,
     NAZIV,
@@ -114,7 +114,7 @@ INCLUDE (
     NazivDokumenta,
     TipDosijea,
     TipProizvoda,
-    sifraDokumenta_migracija,
+    SifraDokumentaMigracija,
     ExcelFileName,
     ExcelFileSheet
 )

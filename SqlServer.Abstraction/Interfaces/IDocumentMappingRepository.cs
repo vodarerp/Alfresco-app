@@ -28,7 +28,7 @@ namespace SqlServer.Abstraction.Interfaces
         Task<DocumentMapping?> FindBySerbianNameAsync(string serbianName, CancellationToken ct = default);
 
         /// <summary>
-        /// Pronalazi mapping po migriranom nazivu dokumenta (NazivDokumenta_migracija polje)
+        /// Pronalazi mapping po migriranom nazivu dokumenta (NazivDokumentaMigracija polje)
         /// </summary>
         Task<DocumentMapping?> FindByMigratedNameAsync(string migratedName, CancellationToken ct = default);
 

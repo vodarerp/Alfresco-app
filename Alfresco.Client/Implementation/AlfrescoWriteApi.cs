@@ -206,42 +206,120 @@ namespace Alfresco.Client.Implementation
 
         public async Task<bool> MoveDocumentAsync(string nodeId, string targetFolderId, string? newName, CancellationToken ct = default)
         {
-            var jsonSerializerSettings = new JsonSerializerSettings
+            try
             {
-                NullValueHandling = NullValueHandling.Ignore,
-                ContractResolver = new Newtonsoft.Json.Serialization.CamelCasePropertyNamesContractResolver()
-            };
-            var body = new
+                _logger.LogDebug("Moving node {NodeId} to folder {TargetFolderId}", nodeId, targetFolderId);
+
+                var jsonSerializerSettings = new JsonSerializerSettings
+                {
+                    NullValueHandling = NullValueHandling.Ignore,
+                    ContractResolver = new Newtonsoft.Json.Serialization.CamelCasePropertyNamesContractResolver()
+                };
+                var body = new
+                {
+                    targetParentId = targetFolderId
+                };
+                var json = JsonConvert.SerializeObject(body, jsonSerializerSettings);
+
+                using var content = new StringContent(json, Encoding.UTF8, "application/json");
+                using var res = await _client.PostAsync($"/alfresco/api/-default-/public/alfresco/versions/1/nodes/{nodeId}/move", content, ct).ConfigureAwait(false);
+
+                if (res.IsSuccessStatusCode)
+                {
+                    _logger.LogDebug("Successfully moved node {NodeId} to folder {TargetFolderId}", nodeId, targetFolderId);
+                    return true;
+                }
+
+                // Handle error response
+                var errorContent = await res.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
+
+                _logger.LogWarning(
+                    "Failed to move node {NodeId} to folder {TargetFolderId}: {StatusCode} - {Error}",
+                    nodeId, targetFolderId, res.StatusCode, errorContent);
+
+                // Try to parse error response for better error details
+                try
+                {
+                    var errorResponse = JsonConvert.DeserializeObject<AlfrescoErrorResponse>(errorContent);
+
+                    if (errorResponse?.Error != null)
+                    {
+                        _logger.LogError(
+                            "Alfresco move error for node {NodeId}: {ErrorKey} - {BriefSummary} (LogId: {LogId})",
+                            nodeId, errorResponse.Error.ErrorKey, errorResponse.Error.BriefSummary, errorResponse.Error.LogId);
+                    }
+                }
+                catch (JsonException)
+                {
+                    _logger.LogWarning("Could not parse error response for move operation on node {NodeId}", nodeId);
+                }
+
+                return false;
+            }
+            catch (Exception ex)
             {
-                targetParentId = targetFolderId
-            };
-            var json = JsonConvert.SerializeObject(body,jsonSerializerSettings);
-
-            using var content = new StringContent(json,Encoding.UTF8, "application/json");
-            using var res = await _client.PostAsync($"/alfresco/api/-default-/public/alfresco/versions/1/nodes/{nodeId}/move", content, ct).ConfigureAwait(false);
-
-            return res.IsSuccessStatusCode;
-
+                _logger.LogError(ex, "Error moving node {NodeId} to folder {TargetFolderId}", nodeId, targetFolderId);
+                throw;
+            }
         }
 
         public async Task<bool> CopyDocumentAsync(string nodeId, string targetFolderId, string? newName, CancellationToken ct = default)
         {
-            var jsonSerializerSettings = new JsonSerializerSettings
+            try
             {
-                NullValueHandling = NullValueHandling.Ignore,
-                ContractResolver = new Newtonsoft.Json.Serialization.CamelCasePropertyNamesContractResolver()
-            };
-            var body = new
+                _logger.LogDebug("Copying node {NodeId} to folder {TargetFolderId}", nodeId, targetFolderId);
+
+                var jsonSerializerSettings = new JsonSerializerSettings
+                {
+                    NullValueHandling = NullValueHandling.Ignore,
+                    ContractResolver = new Newtonsoft.Json.Serialization.CamelCasePropertyNamesContractResolver()
+                };
+                var body = new
+                {
+                    targetParentId = targetFolderId
+                };
+                var json = JsonConvert.SerializeObject(body, jsonSerializerSettings);
+
+                using var content = new StringContent(json, Encoding.UTF8, "application/json");
+                using var res = await _client.PostAsync($"/alfresco/api/-default-/public/alfresco/versions/1/nodes/{nodeId}/copy", content, ct).ConfigureAwait(false);
+
+                if (res.IsSuccessStatusCode)
+                {
+                    _logger.LogDebug("Successfully copied node {NodeId} to folder {TargetFolderId}", nodeId, targetFolderId);
+                    return true;
+                }
+
+                // Handle error response
+                var errorContent = await res.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
+
+                _logger.LogWarning(
+                    "Failed to copy node {NodeId} to folder {TargetFolderId}: {StatusCode} - {Error}",
+                    nodeId, targetFolderId, res.StatusCode, errorContent);
+
+                // Try to parse error response for better error details
+                try
+                {
+                    var errorResponse = JsonConvert.DeserializeObject<AlfrescoErrorResponse>(errorContent);
+
+                    if (errorResponse?.Error != null)
+                    {
+                        _logger.LogError(
+                            "Alfresco copy error for node {NodeId}: {ErrorKey} - {BriefSummary} (LogId: {LogId})",
+                            nodeId, errorResponse.Error.ErrorKey, errorResponse.Error.BriefSummary, errorResponse.Error.LogId);
+                    }
+                }
+                catch (JsonException)
+                {
+                    _logger.LogWarning("Could not parse error response for copy operation on node {NodeId}", nodeId);
+                }
+
+                return false;
+            }
+            catch (Exception ex)
             {
-                targetParentId = targetFolderId
-            };
-            var json = JsonConvert.SerializeObject(body, jsonSerializerSettings);
-
-            using var content = new StringContent(json, Encoding.UTF8, "application/json");
-            using var res = await _client.PostAsync($"/alfresco/api/-default-/public/alfresco/versions/1/nodes/{nodeId}/copy", content, ct).ConfigureAwait(false);
-
-            return res.IsSuccessStatusCode;
-
+                _logger.LogError(ex, "Error copying node {NodeId} to folder {TargetFolderId}", nodeId, targetFolderId);
+                throw;
+            }
         }
 
         public async Task<bool> UpdateNodePropertiesAsync(string nodeId, Dictionary<string, object> properties, CancellationToken ct = default)

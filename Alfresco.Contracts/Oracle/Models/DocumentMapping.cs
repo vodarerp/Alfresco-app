@@ -65,7 +65,7 @@ namespace Alfresco.Contracts.Oracle.Models
         /// Šifra dokumenta posle migracije
         /// Primer: "00849", "00841"
         /// </summary>
-        [Column("sifraDokumenta_migracija")]
+        [Column("SifraDokumentaMigracija")]
         [MaxLength(200)]
         public string? SifraDokumentaMigracija { get; set; }
 
@@ -73,7 +73,7 @@ namespace Alfresco.Contracts.Oracle.Models
         /// Naziv dokumenta posle migracije (može da sadrži sufiks "- migracija")
         /// Primer: "GDPR saglasnost - migracija", "KYC upitnik - migracija"
         /// </summary>
-        [Column("NazivDokumenta_migracija")]
+        [Column("NazivDokumentaMigracija")]
         [MaxLength(500)]
         public string? NazivDokumentaMigracija { get; set; }
 

@@ -468,7 +468,8 @@ namespace Migration.Infrastructure.Implementation.Services
         /// Process:
         /// 1. Create/Get destination folder (with caching)
         /// 2. Move document to destination folder
-        /// 3. Update document properties in new Alfresco
+        /// 3. Lookup DocumentMapping to get migrated document type and name
+        /// 4. Update document properties in new Alfresco
         ///
         /// Per Analiza_migracije_v2.md: All metadata prepared by DocumentDiscoveryService
         /// </summary>
@@ -522,15 +523,120 @@ namespace Migration.Infrastructure.Implementation.Services
                     doc.Id, useCopy ? "copied" : "moved", destFolderId);
 
                 // ========================================
-                // STEP 3: Update document properties in NEW Alfresco
+                // STEP 3: Lookup DocumentMapping to get migrated docType and naziv
                 // ========================================
-                _fileLogger.LogDebug("Updating properties for document {DocId}", doc.Id);
-                var properties = BuildDocumentProperties(doc);
+                _fileLogger.LogDebug("Looking up DocumentMapping for document {DocId} with ecm:docDesc='{DocDesc}'",
+                    doc.Id, doc.DocDescription);
 
-                await _write.UpdateNodePropertiesAsync(doc.NodeId, properties, ct).ConfigureAwait(false);
+                await using var mappingScope = _sp.CreateAsyncScope();
+                var uow = mappingScope.ServiceProvider.GetRequiredService<IUnitOfWork>();
+                var mappingService = mappingScope.ServiceProvider.GetRequiredService<IDocumentMappingService>();
 
-                _fileLogger.LogInformation("Document {DocId} properties updated successfully ({Count} properties)",
-                    doc.Id, properties.Count);
+                string? migratedDocType = null;
+                string? migratedNaziv = null;
+
+                await uow.BeginAsync(ct: ct).ConfigureAwait(false);
+                try
+                {
+                    if (!string.IsNullOrWhiteSpace(doc.DocDescription))
+                    {
+                        // Try to find by original name (Naziv field)
+                        var mapping = await mappingService.FindByOriginalNameAsync(doc.DocDescription, ct).ConfigureAwait(false);
+
+                        // If not found, try by Serbian name (NazivDokumenta field)
+                        if (mapping == null)
+                        {
+                            mapping = await mappingService.FindBySerbianNameAsync(doc.DocDescription, ct).ConfigureAwait(false);
+                        }
+
+                        // If not found, try by migrated name (NazivDokumentaMigracija field)
+                        if (mapping == null)
+                        {
+                            mapping = await mappingService.FindByMigratedNameAsync(doc.DocDescription, ct).ConfigureAwait(false);
+                        }
+
+                        if (mapping != null)
+                        {
+                            migratedDocType = mapping.SifraDokumentaMigracija;
+                            migratedNaziv = mapping.NazivDokumentaMigracija;
+
+                            _fileLogger.LogInformation(
+                                "DocumentMapping found for document {DocId}: DocType='{DocType}', Naziv='{Naziv}'",
+                                doc.Id, migratedDocType ?? "null", migratedNaziv ?? "null");
+                        }
+                        else
+                        {
+                            _fileLogger.LogWarning(
+                                "DocumentMapping NOT found for document {DocId} with ecm:docDesc='{DocDesc}' - will use default values",
+                                doc.Id, doc.DocDescription);
+                        }
+                    }
+
+                    await uow.CommitAsync(ct: ct).ConfigureAwait(false);
+                }
+                catch (Exception ex)
+                {
+                    _fileLogger.LogError(ex,
+                        "Failed to lookup DocumentMapping for document {DocId}, will use default values",
+                        doc.Id);
+                    await uow.RollbackAsync(ct: ct).ConfigureAwait(false);
+                    // Continue with default values - don't fail the entire migration
+                }
+
+                // ========================================
+                // STEP 4: Read existing document properties and update only ecm:docType and ecm:naziv
+                // ========================================
+                _fileLogger.LogDebug("Reading existing properties for document {DocId} (NodeId: {NodeId})", doc.Id, doc.NodeId);
+
+                // Read current document properties from Alfresco
+                var existingNode = await _read.GetNodeByIdAsync(doc.NodeId, ct).ConfigureAwait(false);
+                var existingProperties = existingNode?.Entry?.Properties ?? new Dictionary<string, object>();
+
+                _fileLogger.LogDebug("Document {DocId} has {Count} existing properties", doc.Id, existingProperties.Count);
+
+                // Prepare properties to update - only ecm:docType and ecm:naziv
+                var propertiesToUpdate = new Dictionary<string, object>();
+
+                // Update ecm:docType if we have mapping
+                if (!string.IsNullOrWhiteSpace(migratedDocType))
+                {
+                    propertiesToUpdate["ecm:docType"] = migratedDocType;
+                    _fileLogger.LogDebug("Will update ecm:docType to '{DocType}' for document {DocId}", migratedDocType, doc.Id);
+                }
+                else if (!string.IsNullOrWhiteSpace(doc.DocumentType))
+                {
+                    propertiesToUpdate["ecm:docType"] = doc.DocumentType;
+                    _fileLogger.LogDebug("Will update ecm:docType to '{DocType}' (from DocStaging fallback) for document {DocId}", doc.DocumentType, doc.Id);
+                }
+
+                // Update ecm:naziv if we have mapping
+                if (!string.IsNullOrWhiteSpace(migratedNaziv))
+                {
+                    propertiesToUpdate["ecm:naziv"] = migratedNaziv;
+                    _fileLogger.LogDebug("Will update ecm:naziv to '{Naziv}' for document {DocId}", migratedNaziv, doc.Id);
+                }
+                else if (!string.IsNullOrWhiteSpace(doc.DocDescription))
+                {
+                    propertiesToUpdate["ecm:naziv"] = doc.DocDescription;
+                    _fileLogger.LogDebug("Will update ecm:naziv to '{Naziv}' (from DocStaging fallback) for document {DocId}", doc.DocDescription, doc.Id);
+                }
+
+                // Only update if we have properties to change
+                if (propertiesToUpdate.Count > 0)
+                {
+                    _fileLogger.LogInformation("Updating {Count} properties for document {DocId}: {Properties}",
+                        propertiesToUpdate.Count, doc.Id, string.Join(", ", propertiesToUpdate.Keys));
+
+                    await _write.UpdateNodePropertiesAsync(doc.NodeId, propertiesToUpdate, ct).ConfigureAwait(false);
+
+                    _fileLogger.LogInformation("Document {DocId} properties updated successfully (ecm:docType='{DocType}', ecm:naziv='{Naziv}')",
+                        doc.Id, propertiesToUpdate.ContainsKey("ecm:docType") ? propertiesToUpdate["ecm:docType"] : "unchanged",
+                        propertiesToUpdate.ContainsKey("ecm:naziv") ? propertiesToUpdate["ecm:naziv"] : "unchanged");
+                }
+                else
+                {
+                    _fileLogger.LogWarning("No properties to update for document {DocId} - skipping property update", doc.Id);
+                }
 
                 return true;
             }
@@ -1044,7 +1150,10 @@ namespace Migration.Infrastructure.Implementation.Services
         /// Builds Alfresco properties for migrated document
         /// Per Analiza_migracije_v2.md and application property mapping
         /// </summary>
-        private Dictionary<string, object> BuildDocumentProperties(DocStaging doc)
+        /// <param name="doc">Document staging data</param>
+        /// <param name="migratedDocType">Migrated document type code from DocumentMapping (SifraDokumentaMigracija)</param>
+        /// <param name="migratedNaziv">Migrated document name from DocumentMapping (NazivDokumentaMigracija)</param>
+        private Dictionary<string, object> BuildDocumentProperties(DocStaging doc, string? migratedDocType, string? migratedNaziv)
         {
             var properties = new Dictionary<string, object>
             {
@@ -1056,11 +1165,51 @@ namespace Migration.Infrastructure.Implementation.Services
                 ["ecm:docDesc"] = doc.DocDescription ?? "",
                 ["ecm:coreId"] = doc.CoreId ?? "",
                 ["ecm:status"] = doc.NewAlfrescoStatus ?? "validiran",
-                ["ecm:docType"] = doc.DocumentType ?? "",
                 ["ecm:docDossierType"] = doc.TipDosijea ?? "",
                 ["ecm:docClientType"] = doc.ClientSegment ?? "",
                 ["ecm:source"] = doc.Source ?? "Heimdall"
             };
+
+            // ========================================
+            // CRITICAL: Set ecm:docType and ecm:naziv from DocumentMapping
+            // ========================================
+            // ecm:docType - Use migrated code from DocumentMapping if available, otherwise fallback to doc.DocumentType
+            if (!string.IsNullOrWhiteSpace(migratedDocType))
+            {
+                properties["ecm:docType"] = migratedDocType;
+                _fileLogger.LogDebug("Set ecm:docType='{DocType}' from DocumentMapping for document {DocId}",
+                    migratedDocType, doc.Id);
+            }
+            else if (!string.IsNullOrWhiteSpace(doc.DocumentType))
+            {
+                properties["ecm:docType"] = doc.DocumentType;
+                _fileLogger.LogDebug("Set ecm:docType='{DocType}' from doc.DocumentType (fallback) for document {DocId}",
+                    doc.DocumentType, doc.Id);
+            }
+            else
+            {
+                properties["ecm:docType"] = "";
+                _fileLogger.LogWarning("ecm:docType is empty for document {DocId} - no mapping found and no fallback", doc.Id);
+            }
+
+            // ecm:naziv - Use migrated name from DocumentMapping if available, otherwise fallback to doc.DocDescription
+            if (!string.IsNullOrWhiteSpace(migratedNaziv))
+            {
+                properties["ecm:naziv"] = migratedNaziv;
+                _fileLogger.LogDebug("Set ecm:naziv='{Naziv}' from DocumentMapping for document {DocId}",
+                    migratedNaziv, doc.Id);
+            }
+            else if (!string.IsNullOrWhiteSpace(doc.DocDescription))
+            {
+                properties["ecm:naziv"] = doc.DocDescription;
+                _fileLogger.LogDebug("Set ecm:naziv='{Naziv}' from doc.DocDescription (fallback) for document {DocId}",
+                    doc.DocDescription, doc.Id);
+            }
+            else
+            {
+                properties["ecm:naziv"] = "";
+                _fileLogger.LogWarning("ecm:naziv is empty for document {DocId} - no mapping found and no fallback", doc.Id);
+            }
 
             // ========================================
             // Optional properties (set if available)
@@ -1082,8 +1231,8 @@ namespace Migration.Infrastructure.Implementation.Services
             if (!string.IsNullOrWhiteSpace(doc.ProductType))
                 properties["ecm:tipProizvoda"] = doc.ProductType;
 
-            _fileLogger.LogTrace("Built document properties: {Count} properties for document {DocId}",
-                properties.Count, doc.Id);
+            _fileLogger.LogTrace("Built document properties: {Count} properties for document {DocId} (ecm:docType='{DocType}', ecm:naziv='{Naziv}')",
+                properties.Count, doc.Id, properties["ecm:docType"], properties["ecm:naziv"]);
 
             return properties;
         }

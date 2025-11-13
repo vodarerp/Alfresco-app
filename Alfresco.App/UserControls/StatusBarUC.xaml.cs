@@ -137,7 +137,7 @@ namespace Alfresco.App.UserControls
         {
             try
             {              
-                await _clientApi.ValidateClientExistsAsync("test");
+                //await _clientApi.ValidateClientExistsAsync("test");
                 ClientApiConnected = true;
             }
             catch

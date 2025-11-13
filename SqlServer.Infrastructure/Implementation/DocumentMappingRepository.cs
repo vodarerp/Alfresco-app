@@ -40,8 +40,8 @@ namespace SqlServer.Infrastructure.Implementation
                             NazivDokumenta,
                             TipDosijea,
                             TipProizvoda,
-                            sifraDokumenta_migracija,
-                            NazivDokumenta_migracija,
+                            SifraDokumentaMigracija,
+                            NazivDokumentaMigracija,
                             ExcelFileName,
                             ExcelFileSheet
                         FROM DocumentMappings WITH (NOLOCK)
@@ -79,8 +79,8 @@ namespace SqlServer.Infrastructure.Implementation
                             NazivDokumenta,
                             TipDosijea,
                             TipProizvoda,
-                            sifraDokumenta_migracija,
-                            NazivDokumenta_migracija,
+                            SifraDokumentaMigracija,
+                            NazivDokumentaMigracija,
                             ExcelFileName,
                             ExcelFileSheet
                         FROM DocumentMappings WITH (NOLOCK)
@@ -126,8 +126,8 @@ namespace SqlServer.Infrastructure.Implementation
                             NazivDokumenta,
                             TipDosijea,
                             TipProizvoda,
-                            sifraDokumenta_migracija,
-                            NazivDokumenta_migracija,
+                            SifraDokumentaMigracija,
+                            NazivDokumentaMigracija,
                             ExcelFileName,
                             ExcelFileSheet
                         FROM DocumentMappings WITH (NOLOCK)
@@ -173,8 +173,8 @@ namespace SqlServer.Infrastructure.Implementation
                             NazivDokumenta,
                             TipDosijea,
                             TipProizvoda,
-                            sifraDokumenta_migracija,
-                            NazivDokumenta_migracija,
+                            SifraDokumentaMigracija,
+                            NazivDokumentaMigracija,
                             ExcelFileName,
                             ExcelFileSheet
                         FROM DocumentMappings WITH (NOLOCK)
@@ -197,7 +197,7 @@ namespace SqlServer.Infrastructure.Implementation
         }
 
         /// <summary>
-        /// Pronalazi mapping po migriranom nazivu dokumenta (NazivDokumenta_migracija polje).
+        /// Pronalazi mapping po migriranom nazivu dokumenta (NazivDokumentaMigracija polje).
         /// Koristi SQL indeks za brzu pretragu. Kešira pojedinačne rezultate.
         /// </summary>
         public async Task<DocumentMapping?> FindByMigratedNameAsync(string migratedName, CancellationToken ct = default)
@@ -220,12 +220,12 @@ namespace SqlServer.Infrastructure.Implementation
                             NazivDokumenta,
                             TipDosijea,
                             TipProizvoda,
-                            sifraDokumenta_migracija,
-                            NazivDokumenta_migracija,
+                            SifraDokumentaMigracija,
+                            NazivDokumentaMigracija,
                             ExcelFileName,
                             ExcelFileSheet
                         FROM DocumentMappings WITH (NOLOCK)
-                        WHERE UPPER(NazivDokumenta_migracija) = UPPER(@migratedName)";
+                        WHERE UPPER(NazivDokumentaMigracija) = UPPER(@migratedName)";
 
             var cmd = new CommandDefinition(
                 sql,

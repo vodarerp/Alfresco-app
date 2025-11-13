@@ -63,7 +63,7 @@ namespace Migration.Infrastructure.Implementation
                     return mapping.SifraDokumentaMigracija;
                 }
 
-                // Try to find by migrated name (NazivDokumenta_migracija field) - supports "- migracija" suffix
+                // Try to find by migrated name (NazivDokumentaMigracija field) - supports "- migracija" suffix
                 mapping = await mappingService.FindByMigratedNameAsync(opisDokumenta, ct).ConfigureAwait(false);
 
                 if (mapping != null && !string.IsNullOrWhiteSpace(mapping.SifraDokumentaMigracija))
@@ -75,7 +75,7 @@ namespace Migration.Infrastructure.Implementation
                 await uow.CommitAsync(ct: ct).ConfigureAwait(false);
                 return "UNKNOWN";
             }
-            catch
+            catch(Exception ex)
             {
                 await uow.RollbackAsync(ct: ct).ConfigureAwait(false);
                 throw;
