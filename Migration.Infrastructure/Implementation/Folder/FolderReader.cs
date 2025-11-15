@@ -91,6 +91,12 @@ namespace Migration.Infrastructure.Implementation.Folder
                 query.Append(")");
             }
 
+            List<SortRequest> sortRequests = new List<SortRequest>
+            {
+                new SortRequest { Type = "FIELD", Field = "cm:created", Ascending = true },
+                new SortRequest { Type = "FIELD", Field = "cm:name", Ascending = true }  // Tie-breaker for same timestamp
+            };
+
             var req = new PostSearchRequest()
             {
                 Query = new QueryRequest()
@@ -103,11 +109,7 @@ namespace Migration.Infrastructure.Implementation.Folder
                     MaxItems = inRequest.Take,
                     SkipCount = 0
                 },
-                Sort = new[]
-                {
-                    new SortRequest { Type = "FIELD", Field = "cm:created", Ascending = true },
-                    new SortRequest { Type = "FIELD", Field = "cm:name", Ascending = true }  // Tie-breaker for same timestamp
-                },
+                Sort = sortRequests,
                 Include = new[] { "properties" }
             };
 
@@ -229,15 +231,19 @@ namespace Migration.Infrastructure.Implementation.Folder
             var allFolders = new List<ListEntry>();
             var skipCount = 0;
             const int pageSize = 100;
-            const string dossierPrefix = "DOSSIER-";  // Fixed typo: was "DOSSIERS-"
+            const string dossierPrefix = "DOSSIERS-";  // Fixed typo: was "DOSSIERS-"
 
             // Build AFTS query to find DOSSIER-* folders
             var safeRootId = SanitizeAFTS(rootId);
-            var query = $"PARENT:\"{safeRootId}\" AND TYPE:\"cm:folder\" AND cm:name:\"{dossierPrefix}*\"";
+            var query = $"PARENT:\"{safeRootId}\" AND TYPE:\"cm:folder\" AND =cm:name:{dossierPrefix}*";
 
             _fileLogger.LogDebug("AFTS Query for DOSSIER folders: {Query}", query);
 
             // Pagination loop to handle cases where there are > 100 DOSSIER types
+            List<SortRequest> sortRequests = new List<SortRequest>
+            {
+                new SortRequest { Type = "FIELD", Field = "cm:name", Ascending = true }
+            };
             while (true)
             {
                 var req = new PostSearchRequest()
@@ -252,10 +258,7 @@ namespace Migration.Infrastructure.Implementation.Folder
                         MaxItems = pageSize,
                         SkipCount = skipCount
                     },
-                    Sort = new[]
-                    {
-                        new SortRequest { Type = "FIELD", Field = "cm:name", Ascending = true }
-                    }
+                    Sort = sortRequests
                 };
 
                 var response = await _read.SearchAsync(req, ct).ConfigureAwait(false);
