@@ -499,15 +499,31 @@ namespace Migration.Infrastructure.Implementation.Services
 
                         if (!string.IsNullOrEmpty(checkpoint.CheckpointData))
                         {
-                            var multiCursor = JsonSerializer.Deserialize<MultiFolderDiscoveryCursor>(checkpoint.CheckpointData);
-                            lock (_cursorLock)
+                            try
                             {
-                                _multiFolderCursor = multiCursor;
-                            }
+                                // NOTE: FolderSeekCursor model was updated to include LastObjectName (composite cursor)
+                                // Old checkpoints (with 2-parameter cursor) will fail to deserialize
+                                // In that case, we start fresh from the beginning
+                                var multiCursor = JsonSerializer.Deserialize<MultiFolderDiscoveryCursor>(checkpoint.CheckpointData);
+                                lock (_cursorLock)
+                                {
+                                    _multiFolderCursor = multiCursor;
+                                }
 
-                            _fileLogger.LogInformation(
-                                "Checkpoint loaded: {TotalProcessed} processed, on folder {FolderType} (index {Index})",
-                                _totalInserted, multiCursor?.CurrentFolderType, multiCursor?.CurrentFolderIndex);
+                                _fileLogger.LogInformation(
+                                    "Checkpoint loaded: {TotalProcessed} processed, on folder {FolderType} (index {Index})",
+                                    _totalInserted, multiCursor?.CurrentFolderType, multiCursor?.CurrentFolderIndex);
+                            }
+                            catch (JsonException ex)
+                            {
+                                _fileLogger.LogWarning(ex,
+                                    "Failed to deserialize checkpoint data (likely old format). Starting from beginning. " +
+                                    "TotalProcessed count ({TotalProcessed}) is preserved.",
+                                    _totalInserted);
+
+                                // Start fresh, but keep TotalProcessed count
+                                _multiFolderCursor = null;
+                            }
                         }
                         else
                         {

@@ -41,7 +41,13 @@ namespace Migration.Abstraction.Models
         public bool HasMore => Items != null && Items.Count > 0 && Next is not null;
     }
 
-    public sealed record FolderSeekCursor(string LastObjectId, DateTimeOffset LastObjectCreated);
+    /// <summary>
+    /// Cursor for folder pagination using composite key (CreatedAt + Name)
+    /// </summary>
+    public sealed record FolderSeekCursor(
+        string LastObjectId,
+        DateTimeOffset LastObjectCreated,
+        string LastObjectName);  // Added for composite cursor to avoid skipping folders with same timestamp
 
     /// <summary>
     /// Tracks progress through multiple DOSSIER subfolders during discovery

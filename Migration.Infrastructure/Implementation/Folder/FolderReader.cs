@@ -31,81 +31,138 @@ namespace Migration.Infrastructure.Implementation.Folder
         //public sealed record FolderReaderRequest(string RootId, string NameFilter, int Skip, int Take);
         public async Task<FolderReaderResult> ReadBatchAsync(FolderReaderRequest inRequest, CancellationToken ct)
         {
-            _fileLogger.LogDebug("Reading folders from root {RootId} with filter '{NameFilter}', Take: {Take}",
+            _fileLogger.LogDebug("Reading folders using AFTS from root {RootId} with filter '{NameFilter}', Take: {Take}",
                 inRequest.RootId, inRequest.NameFilter, inRequest.Take);
 
-            var cmsLike = string.IsNullOrWhiteSpace(inRequest.NameFilter) ? "" : inRequest.NameFilter;
-            var sb = new StringBuilder();
+            // Build AFTS query (Alfresco Full Text Search - Lucene syntax)
+            var query = new StringBuilder();
 
-            sb.Append("SELECT * from cmis:folder ")
-              .Append($"WHERE cmis:parentId = '{inRequest.RootId}' ")
-              .Append($"AND cmis:name LIKE '%{cmsLike}%' ");
+            // Parent constraint
+            var safeRootId = SanitizeAFTS(inRequest.RootId);
+            query.Append($"PARENT:\"{safeRootId}\"");
 
-            // Add CoreId filtering if TargetCoreIds is specified
+            // Type constraint
+            query.Append(" AND TYPE:\"cm:folder\"");
+
+            // Name filter (if specified)
+            if (!string.IsNullOrWhiteSpace(inRequest.NameFilter))
+            {
+                var safeName = SanitizeAFTS(inRequest.NameFilter);
+                query.Append($" AND cm:name:\"*{safeName}*\"");
+            }
+
+            // CoreId filtering (if specified)
             if (inRequest.TargetCoreIds != null && inRequest.TargetCoreIds.Count > 0)
             {
-                sb.Append("AND (");
+                query.Append(" AND (");
                 for (int i = 0; i < inRequest.TargetCoreIds.Count; i++)
                 {
                     if (i > 0)
-                        sb.Append(" OR ");
+                        query.Append(" OR ");
 
+                    var safeCoreId = SanitizeAFTS(inRequest.TargetCoreIds[i]);
                     // Match folder names containing the CoreId
                     // Format: {Type}-{CoreId}TTT (e.g., PL-10000003TTT)
-                    sb.Append($"cmis:name LIKE '%-{inRequest.TargetCoreIds[i]}%'");
+                    query.Append($"cm:name:\"*-{safeCoreId}*\"");
                 }
-                sb.Append(") ");
+                query.Append(")");
             }
 
-            if (inRequest.Cursor is not null && !string.IsNullOrEmpty(inRequest.Cursor.LastObjectId))
+            // Cursor filtering - composite key (createdAt + name) to avoid skipping folders
+            if (inRequest.Cursor != null && !string.IsNullOrEmpty(inRequest.Cursor.LastObjectName))
             {
-                var ld = inRequest.Cursor.LastObjectCreated.UtcDateTime.ToString("yyyy-MM-dd'T'HH:mm:ss.fff'Z'");
-                sb.Append($"AND cmis:creationDate > TIMESTAMP '{ld}' ");
+                var cursorDate = inRequest.Cursor.LastObjectCreated.UtcDateTime;
+                var dateStr = cursorDate.ToString("yyyy-MM-dd'T'HH:mm:ss.fff'Z'");
+                var safeCursorName = SanitizeAFTS(inRequest.Cursor.LastObjectName);
+
+                // Query logic:
+                // (created > cursorDate) OR (created = cursorDate AND name > cursorName)
+                query.Append(" AND (");
+
+                // Option 1: created > cursorDate
+                query.Append($"(cm:created:>{dateStr})");
+
+                // Option 2: created = cursorDate AND name > cursorName
+                query.Append(" OR (");
+                query.Append($"cm:created:{dateStr}");
+                query.Append($" AND cm:name:>{safeCursorName}");
+                query.Append(")");
+
+                query.Append(")");
             }
-
-            sb.Append("ORDER BY cmis:creationDate ASC ");
-            //if (inRequest.Cursor is not null && !string.IsNullOrEmpty(inRequest.Cursor.LastObjectId) && inRequest?.Cursor.LastCreatedAt != null)
-            //{
-            //    var ld = inRequest.Cursor.LastCreatedAt.UtcDateTime.ToString("yyyy-MM-dd'T'HH:mm:ss.fff'Z'");
-            //    sb.Append("AND (cmis:creationDate > TIMESTAMP '").Append(ld).Append("' ")
-            //      .Append("OR (cmis:creationDate = TIMESTAMP '").Append(ld).Append("' ")
-            //      .Append($"AND cmis:objectId > '{inRequest.Cursor.LastObjectId}' )) ");
-            //}
-
-            //sb.Append("ORDER BY cmis:creationDate ASC, cmis:objectId ASC");
-
-            //Query = $"SELECT * FROM cmis:folder WHERE cmis:parentId = '{inRequest.RootId}' and cmis:name LIKE '%{cmsLike}%' order by cmis:name" //IN_TREE('<id>') umose parentId = ''
 
             var req = new PostSearchRequest()
             {
                 Query = new QueryRequest()
                 {
-                    Language = "cmis",
-                    Query = sb.ToString()
+                    Language = "afts",  // Changed from "cmis" to "afts"
+                    Query = query.ToString()
                 },
                 Paging = new PagingRequest()
                 {
                     MaxItems = inRequest.Take,
                     SkipCount = 0
                 },
-                Sort = null,
-                Include = new string[] { "properties" }
+                Sort = new[]
+                {
+                    new SortRequest { Type = "FIELD", Field = "cm:created", Ascending = true },
+                    new SortRequest { Type = "FIELD", Field = "cm:name", Ascending = true }  // Tie-breaker for same timestamp
+                },
+                Include = new[] { "properties" }
             };
 
-            var result = (await _read.SearchAsync(req, ct).ConfigureAwait(false)).List?.Entries ?? new List<ListEntry>();
+            _fileLogger.LogDebug("AFTS Query: {Query}", query.ToString());
 
-            _fileLogger.LogDebug("Found {Count} folders in root {RootId}", result.Count, inRequest.RootId);
+            var response = await _read.SearchAsync(req, ct).ConfigureAwait(false);
+            var result = response?.List?.Entries ?? new List<ListEntry>();
+
+            _fileLogger.LogDebug("AFTS query returned {Count} folders in root {RootId}", result.Count, inRequest.RootId);
 
             FolderSeekCursor? next = null;
 
-            if ( result != null && result.Count > 0)
+            if (result.Count > 0)
             {
                 var last = result[^1].Entry;
-                var lastId = $"workspace://SpacesStore/{last.Id}";
-                next = new FolderSeekCursor(last.Id,last.CreatedAt);
+
+                // Build next cursor with composite key
+                next = new FolderSeekCursor(
+                    last.Id,
+                    last.CreatedAt,
+                    last.Name ?? string.Empty);  // Include name for tie-breaking
             }
 
             return new FolderReaderResult(Items: result, next);
+        }
+
+        /// <summary>
+        /// Sanitizes input for AFTS (Lucene) queries to prevent injection attacks
+        /// </summary>
+        private string SanitizeAFTS(string value)
+        {
+            if (string.IsNullOrEmpty(value))
+                return string.Empty;
+
+            // AFTS (Lucene) special characters that need escaping:
+            // + - && || ! ( ) { } [ ] ^ " ~ * ? : \
+            return value
+                .Replace("\\", "\\\\")   // Backslash first
+                .Replace("\"", "\\\"")
+                .Replace("+", "\\+")
+                .Replace("-", "\\-")
+                .Replace("&", "\\&")     // Escape & (part of &&)
+                .Replace("|", "\\|")     // Escape | (part of ||)
+                .Replace("!", "\\!")
+                .Replace("(", "\\(")
+                .Replace(")", "\\)")
+                .Replace("{", "\\{")
+                .Replace("}", "\\}")
+                .Replace("[", "\\[")
+                .Replace("]", "\\]")
+                .Replace("^", "\\^")
+                .Replace("~", "\\~")
+                .Replace("*", "\\*")
+                .Replace("?", "\\?")
+                .Replace(":", "\\:");
         }
 
         public async Task<long> CountTotalFoldersAsync(string rootId, string nameFilter, CancellationToken ct)
@@ -169,40 +226,65 @@ namespace Migration.Infrastructure.Implementation.Folder
             _fileLogger.LogDebug("Finding DOSSIER subfolders in root {RootId}", rootId);
 
             var result = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            var allFolders = new List<ListEntry>();
+            var skipCount = 0;
+            const int pageSize = 100;
+            const string dossierPrefix = "DOSSIER-";  // Fixed typo: was "DOSSIERS-"
 
-            // Build query to find DOSSIER-* folders
-            var sb = new StringBuilder();
-            sb.Append("SELECT * FROM cmis:folder ")
-              .Append($"WHERE cmis:parentId = '{rootId}' ")
-              .Append("AND cmis:name LIKE 'DOSSIERS-%' ");
+            // Build AFTS query to find DOSSIER-* folders
+            var safeRootId = SanitizeAFTS(rootId);
+            var query = $"PARENT:\"{safeRootId}\" AND TYPE:\"cm:folder\" AND cm:name:\"{dossierPrefix}*\"";
 
-            var req = new PostSearchRequest()
+            _fileLogger.LogDebug("AFTS Query for DOSSIER folders: {Query}", query);
+
+            // Pagination loop to handle cases where there are > 100 DOSSIER types
+            while (true)
             {
-                Query = new QueryRequest()
+                var req = new PostSearchRequest()
                 {
-                    Language = "cmis",
-                    Query = sb.ToString()
-                },
-                Paging = new PagingRequest()
-                {
-                    MaxItems = 100, // Should be enough for all DOSSIER types
-                    SkipCount = 0
-                },
-                Sort = null
-            };
+                    Query = new QueryRequest()
+                    {
+                        Language = "afts",  // Changed from "cmis" to "afts"
+                        Query = query
+                    },
+                    Paging = new PagingRequest()
+                    {
+                        MaxItems = pageSize,
+                        SkipCount = skipCount
+                    },
+                    Sort = new[]
+                    {
+                        new SortRequest { Type = "FIELD", Field = "cm:name", Ascending = true }
+                    }
+                };
 
-            var folders = (await _read.SearchAsync(req, ct).ConfigureAwait(false)).List?.Entries ?? new List<ListEntry>();
+                var response = await _read.SearchAsync(req, ct).ConfigureAwait(false);
+                var folders = response?.List?.Entries ?? new List<ListEntry>();
 
-            _fileLogger.LogDebug("Found {Count} DOSSIER folders in root {RootId}", folders.Count, rootId);
+                if (folders.Count == 0)
+                    break;
 
-            foreach (var folder in folders)
+                allFolders.AddRange(folders);
+
+                _fileLogger.LogDebug("Retrieved {Count} DOSSIER folders (page {Page})", folders.Count, (skipCount / pageSize) + 1);
+
+                if (folders.Count < pageSize)
+                    break; // Last page
+
+                skipCount += pageSize;
+            }
+
+            _fileLogger.LogDebug("Found total {Count} DOSSIER folders in root {RootId}", allFolders.Count, rootId);
+
+            // Process all retrieved folders
+            foreach (var folder in allFolders)
             {
                 var folderName = folder.Entry?.Name;
-                if (string.IsNullOrEmpty(folderName) || !folderName.StartsWith("DOSSIERS-", StringComparison.OrdinalIgnoreCase))
+                if (string.IsNullOrEmpty(folderName) || !folderName.StartsWith(dossierPrefix, StringComparison.OrdinalIgnoreCase))
                     continue;
 
                 // Extract type from folder name (e.g., "DOSSIER-PL" -> "PL")
-                var type = folderName.Substring("DOSSIERS-".Length);
+                var type = folderName.Substring(dossierPrefix.Length);
 
                 // If folderTypes is specified, filter by those types
                 if (folderTypes != null && folderTypes.Count > 0)
@@ -214,7 +296,7 @@ namespace Migration.Infrastructure.Implementation.Folder
                 // Add to result dictionary
                 var folderId = $"workspace://SpacesStore/{folder.Entry?.Id}";
                 result[type] = folderId;
-                _fileLogger.LogDebug("Added DOSSIERS-{Type} folder: {FolderId}", type, folderId);
+                _fileLogger.LogDebug("Added DOSSIER-{Type} folder: {FolderId}", type, folderId);
             }
 
             _fileLogger.LogInformation("Found {Count} matching DOSSIER subfolders in root {RootId}", result.Count, rootId);
