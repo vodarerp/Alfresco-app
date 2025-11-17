@@ -24,8 +24,9 @@ namespace Migration.Infrastructure.Implementation.Document
         // Example: "abc-123_DOSSIERS-LE" -> "def-456-ghi-789"
         private readonly ConcurrentDictionary<string, string> _folderCache = new();
 
-        // Semaphore for folder creation synchronization per cache key
-        private readonly ConcurrentDictionary<string, SemaphoreSlim> _folderLocks = new();
+        // Lock striping: Fixed 1024 locks instead of unlimited SemaphoreSlim instances
+        // Prevents memory leak: 100 MB (1M locks) → 200 KB (1024 locks) = 99.8% reduction
+        private readonly LockStriping _lockStriping = new(1024);
 
         public DocumentResolver(
             IDocStagingRepository doc,
@@ -62,9 +63,9 @@ namespace Migration.Infrastructure.Implementation.Document
             _logger.LogDebug("Cache MISS for folder '{FolderName}', acquiring lock...", newFolderName);
 
             // ========================================
-            // Step 2: Acquire lock for this specific cache key
+            // Step 2: Acquire lock using lock striping (fixed 1024 locks, no memory leak)
             // ========================================
-            var folderLock = _folderLocks.GetOrAdd(cacheKey, _ => new SemaphoreSlim(1, 1));
+            var folderLock = _lockStriping.GetLock(cacheKey);
 
             await folderLock.WaitAsync(ct).ConfigureAwait(false);
             try
