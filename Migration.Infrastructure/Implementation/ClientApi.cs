@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Migration.Abstraction.Interfaces;
@@ -21,15 +22,22 @@ namespace Migration.Infrastructure.Implementation
         private readonly HttpClient _httpClient;
         private readonly ILogger<ClientApi> _logger;
         private readonly ClientApiOptions _options;
+        private readonly IMemoryCache _cache;
+
+        // Cache configuration
+        private static readonly TimeSpan CacheDuration = TimeSpan.FromMinutes(5);
+        private const string CacheKeyPrefix = "ClientApi_";
 
         public ClientApi(
             HttpClient httpClient,
             IOptions<ClientApiOptions> options,
-            ILogger<ClientApi> logger)
+            ILogger<ClientApi> logger,
+            IMemoryCache cache)
         {
             _httpClient = httpClient ?? throw new ArgumentNullException(nameof(httpClient));
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
             _options = options?.Value ?? throw new ArgumentNullException(nameof(options));
+            _cache = cache ?? throw new ArgumentNullException(nameof(cache));
         }
 
         public async Task<ClientData> GetClientDataAsync(string coreId, CancellationToken ct = default)
@@ -39,6 +47,16 @@ namespace Migration.Infrastructure.Implementation
                 _logger.LogWarning("GetClientDataAsync called with null or empty CoreId, returning empty ClientData");
                 return CreateEmptyClientData(coreId ?? string.Empty);
             }
+
+            // Check cache first
+            var cacheKey = $"{CacheKeyPrefix}ClientData_{coreId}";
+            if (_cache.TryGetValue(cacheKey, out ClientData? cachedData) && cachedData != null)
+            {
+                _logger.LogDebug("Cache HIT for client data CoreId: {CoreId}", coreId);
+                return cachedData;
+            }
+
+            _logger.LogDebug("Cache MISS for client data CoreId: {CoreId}, fetching from API", coreId);
 
             try
             {
@@ -85,6 +103,10 @@ namespace Migration.Infrastructure.Implementation
                 _logger.LogInformation(
                     "Successfully retrieved client data for CoreId: {CoreId}, ClientName: {ClientName}, ClientType: {ClientType}",
                     coreId, clientData.ClientName, clientData.ClientType);
+
+                // Cache the result
+                _cache.Set(cacheKey, clientData, CacheDuration);
+                _logger.LogDebug("Cached client data for CoreId: {CoreId} with TTL: {Duration}", coreId, CacheDuration);
 
                 return clientData;
             }
@@ -194,6 +216,16 @@ namespace Migration.Infrastructure.Implementation
                 return false;
             }
 
+            // Check cache first
+            var cacheKey = $"{CacheKeyPrefix}ClientExists_{coreId}";
+            if (_cache.TryGetValue(cacheKey, out bool cachedExists))
+            {
+                _logger.LogDebug("Cache HIT for client validation CoreId: {CoreId}, exists: {Exists}", coreId, cachedExists);
+                return cachedExists;
+            }
+
+            _logger.LogDebug("Cache MISS for client validation CoreId: {CoreId}, checking API", coreId);
+
             try
             {
                 _logger.LogDebug("Validating client exists for CoreId: {CoreId}", coreId);
@@ -208,6 +240,10 @@ namespace Migration.Infrastructure.Implementation
                 _logger.LogInformation(
                     "Client validation for CoreId: {CoreId} result: {Exists}",
                     coreId, exists);
+
+                // Cache the result
+                _cache.Set(cacheKey, exists, CacheDuration);
+                _logger.LogDebug("Cached client validation for CoreId: {CoreId} with TTL: {Duration}", coreId, CacheDuration);
 
                 return exists;
             }
