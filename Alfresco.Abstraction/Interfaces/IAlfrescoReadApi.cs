@@ -14,6 +14,17 @@ namespace Alfresco.Abstraction.Interfaces
 
         Task<NodeChildrenResponse> GetNodeChildrenAsync(string nodeId, CancellationToken ct = default);
 
+        /// <summary>
+        /// Gets children of a node with pagination support.
+        /// Prevents OutOfMemory exceptions by limiting number of items loaded at once.
+        /// </summary>
+        /// <param name="nodeId">The node ID</param>
+        /// <param name="skipCount">Number of items to skip (pagination offset)</param>
+        /// <param name="maxItems">Maximum number of items to return per page</param>
+        /// <param name="ct">Cancellation token</param>
+        /// <returns>Node children response with pagination info</returns>
+        Task<NodeChildrenResponse> GetNodeChildrenAsync(string nodeId, int skipCount, int maxItems, CancellationToken ct = default);
+
         Task<NodeChildrenResponse> SearchAsync(PostSearchRequest request, CancellationToken ct = default);
 
         Task<string> GetFolderByRelative(string inNodeId, string inRelativePath, CancellationToken ct = default);

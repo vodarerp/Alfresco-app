@@ -49,7 +49,23 @@ namespace Alfresco.Client.Implementation
             var body = await getResponse.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
             if (!getResponse.IsSuccessStatusCode)
                 throw new AlfrescoException("Neuspešan odgovor pri čitanju root čvora.", (int)getResponse.StatusCode, body); // izbaciti
-            
+
+            var toRet = JsonConvert.DeserializeObject<NodeChildrenResponse>(body);
+            return toRet;
+        }
+
+        public async Task<NodeChildrenResponse> GetNodeChildrenAsync(string nodeId, int skipCount, int maxItems, CancellationToken ct = default)
+        {
+            using var getResponse = await _client.GetAsync(
+                $"/alfresco/api/-default-/public/alfresco/versions/1/nodes/{nodeId}/children?include=properties&skipCount={skipCount}&maxItems={maxItems}",
+                ct).ConfigureAwait(false);
+
+            var body = await getResponse.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
+
+            if (!getResponse.IsSuccessStatusCode)
+                throw new AlfrescoException($"Neuspešan odgovor pri čitanju čvora sa paginacijom. NodeId: {nodeId}, SkipCount: {skipCount}, MaxItems: {maxItems}",
+                    (int)getResponse.StatusCode, body);
+
             var toRet = JsonConvert.DeserializeObject<NodeChildrenResponse>(body);
             return toRet;
         }

@@ -17,7 +17,7 @@ namespace Migration.Infrastructure.Implementation
     /// VERZIJA 3.0: Koristi DocumentMappingService koji čita podatke iz SQL tabele DocumentMappings.
     /// Zamenjuje statički HeimdallDocumentMapper sa database-driven pristupom.
     /// </summary>
-    public class OpisToTipMapperV2
+    public class OpisToTipMapperV2 : IOpisToTipMapper
     {
         private readonly IServiceProvider _serviceProvider;
 

@@ -37,7 +37,7 @@ namespace Migration.Infrastructure.Implementation.Services
         private readonly ILogger _dbLogger;
         private readonly ILogger _fileLogger;
         private readonly ILogger _uiLogger;
-        private readonly OpisToTipMapperV2 _opisToTipMapper;
+        private readonly IOpisToTipMapper _opisToTipMapper;
 
         private long _totalProcessed = 0;
         private long _totalFailed = 0;
@@ -54,7 +54,7 @@ namespace Migration.Infrastructure.Implementation.Services
             IServiceProvider sp,
             IUnitOfWork unitOfWork,
             ILoggerFactory logger,
-            OpisToTipMapperV2 opisToTipMapper)
+            IOpisToTipMapper opisToTipMapper)
         {
             _ingestor = ingestor;
             _reader = reader;
