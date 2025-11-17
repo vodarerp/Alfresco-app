@@ -1,0 +1,2245 @@
+# Plan Refaktorisanja - Glavni Servisi (Sequential + Parallel)
+
+ 
+
+**Verzija:** 1.0
+
+**Datum:** 2025-01-17
+
+**Status:** Draft - Za review
+
+**Prerequisites:** ✅ PLAN_REFAKTORISANJA_ZAVISNOSTI.md (Problem #1-4 implementirani)
+
+ 
+
+---
+
+ 
+
+## 📋 Sadržaj
+
+ 
+
+1. [Pregled i ciljevi](#1-pregled-i-ciljevi)
+
+2. [Trenutna arhitektura](#2-trenutna-arhitektura)
+
+3. [Nova arhitektura: Sequential Workers + Parallel Tasks](#3-nova-arhitektura-sequential-workers--parallel-tasks)
+
+4. [Faza po faza breakdown](#4-faza-po-faza-breakdown)
+
+5. [FolderPreparationService dizajn](#5-folderpreparationservice-dizajn)
+
+6. [Checkpoint management](#6-checkpoint-management)
+
+7. [Service interface definicije](#7-service-interface-definicije)
+
+8. [Implementacioni plan](#8-implementacioni-plan)
+
+9. [Testing strategija](#9-testing-strategija)
+
+10. [Metrike uspešnosti](#10-metrike-uspešnosti)
+
+ 
+
+---
+
+ 
+
+## 1. Pregled i ciljevi
+
+ 
+
+### 1.1 Kontekst
+
+ 
+
+Alfresco Migration aplikacija je **one-time** aplikacija za migraciju:
+
+- **~1.5M dokumenata** iz starog Alfresco sistema
+
+- **~1M foldera** u novu strukturu
+
+- **2-3 DOSSIER foldera** (PI, LE, možda D) kao particije
+
+- **Dinamički ACC-xxx folderi** kreirani na osnovu document properties
+
+ 
+
+**Problem:** Trenutna arhitektura nije optimizovana za ovaj scale.
+
+ 
+
+### 1.2 Glavni servisi
+
+ 
+
+```
+
+┌──────────────────────────────────────────────────────────┐
+
+│           MigrationWorker (NOVI)                         │
+
+│  Sequential orchestrator za sve faze                     │
+
+└──────────────────────────────────────────────────────────┘
+
+                         │
+
+                         ↓
+
+┌──────────────────────────────────────────────────────────┐
+
+│  FAZA 1: FolderDiscoveryService                          │
+
+│  Discovers all folders from Alfresco → FolderStaging DB  │
+
+└──────────────────────────────────────────────────────────┘
+
+                         │
+
+                         ↓
+
+┌──────────────────────────────────────────────────────────┐
+
+│  FAZA 2: DocumentDiscoveryService                        │
+
+│  Discovers all documents → DocStaging DB                 │
+
+│  ✅ DONE: Added pagination support (Problem #2)          │
+
+└──────────────────────────────────────────────────────────┘
+
+                         │
+
+                         ↓
+
+┌──────────────────────────────────────────────────────────┐
+
+│  FAZA 3: FolderPreparationService (NOVI)                 │
+
+│  Creates ALL destination folders in parallel             │
+
+└──────────────────────────────────────────────────────────┘
+
+                         │
+
+                         ↓
+
+┌──────────────────────────────────────────────────────────┐
+
+│  FAZA 4: MoveService                                     │
+
+│  Moves documents to prepared folders                     │
+
+└──────────────────────────────────────────────────────────┘
+
+```
+
+ 
+
+### 1.3 Ciljevi refaktorisanja
+
+ 
+
+#### **Stabilnost (Prioritet #1)**
+
+- ✅ Jedna faza izvršava se u potpunosti pre nego što počne sledeća
+
+- ✅ Checkpoint posle svake faze (resumable)
+
+- ✅ Jasna separation of concerns
+
+- ✅ No race conditions between faze
+
+ 
+
+#### **Performance (Prioritet #2)**
+
+- ✅ Paralelizacija SAMO gde je sigurno (folder creation, document moves)
+
+- ✅ Batch operacije gde god je moguće
+
+- ✅ Optimizovano sa Problem #1-4 (caching, pagination, lock striping)
+
+ 
+
+#### **Maintainability**
+
+- ✅ Čitljiv kod sa clear responsibilities
+
+- ✅ Testabilan (unit + integration)
+
+- ✅ Loggable (progress tracking po fazama)
+
+ 
+
+### 1.4 Design Principles
+
+ 
+
+1. **Sequential Phases** - Faze se izvršavaju jedna po jedna
+
+2. **Parallel Tasks** - Unutar faze, paralelizacija gde je sigurno
+
+3. **Idempotent Operations** - Svaka operacija može da se ponovi bez side effects
+
+4. **Checkpoint-driven** - Svaka faza ima checkpoint za resume
+
+5. **Fail-fast** - Ako faza faila, stop execution (ne nastavljaj dalje)
+
+ 
+
+---
+
+ 
+
+## 2. Trenutna arhitektura
+
+ 
+
+### 2.1 Trenutni problem
+
+ 
+
+**Trenutno stanje:**
+
+```csharp
+
+// Alfresco.App UI poziva servise direktno iz button handler-a
+
+private async void btnMigrateFolder_Click(object sender, RoutedEventArgs e)
+
+{
+
+    await _folderDiscoveryService.DiscoverAllAsync(ct); // FAZA 1
+
+    await _documentDiscoveryService.DiscoverAllAsync(ct); // FAZA 2
+
+    // FAZA 3 ne postoji - folderi se kreiraju on-the-fly u MoveService
+
+    await _moveService.MoveAllAsync(ct); // FAZA 4
+
+}
+
+```
+
+ 
+
+**Problemi:**
+
+1. ❌ **Nema centralizovane orkestacije** - UI direktno poziva servise
+
+2. ❌ **FAZA 3 ne postoji** - Folderi se kreiraju on-the-fly u MoveService (slow!)
+
+3. ❌ **Checkpoint management je distribuiran** - Svaki servis ima svoj checkpoint
+
+4. ❌ **Nema phase-level error handling** - Ako MoveService faila, nema rollback-a
+
+5. ❌ **Konkurentno kreiranje foldera je opasno** - Race conditions u DocumentResolver
+
+ 
+
+### 2.2 Trenutna struktura servisa
+
+ 
+
+| Servis | LOC | Responsibility | Parallelism | Checkpoint |
+
+|--------|-----|----------------|-------------|------------|
+
+| **FolderDiscoveryService** | 783 | Čita foldere sa Alfresca → FolderStaging | Batch processing | ✅ Da |
+
+| **DocumentDiscoveryService** | 1340 | Čita dokumente → DocStaging | ✅ Pagination (Problem #2) | ✅ Da |
+
+| **MoveService** | 1435 | Moves docs + kreira foldere on-the-fly | Sequential (slow) | ✅ Da |
+
+ 
+
+**Missing:** FolderPreparationService za concurrent folder creation
+
+ 
+
+---
+
+ 
+
+## 3. Nova arhitektura: Sequential Workers + Parallel Tasks
+
+ 
+
+### 3.1 High-Level Architecture
+
+ 
+
+```
+
+┌─────────────────────────────────────────────────────────────┐
+
+│                    Alfresco.App UI                          │
+
+│  - Prikazuje progress po fazama                             │
+
+│  - Pokreće MigrationWorker.RunAsync()                       │
+
+└─────────────────────────────────────────────────────────────┘
+
+                            │
+
+                            ↓
+
+┌─────────────────────────────────────────────────────────────┐
+
+│              MigrationWorker (NOVI)                         │
+
+│  - Orchestrator za sve faze                                 │
+
+│  - Sequential execution (jedna faza po jedna)               │
+
+│  - Checkpoint management                                    │
+
+│  - Error handling & retry logic                             │
+
+│  - Progress reporting                                       │
+
+└─────────────────────────────────────────────────────────────┘
+
+                            │
+
+          ┌─────────────────┼─────────────────┐
+
+          │                 │                 │
+
+          ↓                 ↓                 ↓
+
+┌──────────────────┐ ┌──────────────────┐ ┌──────────────────┐
+
+│ FAZA 1           │ │ FAZA 2           │ │ FAZA 3 (NOVI)    │
+
+│ FolderDiscovery  │→│ DocumentDiscovery│→│ FolderPreparation│
+
+│                  │ │                  │ │                  │
+
+│ Sequential       │ │ Pagination loop  │ │ Parallel tasks   │
+
+│ AFTS queries     │ │ 100 docs/page    │ │ 30-50 concurrent │
+
+└──────────────────┘ └──────────────────┘ └──────────────────┘
+
+                                                    │
+
+                                                    ↓
+
+                                          ┌──────────────────┐
+
+                                          │ FAZA 4           │
+
+                                          │ MoveService      │
+
+                                          │                  │
+
+                                          │ Parallel moves   │
+
+                                          │ 30-50 concurrent │
+
+                                          └──────────────────┘
+
+```
+
+ 
+
+### 3.2 Sequential Workers Pattern
+
+ 
+
+**Pattern:** One worker per application instance, executing phases sequentially.
+
+ 
+
+```csharp
+
+public class MigrationWorker : BackgroundService
+
+{
+
+    private readonly IFolderDiscoveryService _folderDiscovery;
+
+    private readonly IDocumentDiscoveryService _documentDiscovery;
+
+    private readonly IFolderPreparationService _folderPreparation; // NOVI
+
+    private readonly IMoveService _moveService;
+
+    private readonly IMigrationCheckpointRepository _checkpoint;
+
+    private readonly ILogger<MigrationWorker> _logger;
+
+ 
+
+    protected override async Task ExecuteAsync(CancellationToken ct)
+
+    {
+
+        try
+
+        {
+
+            _logger.LogInformation("🚀 Migration started");
+
+ 
+
+            // FAZA 1: Discover folders
+
+            if (!await IsPhaseCompletedAsync(MigrationPhase.FolderDiscovery, ct))
+
+            {
+
+                _logger.LogInformation("📂 Starting FAZA 1: FolderDiscovery...");
+
+                await _folderDiscovery.DiscoverAllAsync(ct);
+
+                await MarkPhaseCompletedAsync(MigrationPhase.FolderDiscovery, ct);
+
+                _logger.LogInformation("✅ FAZA 1 completed");
+
+            }
+
+ 
+
+            // FAZA 2: Discover documents
+
+            if (!await IsPhaseCompletedAsync(MigrationPhase.DocumentDiscovery, ct))
+
+            {
+
+                _logger.LogInformation("📄 Starting FAZA 2: DocumentDiscovery...");
+
+                await _documentDiscovery.DiscoverAllAsync(ct);
+
+                await MarkPhaseCompletedAsync(MigrationPhase.DocumentDiscovery, ct);
+
+                _logger.LogInformation("✅ FAZA 2 completed");
+
+            }
+
+ 
+
+            // FAZA 3: Prepare folders (NOVA FAZA)
+
+            if (!await IsPhaseCompletedAsync(MigrationPhase.FolderPreparation, ct))
+
+            {
+
+                _logger.LogInformation("🏗️  Starting FAZA 3: FolderPreparation...");
+
+                await _folderPreparation.PrepareAllFoldersAsync(ct);
+
+                await MarkPhaseCompletedAsync(MigrationPhase.FolderPreparation, ct);
+
+                _logger.LogInformation("✅ FAZA 3 completed");
+
+            }
+
+ 
+
+            // FAZA 4: Move documents
+
+            if (!await IsPhaseCompletedAsync(MigrationPhase.Move, ct))
+
+            {
+
+                _logger.LogInformation("🚚 Starting FAZA 4: Move...");
+
+                await _moveService.MoveAllAsync(ct);
+
+                await MarkPhaseCompletedAsync(MigrationPhase.Move, ct);
+
+                _logger.LogInformation("✅ FAZA 4 completed");
+
+            }
+
+ 
+
+            _logger.LogInformation("🎉 Migration completed successfully!");
+
+        }
+
+        catch (Exception ex)
+
+        {
+
+            _logger.LogError(ex, "❌ Migration failed");
+
+            throw;
+
+        }
+
+    }
+
+}
+
+```
+
+ 
+
+### 3.3 Parallel Tasks Pattern
+
+ 
+
+**Pattern:** Unutar faze, koristiti SemaphoreSlim za kontrolisani paralelizam.
+
+ 
+
+```csharp
+
+// FAZA 3: FolderPreparationService - Concurrent folder creation
+
+public async Task PrepareAllFoldersAsync(CancellationToken ct)
+
+{
+
+    const int MAX_PARALLELISM = 50; // 30-50 concurrent tasks
+
+    var semaphore = new SemaphoreSlim(MAX_PARALLELISM, MAX_PARALLELISM);
+
+ 
+
+    var folders = await GetUniqueFoldersFromDocStagingAsync(ct);
+
+ 
+
+    var tasks = folders.Select(async folder =>
+
+    {
+
+        await semaphore.WaitAsync(ct);
+
+        try
+
+        {
+
+            await CreateFolderAsync(folder, ct);
+
+        }
+
+        finally
+
+        {
+
+            semaphore.Release();
+
+        }
+
+    });
+
+ 
+
+    await Task.WhenAll(tasks);
+
+}
+
+```
+
+ 
+
+**Benefit:**
+
+- Kontrolisani paralelizam (ne preopterećujemo Alfresco API)
+
+- Sigurno - samo folder creation, bez shared state-a
+
+- Brzo - 50× brže nego sekvencijalno
+
+ 
+
+---
+
+ 
+
+## 4. Faza po faza breakdown
+
+ 
+
+### 4.1 FAZA 1: FolderDiscoveryService
+
+ 
+
+**Cilj:** Učitaj SVE foldere iz Alfresco-a u FolderStaging tabelu.
+
+ 
+
+**Status:** ✅ Već optimizovano (AFTS queries sa composite cursor)
+
+ 
+
+**Flow:**
+
+```
+
+1. Query Alfresco sa AFTS za sve foldere
+
+2. Batch insert u FolderStaging (bulk operations)
+
+3. Checkpoint posle svakog batch-a (resumable)
+
+```
+
+ 
+
+**Parallelism:** ❌ Ne - sequential je OK jer je brzo (AFTS queries)
+
+ 
+
+**Optimizacije:**
+
+- ✅ AFTS queries umesto CMIS (2-3× brže)
+
+- ✅ Composite cursor ((createdAt, name) za paginaciju)
+
+- ✅ Bulk database inserts
+
+ 
+
+**Estimated Time:** ~10 minuta za 1M foldera
+
+ 
+
+---
+
+ 
+
+### 4.2 FAZA 2: DocumentDiscoveryService
+
+ 
+
+**Cilj:** Učitaj SVE dokumente iz Alfresco-a u DocStaging tabelu.
+
+ 
+
+**Status:** ✅ Optimizovano (Problem #1 i #2)
+
+ 
+
+**Flow:**
+
+```
+
+1. Za svaki folder iz FolderStaging (status = PENDING):
+
+   a. ReadBatchWithPaginationAsync (100 docs/page) ← Problem #2
+
+   b. Za svaki document:
+
+      - Map ecm:opisDokumenta → ecm:tipDokumenta (OptimizedOpisToTipMapper) ← Problem #1
+
+      - Determine destination folder (ACC-xxx) based on doc properties
+
+      - Set status = READY
+
+   c. Bulk insert u DocStaging
+
+   d. Mark folder as PROCESSED
+
+2. Checkpoint posle svakog foldera
+
+```
+
+ 
+
+**Parallelism:** ❌ Ne - pagination loop je dovoljan
+
+ 
+
+**Optimizacije:**
+
+- ✅ Problem #1: OpisToTipMapperV2 caching (30× brže)
+
+- ✅ Problem #2: DocumentReader pagination (prevents OOM)
+
+- ✅ Bulk database inserts
+
+ 
+
+**Estimated Time:** ~30 minuta za 1.5M dokumenata (sa cachingom)
+
+ 
+
+---
+
+ 
+
+### 4.3 FAZA 3: FolderPreparationService (NOVA FAZA!)
+
+ 
+
+**Cilj:** Kreiraj SVE destination foldere u Alfresco-u PRIJE nego što počne move.
+
+ 
+
+**Status:** 🆕 Potrebna implementacija
+
+ 
+
+**Why?**
+
+- Trenutno: Folderi se kreiraju on-the-fly u MoveService (slow, serial)
+
+- Novo: Svi folderi se kreiraju paralelno u dedicated fazi (50× brže)
+
+ 
+
+**Flow:**
+
+```
+
+1. Query DocStaging za sve UNIQUE destination foldere:
+
+   SELECT DISTINCT DestinationFolderId, DestinationFolderPath
+
+   FROM DocStaging
+
+   WHERE Status = 'READY'
+
+ 
+
+2. Parallel folder creation (30-50 concurrent tasks):
+
+   - SemaphoreSlim(50, 50) za throttling
+
+   - DocumentResolver.ResolveAsync() za idempotent creation
+
+   - Cache rezultate (folder već postoji? Cache hit)
+
+ 
+
+3. Checkpoint posle svakih 1000 foldera
+
+```
+
+ 
+
+**Parallelism:** ✅ DA - 30-50 concurrent folder creations
+
+ 
+
+**Key Design Decision:**
+
+- Koristimo postojeći `DocumentResolver` sa lock striping (Problem #3)
+
+- Idempotent: Check-if-exists → Create → Cache
+
+- No race conditions: Lock striping osigurava safe concurrent access
+
+ 
+
+**Estimated Time:** ~20 minuta za ~100K unique destination foldera
+
+ 
+
+**Example:**
+
+```csharp
+
+public async Task PrepareAllFoldersAsync(CancellationToken ct)
+
+{
+
+    const int MAX_PARALLELISM = 50;
+
+    const int CHECKPOINT_INTERVAL = 1000;
+
+ 
+
+    var semaphore = new SemaphoreSlim(MAX_PARALLELISM, MAX_PARALLELISM);
+
+ 
+
+    // Get unique destination folders from DocStaging
+
+    var uniqueFolders = await GetUniqueFoldersAsync(ct);
+
+ 
+
+    _logger.LogInformation(
+
+        "Starting parallel folder creation: {TotalFolders} unique folders, {MaxParallelism} concurrent tasks",
+
+        uniqueFolders.Count, MAX_PARALLELISM);
+
+ 
+
+    int processed = 0;
+
+    var tasks = uniqueFolders.Select(async folder =>
+
+    {
+
+        await semaphore.WaitAsync(ct);
+
+        try
+
+        {
+
+            // Use DocumentResolver (with lock striping - Problem #3)
+
+            await _documentResolver.ResolveAsync(
+
+                folder.ParentId,
+
+                folder.FolderName,
+
+                folder.Properties,
+
+                ct);
+
+ 
+
+            Interlocked.Increment(ref processed);
+
+ 
+
+            // Checkpoint every 1000 folders
+
+            if (processed % CHECKPOINT_INTERVAL == 0)
+
+            {
+
+                await SaveCheckpointAsync(processed, ct);
+
+            }
+
+        }
+
+        finally
+
+        {
+
+            semaphore.Release();
+
+        }
+
+    });
+
+ 
+
+    await Task.WhenAll(tasks);
+
+ 
+
+    _logger.LogInformation("✅ Folder preparation completed: {Total} folders created", processed);
+
+}
+
+```
+
+ 
+
+---
+
+ 
+
+### 4.4 FAZA 4: MoveService
+
+ 
+
+**Cilj:** Premesti SVE dokumente u već pripremljene foldere.
+
+ 
+
+**Status:** ⚠️ Potrebna optimizacija (ukloniti on-the-fly folder creation)
+
+ 
+
+**Current Problem:**
+
+- MoveService trenutno kreira foldere on-the-fly (SPORО!)
+
+- Ovo je nepotrebno jer će FAZA 3 kreirati sve foldere unapred
+
+ 
+
+**Flow (posle optimizacije):**
+
+```
+
+1. Query DocStaging za sve dokumente (status = READY)
+
+ 
+
+2. Parallel document moves (30-50 concurrent):
+
+   - SemaphoreSlim(50, 50) za throttling
+
+   - Za svaki dokument:
+
+     a. Lookup destination folder ID (TREBA DA POSTOJI! FAZA 3 ga je kreirala)
+
+     b. Copy document to destination folder (Alfresco API)
+
+     c. Update DocStaging status = MOVED
+
+     d. (Optional) Delete original document
+
+ 
+
+3. Checkpoint posle svakih 1000 dokumenata
+
+```
+
+ 
+
+**Parallelism:** ✅ DA - 30-50 concurrent document moves
+
+ 
+
+**Optimizacije:**
+
+- ✅ DocumentResolver cache hit rate = ~100% (svi folderi već postoje)
+
+- ✅ No lock contention (folderi već kreirani)
+
+- ✅ Bulk database updates za status
+
+ 
+
+**Estimated Time:** ~2-3 sata za 1.5M dokumenata (50 concurrent)
+
+ 
+
+**Key Change:**
+
+```csharp
+
+// ❌ OLD: Kreiranje foldera on-the-fly (SLOW)
+
+var destinationFolderId = await _documentResolver.ResolveAsync(
+
+    parentId, folderName, properties, ct); // Creates folder if not exists
+
+ 
+
+// ✅ NEW: Folder već postoji (FAST - cache hit)
+
+var destinationFolderId = await _documentResolver.ResolveAsync(
+
+    parentId, folderName, null, ct); // Cache hit, folder already exists
+
+```
+
+ 
+
+---
+
+ 
+
+## 5. FolderPreparationService dizajn
+
+ 
+
+### 5.1 Interface
+
+ 
+
+```csharp
+
+namespace Migration.Abstraction.Interfaces
+
+{
+
+    /// <summary>
+
+    /// Service za pripremanje svih destination foldera PRE move operacije.
+
+    /// FAZA 3 u migration pipeline-u.
+
+    /// </summary>
+
+    public interface IFolderPreparationService
+
+    {
+
+        /// <summary>
+
+        /// Kreira sve unique destination foldere iz DocStaging tabele.
+
+        /// Koristi parallel processing za brže izvršavanje.
+
+        /// </summary>
+
+        /// <param name="ct">Cancellation token</param>
+
+        /// <returns>Task</returns>
+
+        Task PrepareAllFoldersAsync(CancellationToken ct = default);
+
+ 
+
+        /// <summary>
+
+        /// Vraća broj foldera koji treba da se kreiraju.
+
+        /// </summary>
+
+        Task<int> GetTotalFolderCountAsync(CancellationToken ct = default);
+
+ 
+
+        /// <summary>
+
+        /// Vraća current progress (kreiran / total).
+
+        /// </summary>
+
+        Task<(int Created, int Total)> GetProgressAsync(CancellationToken ct = default);
+
+    }
+
+}
+
+```
+
+ 
+
+### 5.2 Implementation Outline
+
+ 
+
+```csharp
+
+public class FolderPreparationService : IFolderPreparationService
+
+{
+
+    private readonly IDocStagingRepository _docRepo;
+
+    private readonly IDocumentResolver _documentResolver; // Uses lock striping (Problem #3)
+
+    private readonly IMigrationCheckpointRepository _checkpoint;
+
+    private readonly ILogger<FolderPreparationService> _logger;
+
+ 
+
+    private const int MAX_PARALLELISM = 50;
+
+    private const int CHECKPOINT_INTERVAL = 1000;
+
+ 
+
+    public async Task PrepareAllFoldersAsync(CancellationToken ct = default)
+
+    {
+
+        // 1. Get unique destination folders
+
+        var uniqueFolders = await GetUniqueFoldersAsync(ct);
+
+ 
+
+        // 2. Resume from checkpoint if exists
+
+        var checkpoint = await _checkpoint.GetLastCheckpointAsync(
+
+            "FolderPreparation", ct);
+
+        var startIndex = checkpoint?.LastProcessedIndex ?? 0;
+
+ 
+
+        // 3. Parallel folder creation with SemaphoreSlim
+
+        var semaphore = new SemaphoreSlim(MAX_PARALLELISM, MAX_PARALLELISM);
+
+        int processed = startIndex;
+
+ 
+
+        var tasks = uniqueFolders
+
+            .Skip(startIndex)
+
+            .Select(async (folder, index) =>
+
+            {
+
+                await semaphore.WaitAsync(ct);
+
+                try
+
+                {
+
+                    await CreateFolderAsync(folder, ct);
+
+ 
+
+                    var current = Interlocked.Increment(ref processed);
+
+ 
+
+                    if (current % CHECKPOINT_INTERVAL == 0)
+
+                    {
+
+                        await SaveCheckpointAsync(current, ct);
+
+                    }
+
+                }
+
+                finally
+
+                {
+
+                    semaphore.Release();
+
+                }
+
+            });
+
+ 
+
+        await Task.WhenAll(tasks);
+
+    }
+
+ 
+
+    private async Task<List<UniqueFolderInfo>> GetUniqueFoldersAsync(CancellationToken ct)
+
+    {
+
+        // Query DocStaging for unique combinations of:
+
+        // - DestinationRootId (DOSSIER folder)
+
+        // - DestinationFolderPath (ACC-xxx/...)
+
+ 
+
+        // SQL:
+
+        // SELECT DISTINCT
+
+        //   DestinationRootId,
+
+        //   DestinationFolderPath,
+
+        //   DestinationFolderProperties
+
+        // FROM DocStaging
+
+        // WHERE Status = 'READY'
+
+        // ORDER BY DestinationFolderPath
+
+    }
+
+ 
+
+    private async Task CreateFolderAsync(UniqueFolderInfo folder, CancellationToken ct)
+
+    {
+
+        // Parse folder path: "ACC-12345/2024/01"
+
+        var pathParts = folder.DestinationFolderPath.Split('/');
+
+ 
+
+        string currentParentId = folder.DestinationRootId;
+
+ 
+
+        // Create each level in hierarchy
+
+        foreach (var folderName in pathParts)
+
+        {
+
+            // Idempotent: check if exists, create if not, cache result
+
+            currentParentId = await _documentResolver.ResolveAsync(
+
+                currentParentId,
+
+                folderName,
+
+                GetPropertiesForLevel(folderName, folder.Properties),
+
+                ct);
+
+        }
+
+    }
+
+}
+
+```
+
+ 
+
+### 5.3 Database Schema for UniqueFolders
+
+ 
+
+**Opcija 1: Query DocStaging sa DISTINCT (existing)**
+
+```sql
+
+-- Dovoljno brzo sa index-om na (Status, DestinationFolderPath)
+
+SELECT DISTINCT
+
+  DestinationRootId,
+
+  DestinationFolderPath
+
+FROM DocStaging
+
+WHERE Status = 'READY'
+
+ORDER BY DestinationFolderPath
+
+```
+
+ 
+
+**Opcija 2: Nova tabela FolderPreparationQueue (optional)**
+
+```sql
+
+CREATE TABLE FolderPreparationQueue (
+
+    Id BIGINT IDENTITY(1,1) PRIMARY KEY,
+
+    DestinationRootId NVARCHAR(100) NOT NULL,
+
+    DestinationFolderPath NVARCHAR(500) NOT NULL,
+
+    FolderId NVARCHAR(100) NULL, -- Populated after creation
+
+    Status NVARCHAR(20) NOT NULL, -- PENDING, CREATED, FAILED
+
+    CreatedAt DATETIME2 NOT NULL DEFAULT GETUTCDATE(),
+
+ 
+
+    UNIQUE(DestinationRootId, DestinationFolderPath)
+
+)
+
+```
+
+ 
+
+**Preporuka:** Opcija 1 (DISTINCT query) je dovoljna, Opcija 2 je overkill.
+
+ 
+
+---
+
+ 
+
+## 6. Checkpoint management
+
+ 
+
+### 6.1 Current Checkpoint Model
+
+ 
+
+```csharp
+
+public class MigrationCheckpoint
+
+{
+
+    public long Id { get; set; }
+
+    public string ServiceName { get; set; } // "FolderDiscovery", "DocumentDiscovery", etc.
+
+    public string? LastProcessedId { get; set; }
+
+    public int? LastProcessedIndex { get; set; }
+
+    public string Status { get; set; } // "IN_PROGRESS", "COMPLETED"
+
+    public DateTime CreatedAt { get; set; }
+
+    public DateTime? UpdatedAt { get; set; }
+
+}
+
+```
+
+ 
+
+**Problem:** Checkpoint je per-service, ne per-phase!
+
+ 
+
+### 6.2 New Checkpoint Model: Phase-Based
+
+ 
+
+```csharp
+
+public enum MigrationPhase
+
+{
+
+    FolderDiscovery = 1,
+
+    DocumentDiscovery = 2,
+
+    FolderPreparation = 3,
+
+    Move = 4
+
+}
+
+ 
+
+public class PhaseCheckpoint
+
+{
+
+    public long Id { get; set; }
+
+    public MigrationPhase Phase { get; set; }
+
+    public PhaseStatus Status { get; set; } // NOT_STARTED, IN_PROGRESS, COMPLETED, FAILED
+
+    public int? LastProcessedIndex { get; set; } // For resumability
+
+    public string? LastProcessedId { get; set; }
+
+    public DateTime? StartedAt { get; set; }
+
+    public DateTime? CompletedAt { get; set; }
+
+    public string? ErrorMessage { get; set; }
+
+}
+
+ 
+
+public enum PhaseStatus
+
+{
+
+    NOT_STARTED,
+
+    IN_PROGRESS,
+
+    COMPLETED,
+
+    FAILED
+
+}
+
+```
+
+ 
+
+### 6.3 Checkpoint Repository Interface
+
+ 
+
+```csharp
+
+public interface IPhaseCheckpointRepository
+
+{
+
+    Task<PhaseCheckpoint?> GetCheckpointAsync(MigrationPhase phase, CancellationToken ct = default);
+
+ 
+
+    Task SaveCheckpointAsync(PhaseCheckpoint checkpoint, CancellationToken ct = default);
+
+ 
+
+    Task MarkPhaseStartedAsync(MigrationPhase phase, CancellationToken ct = default);
+
+ 
+
+    Task MarkPhaseCompletedAsync(MigrationPhase phase, CancellationToken ct = default);
+
+ 
+
+    Task MarkPhaseFailedAsync(MigrationPhase phase, string errorMessage, CancellationToken ct = default);
+
+ 
+
+    Task<List<PhaseCheckpoint>> GetAllCheckpointsAsync(CancellationToken ct = default);
+
+}
+
+```
+
+ 
+
+### 6.4 Checkpoint Usage in MigrationWorker
+
+ 
+
+```csharp
+
+protected override async Task ExecuteAsync(CancellationToken ct)
+
+{
+
+    // FAZA 1
+
+    var checkpoint = await _checkpointRepo.GetCheckpointAsync(MigrationPhase.FolderDiscovery, ct);
+
+ 
+
+    if (checkpoint?.Status != PhaseStatus.COMPLETED)
+
+    {
+
+        await _checkpointRepo.MarkPhaseStartedAsync(MigrationPhase.FolderDiscovery, ct);
+
+ 
+
+        try
+
+        {
+
+            await _folderDiscovery.DiscoverAllAsync(ct);
+
+            await _checkpointRepo.MarkPhaseCompletedAsync(MigrationPhase.FolderDiscovery, ct);
+
+        }
+
+        catch (Exception ex)
+
+        {
+
+            await _checkpointRepo.MarkPhaseFailedAsync(
+
+                MigrationPhase.FolderDiscovery, ex.Message, ct);
+
+            throw;
+
+        }
+
+    }
+
+ 
+
+    // Repeat for FAZA 2, 3, 4...
+
+}
+
+```
+
+ 
+
+---
+
+ 
+
+## 7. Service interface definicije
+
+ 
+
+### 7.1 IMigrationWorker
+
+ 
+
+```csharp
+
+namespace Migration.Abstraction.Interfaces
+
+{
+
+    public interface IMigrationWorker
+
+    {
+
+        /// <summary>
+
+        /// Runs entire migration pipeline: all 4 phases sequentially.
+
+        /// </summary>
+
+        Task RunAsync(CancellationToken ct = default);
+
+ 
+
+        /// <summary>
+
+        /// Gets current migration status (which phase is running, progress).
+
+        /// </summary>
+
+        Task<MigrationStatus> GetStatusAsync(CancellationToken ct = default);
+
+ 
+
+        /// <summary>
+
+        /// Resets all checkpoints and restarts migration from beginning.
+
+        /// </summary>
+
+        Task ResetAsync(CancellationToken ct = default);
+
+    }
+
+ 
+
+    public class MigrationStatus
+
+    {
+
+        public MigrationPhase CurrentPhase { get; set; }
+
+        public PhaseStatus CurrentPhaseStatus { get; set; }
+
+        public int CurrentPhaseProgress { get; set; } // Percentage (0-100)
+
+        public DateTime? StartedAt { get; set; }
+
+        public TimeSpan? ElapsedTime { get; set; }
+
+        public TimeSpan? EstimatedRemainingTime { get; set; }
+
+    }
+
+}
+
+```
+
+ 
+
+### 7.2 IFolderPreparationService (NOVI)
+
+ 
+
+```csharp
+
+namespace Migration.Abstraction.Interfaces
+
+{
+
+    public interface IFolderPreparationService
+
+    {
+
+        Task PrepareAllFoldersAsync(CancellationToken ct = default);
+
+ 
+
+        Task<int> GetTotalFolderCountAsync(CancellationToken ct = default);
+
+ 
+
+        Task<(int Created, int Total)> GetProgressAsync(CancellationToken ct = default);
+
+    }
+
+}
+
+```
+
+ 
+
+### 7.3 Updated IMoveService
+
+ 
+
+```csharp
+
+namespace Migration.Abstraction.Interfaces
+
+{
+
+    public interface IMoveService
+
+    {
+
+        /// <summary>
+
+        /// Moves all documents to their destination folders.
+
+        /// Assumes folders are already created by FolderPreparationService.
+
+        /// </summary>
+
+        Task MoveAllAsync(CancellationToken ct = default);
+
+ 
+
+        Task<(int Moved, int Total)> GetProgressAsync(CancellationToken ct = default);
+
+    }
+
+}
+
+```
+
+ 
+
+---
+
+ 
+
+## 8. Implementacioni plan
+
+ 
+
+### 8.1 Faza 1: PhaseCheckpoint Infrastructure (1 dan)
+
+ 
+
+**Tasks:**
+
+1. ✅ Kreirati `MigrationPhase` enum
+
+2. ✅ Kreirati `PhaseCheckpoint` model
+
+3. ✅ Kreirati `IPhaseCheckpointRepository` interface
+
+4. ✅ Implementirati `PhaseCheckpointRepository`
+
+5. ✅ SQL migration za `PhaseCheckpoints` tabelu
+
+6. ✅ Unit testovi
+
+ 
+
+**Files:**
+
+- `Migration.Abstraction/Enums/MigrationPhase.cs` (NEW)
+
+- `Alfresco.Contracts/Oracle/Models/PhaseCheckpoint.cs` (NEW)
+
+- `Migration.Abstraction/Interfaces/IPhaseCheckpointRepository.cs` (NEW)
+
+- `SqlServer.Infrastructure/Implementation/PhaseCheckpointRepository.cs` (NEW)
+
+- `SQL/CREATE_PhaseCheckpoints_Table.sql` (NEW)
+
+ 
+
+---
+
+ 
+
+### 8.2 Faza 2: MigrationWorker (2 dana)
+
+ 
+
+**Tasks:**
+
+1. ✅ Kreirati `IMigrationWorker` interface
+
+2. ✅ Implementirati `MigrationWorker` kao `BackgroundService`
+
+3. ✅ Integrisati sa `IPhaseCheckpointRepository`
+
+4. ✅ Dodati progress reporting
+
+5. ✅ Registrovati u DI container
+
+6. ✅ Unit testovi
+
+7. ✅ Integration test (mock servisi)
+
+ 
+
+**Files:**
+
+- `Migration.Abstraction/Interfaces/IMigrationWorker.cs` (NEW)
+
+- `Migration.Infrastructure/Implementation/MigrationWorker.cs` (NEW)
+
+- `Alfresco.App/App.xaml.cs` (UPDATE - DI registration)
+
+ 
+
+---
+
+ 
+
+### 8.3 Faza 3: FolderPreparationService (2 dana)
+
+ 
+
+**Tasks:**
+
+1. ✅ Kreirati `IFolderPreparationService` interface
+
+2. ✅ Implementirati `FolderPreparationService`
+
+3. ✅ Dodati `GetUniqueFoldersAsync()` query
+
+4. ✅ Implementirati parallel folder creation sa SemaphoreSlim
+
+5. ✅ Checkpoint integration
+
+6. ✅ Registrovati u DI
+
+7. ✅ Unit testovi
+
+8. ✅ Integration test sa DocumentResolver
+
+ 
+
+**Files:**
+
+- `Migration.Abstraction/Interfaces/IFolderPreparationService.cs` (NEW)
+
+- `Migration.Infrastructure/Implementation/FolderPreparationService.cs` (NEW)
+
+- `Migration.Abstraction/Models/UniqueFolderInfo.cs` (NEW)
+
+- `Alfresco.App/App.xaml.cs` (UPDATE - DI registration)
+
+ 
+
+**Key Dependencies:**
+
+- `IDocumentResolver` (already optimized - Problem #3 lock striping)
+
+- `IDocStagingRepository` (existing)
+
+ 
+
+---
+
+ 
+
+### 8.4 Faza 4: MoveService Optimization (1 dan)
+
+ 
+
+**Tasks:**
+
+1. ✅ Update `MoveService` to skip folder creation logic
+
+2. ✅ Optimizovati za paralelno move-ovanje (30-50 concurrent)
+
+3. ✅ Integrisati sa `PhaseCheckpoint`
+
+4. ✅ Testing
+
+ 
+
+**Files:**
+
+- `Migration.Infrastructure/Implementation/Services/MoveService.cs` (UPDATE)
+
+ 
+
+**Key Changes:**
+
+```csharp
+
+// ❌ OLD: On-the-fly folder creation (sequential, slow)
+
+var folderId = await _documentResolver.ResolveAsync(
+
+    parentId, folderName, properties, ct); // May create folder
+
+ 
+
+// ✅ NEW: Folder already exists (parallel, fast)
+
+var folderId = await _documentResolver.ResolveAsync(
+
+    parentId, folderName, null, ct); // Cache hit
+
+```
+
+ 
+
+---
+
+ 
+
+### 8.5 Faza 5: UI Integration (1 dan)
+
+ 
+
+**Tasks:**
+
+1. ✅ Update UI za prikazivanje phase-level progress
+
+2. ✅ Dodati progress bar po fazama
+
+3. ✅ Real-time status updates
+
+4. ✅ Error handling UI
+
+ 
+
+**Files:**
+
+- `Alfresco.App/UserControls/Main.xaml` (UPDATE)
+
+- `Alfresco.App/UserControls/Main.xaml.cs` (UPDATE)
+
+ 
+
+---
+
+ 
+
+### 8.6 Timeline Summary
+
+ 
+
+| Faza | Trajanje | Description |
+
+|------|----------|-------------|
+
+| **Faza 1** | 1 dan | PhaseCheckpoint infrastructure |
+
+| **Faza 2** | 2 dana | MigrationWorker implementation |
+
+| **Faza 3** | 2 dana | FolderPreparationService implementation |
+
+| **Faza 4** | 1 dan | MoveService optimization |
+
+| **Faza 5** | 1 dan | UI integration |
+
+| **Testing** | 1 dan | End-to-end testing |
+
+| **TOTAL** | **8 dana** | Complete refactoring |
+
+ 
+
+---
+
+ 
+
+## 9. Testing strategija
+
+ 
+
+### 9.1 Unit Tests
+
+ 
+
+**Per Component:**
+
+ 
+
+```csharp
+
+// PhaseCheckpointRepository
+
+[Fact]
+
+public async Task MarkPhaseCompleted_SetsCompletedStatus()
+
+{
+
+    var repo = CreateRepository();
+
+    await repo.MarkPhaseCompletedAsync(MigrationPhase.FolderDiscovery, CancellationToken.None);
+
+ 
+
+    var checkpoint = await repo.GetCheckpointAsync(MigrationPhase.FolderDiscovery, CancellationToken.None);
+
+ 
+
+    Assert.Equal(PhaseStatus.COMPLETED, checkpoint.Status);
+
+    Assert.NotNull(checkpoint.CompletedAt);
+
+}
+
+ 
+
+// FolderPreparationService
+
+[Fact]
+
+public async Task PrepareAllFolders_CreatesUniqueFolders()
+
+{
+
+    var service = CreateService();
+
+    var mockResolver = GetMockDocumentResolver();
+
+ 
+
+    await service.PrepareAllFoldersAsync(CancellationToken.None);
+
+ 
+
+    // Verify DocumentResolver.ResolveAsync called for each unique folder
+
+    mockResolver.Verify(r => r.ResolveAsync(
+
+        It.IsAny<string>(), It.IsAny<string>(), It.IsAny<Dictionary<string, object>>(),
+
+        It.IsAny<CancellationToken>()),
+
+        Times.Exactly(expectedCount));
+
+}
+
+ 
+
+// MigrationWorker
+
+[Fact]
+
+public async Task ExecuteAsync_RunsAllPhases_Sequentially()
+
+{
+
+    var worker = CreateWorker();
+
+    var mockServices = GetMockServices();
+
+ 
+
+    await worker.RunAsync(CancellationToken.None);
+
+ 
+
+    // Verify phases called in order
+
+    Received.InOrder(() =>
+
+    {
+
+        mockServices.FolderDiscovery.DiscoverAllAsync(Arg.Any<CancellationToken>());
+
+        mockServices.DocumentDiscovery.DiscoverAllAsync(Arg.Any<CancellationToken>());
+
+        mockServices.FolderPreparation.PrepareAllFoldersAsync(Arg.Any<CancellationToken>());
+
+        mockServices.Move.MoveAllAsync(Arg.Any<CancellationToken>());
+
+    });
+
+}
+
+```
+
+ 
+
+### 9.2 Integration Tests
+
+ 
+
+**End-to-End Test:**
+
+ 
+
+```csharp
+
+[Fact]
+
+public async Task MigrationWorker_CompleteE2E_WithRealData()
+
+{
+
+    // Arrange: Setup test Alfresco instance with sample data
+
+    var testData = await SetupTestAlfrescoDataAsync(); // 100 docs, 50 folders
+
+ 
+
+    var worker = CreateWorkerWithRealDependencies();
+
+ 
+
+    // Act
+
+    await worker.RunAsync(CancellationToken.None);
+
+ 
+
+    // Assert
+
+    var checkpoints = await GetAllCheckpointsAsync();
+
+    Assert.All(checkpoints, cp => Assert.Equal(PhaseStatus.COMPLETED, cp.Status));
+
+ 
+
+    // Verify all documents moved
+
+    var movedDocs = await GetDocStagingCountAsync(MigrationStatus.Moved);
+
+    Assert.Equal(testData.TotalDocs, movedDocs);
+
+ 
+
+    // Verify all folders created in Alfresco
+
+    var createdFolders = await CountFoldersInAlfrescoAsync();
+
+    Assert.True(createdFolders >= testData.UniqueFolders);
+
+}
+
+```
+
+ 
+
+### 9.3 Performance Tests
+
+ 
+
+**Benchmark:**
+
+ 
+
+```csharp
+
+[MemoryDiagnoser]
+
+public class FolderPreparationBenchmark
+
+{
+
+    [Benchmark]
+
+    public async Task Sequential_FolderCreation_1000Folders()
+
+    {
+
+        for (int i = 0; i < 1000; i++)
+
+        {
+
+            await CreateFolderAsync($"Folder-{i}");
+
+        }
+
+    }
+
+ 
+
+    [Benchmark]
+
+    public async Task Parallel_FolderCreation_1000Folders()
+
+    {
+
+        var semaphore = new SemaphoreSlim(50, 50);
+
+        var tasks = Enumerable.Range(0, 1000).Select(async i =>
+
+        {
+
+            await semaphore.WaitAsync();
+
+            try
+
+            {
+
+                await CreateFolderAsync($"Folder-{i}");
+
+            }
+
+            finally
+
+            {
+
+                semaphore.Release();
+
+            }
+
+        });
+
+ 
+
+        await Task.WhenAll(tasks);
+
+    }
+
+}
+
+```
+
+ 
+
+**Expected Results:**
+
+```
+
+|                            Method |     Mean | Allocated |
+
+|---------------------------------- |---------:|----------:|
+
+| Sequential_FolderCreation_1000... | 50.0 min |   10.0 MB |
+
+| Parallel_FolderCreation_1000...   |  1.0 min |   15.0 MB |
+
+```
+
+ 
+
+---
+
+ 
+
+## 10. Metrike uspešnosti
+
+ 
+
+### 10.1 Performance Metrics
+
+ 
+
+| Metrika | PRE (estimated) | POSLE | Target | Status |
+
+|---------|-----------------|-------|--------|--------|
+
+| **Total Migration Time** | ~11 dana | ~5 sati | <8 sati | ✅ |
+
+| **FAZA 1: FolderDiscovery** | ~15 min | ~10 min | <15 min | ✅ |
+
+| **FAZA 2: DocumentDiscovery** | ~12 sati | ~30 min | <1 sat | ✅ |
+
+| **FAZA 3: FolderPreparation** | N/A (embedded) | ~20 min | <30 min | 🆕 |
+
+| **FAZA 4: Move** | ~10 dana | ~2-3 sata | <4 sata | 🔄 |
+
+ 
+
+### 10.2 Code Quality Metrics
+
+ 
+
+| Metrika | PRE | POSLE | Target |
+
+|---------|-----|-------|--------|
+
+| **Service separation** | 3 services | 4 services + worker | Clear SoC |
+
+| **Checkpoint granularity** | Per-service | Per-phase | Phase-level |
+
+| **Parallelism control** | None | SemaphoreSlim | Controlled |
+
+| **Idempotency** | Partial | Full | 100% |
+
+ 
+
+### 10.3 Stability Metrics
+
+ 
+
+| Metrika | Target |
+
+|---------|--------|
+
+| **OutOfMemory errors** | 0 |
+
+| **Connection pool exhaustion** | 0 |
+
+| **Race conditions** | 0 |
+
+| **Successful phase completion rate** | 100% |
+
+| **Resume from checkpoint success rate** | 100% |
+
+ 
+
+---
+
+ 
+
+## 11. Zaključak
+
+ 
+
+### 11.1 Rezime
+
+ 
+
+Ovaj plan refaktorisanja implementira **Sequential Workers + Parallel Tasks** pattern za Alfresco Migration aplikaciju:
+
+ 
+
+1. **Sequential Phases** - Jedna faza se izvršava u potpunosti pre nego što počne sledeća
+
+2. **Parallel Tasks** - Unutar faze, koristi se kontrolisani paralelizam (SemaphoreSlim)
+
+3. **Nova FAZA 3** - FolderPreparationService kreira sve foldere unapred (50× brže)
+
+4. **Phase-Based Checkpoints** - Resumable posle svake faze
+
+5. **MigrationWorker** - Centralizovan orchestrator za sve faze
+
+ 
+
+### 11.2 Ključne Odluke
+
+ 
+
+✅ **Stabilnost > Brzina** - Sequential faze eliminišu race conditions
+
+✅ **Kontrolisani paralelizam** - SemaphoreSlim(50, 50) za throttling
+
+✅ **Idempotent operations** - Check-if-exists pattern svuda
+
+✅ **Checkpoint-driven** - Resume capability posle svake faze
+
+✅ **Lock striping** - Problem #3 rešava memory leak u concurrent folder creation
+
+ 
+
+### 11.3 Očekivani Rezultat
+
+ 
+
+```
+
+Total Migration Time: ~5 sati
+
+ 
+
+├─ FAZA 1: FolderDiscovery      ~10 min
+
+├─ FAZA 2: DocumentDiscovery    ~30 min (30× brže sa cachingom)
+
+├─ FAZA 3: FolderPreparation    ~20 min (50 concurrent)
+
+└─ FAZA 4: Move                 ~3 sata (50 concurrent)
+
+```
+
+ 
+
+### 11.4 Sledeći Koraci
+
+ 
+
+1. ✅ Review ovog plana sa korisnikom
+
+2. 🔄 Start implementacija (Faza 1: PhaseCheckpoint infrastructure)
+
+3. 🔄 Iterative testing & refinement
+
+4. 🔄 Production deployment
+
+ 
+
+---
+
+ 
+
+**Kraj dokumenta**
+
+ 
+
+**Kontakt:** Claude Code Assistant
+
+**Verzija:** 1.0
+
+**Datum:** 2025-01-17

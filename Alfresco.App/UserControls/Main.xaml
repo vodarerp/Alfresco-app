@@ -73,7 +73,12 @@
                     </Grid>
                 </Grid>
             </TabItem>
-            
+
+            <!-- NEW: Migration Pipeline Tab -->
+            <TabItem Header="Migration Pipeline">
+                <local:MigrationPhaseMonitor/>
+            </TabItem>
+
             <TabItem x:Name="LiveLoggerTab">
                 <TabItem.Header>
                     <Grid>

@@ -278,6 +278,9 @@ namespace Alfresco.App
                     services.AddTransient<SqlServer.Abstraction.Interfaces.IFolderStagingRepository, SqlServer.Infrastructure.Implementation.FolderStagingRepository>();
                     services.AddTransient<SqlServer.Abstraction.Interfaces.IMigrationCheckpointRepository, SqlServer.Infrastructure.Implementation.MigrationCheckpointRepository>();
 
+                    // Phase-based checkpoint repository (NEW - for refactoring)
+                    services.AddTransient<SqlServer.Abstraction.Interfaces.IPhaseCheckpointRepository, SqlServer.Infrastructure.Implementation.PhaseCheckpointRepository>();
+
                     // Memory Cache for DocumentMappingRepository (caching individual query results)
                     services.AddMemoryCache();
 
@@ -321,6 +324,12 @@ namespace Alfresco.App
                     services.AddTransient<IMoveReader, MoveReader>();
                     services.AddTransient<IMoveExecutor, MoveExecutor>();
                     services.AddSingleton<IMoveService, MoveService>();
+
+                    // NEW: FolderPreparationService (FAZA 3 - parallel folder creation)
+                    services.AddSingleton<IFolderPreparationService, FolderPreparationService>();
+
+                    // NEW: MigrationWorker (orchestrator za sve 4 faze)
+                    services.AddSingleton<IMigrationWorker, MigrationWorker>();
 
                     services.AddSingleton<IAlfrescoDbReader, AlfrescoDbReader>();
 

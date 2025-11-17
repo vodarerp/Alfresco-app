@@ -47,12 +47,9 @@ namespace Migration.Infrastructure.Implementation.Services
 
         private readonly ILogger _uiLogger;
 
-        // Folder cache: Key = "TargetDossierType_DossierDestFolderId", Value = Folder ID in Alfresco
-        // Example: "500_PI102206" -> "abc-123-def-456"
-        private readonly ConcurrentDictionary<string, string> _folderCache = new();
-
-        // Semaphore for folder creation synchronization per cache key
-        private readonly ConcurrentDictionary<string, SemaphoreSlim> _folderLocks = new();
+        // NOTE: Removed _folderCache and _folderLocks after refactoring
+        // Folder caching is now handled by DocumentResolver (with lock striping)
+        // All folders are pre-created by FolderPreparationService in FAZA 3
 
         public MoveService(IMoveReader moveService, IMoveExecutor moveExecutor, IDocStagingRepository docRepo, IDocumentResolver resolver, IAlfrescoWriteApi write, IAlfrescoReadApi read, IOptions<MigrationOptions> options, IServiceProvider sp, ILoggerFactory logger)
         {
@@ -915,122 +912,71 @@ namespace Migration.Infrastructure.Implementation.Services
         ///
         /// Returns: Folder ID in new Alfresco where document should be moved
         /// </summary>
+        /// <summary>
+        /// Gets destination folder ID for document.
+        /// OPTIMIZED: After FAZA 3 (FolderPreparationService), all folders already exist.
+        /// DocumentResolver will find them (cache hit ~100%) without creating new ones.
+        /// This eliminates the need for complex lock-based folder creation logic.
+        /// </summary>
         private async Task<string> CreateOrGetDestinationFolder(DocStaging doc, CancellationToken ct)
         {
             // ========================================
-            // Step 1: Check cache first (fast path - no locking)
+            // SIMPLIFIED LOGIC (POST-REFACTORING):
+            // All folders are created by FolderPreparationService in FAZA 3,
+            // so we just need to resolve the path. DocumentResolver will:
+            // 1. Check its cache (likely hit)
+            // 2. Query Alfresco if cache miss (folder exists)
+            // 3. Cache the result for future calls
+            // NO FOLDER CREATION HAPPENS HERE!
             // ========================================
-            var cacheKey = $"{doc.TargetDossierType}_{doc.DossierDestFolderId}";
 
-            if (_folderCache.TryGetValue(cacheKey, out var cachedFolderId))
+            // Step 1: Get parent folder (DOSSIERS-PI, DOSSIERS-LE, etc.)
+            var parentFolderName = GetParentFolderName(doc.TargetDossierType);
+
+            _fileLogger.LogDebug("Resolving parent folder '{ParentFolderName}' under root {RootId}",
+                parentFolderName, _options.Value.RootDestinationFolderId);
+
+            var parentFolderId = await _resolver.ResolveAsync(
+                _options.Value.RootDestinationFolderId,
+                parentFolderName,
+                ct).ConfigureAwait(false);
+
+            _fileLogger.LogTrace("Parent folder '{ParentFolderName}' → ID: {ParentFolderId}",
+                parentFolderName, parentFolderId);
+
+            // Step 2: Get individual dossier folder (PI102206, LE500342, etc.)
+            var dossierId = doc.DossierDestFolderId;
+
+            if (string.IsNullOrWhiteSpace(dossierId))
             {
-                _fileLogger.LogTrace("Cache HIT for key '{CacheKey}' → Folder ID: {FolderId}",
-                    cacheKey, cachedFolderId);
-                return cachedFolderId;
+                _fileLogger.LogError("DossierDestFolderId is empty for document {DocId}, cannot resolve destination folder", doc.Id);
+                throw new InvalidOperationException($"DossierDestFolderId is empty for document {doc.Id}");
             }
 
-            _fileLogger.LogDebug("Cache MISS for key '{CacheKey}', acquiring lock to create folder...", cacheKey);
+            _fileLogger.LogDebug("Resolving dossier folder '{DossierId}' under parent {ParentFolderId}",
+                dossierId, parentFolderId);
 
-            // ========================================
-            // Step 2: Acquire lock for this specific cache key
-            // ========================================
-            var folderLock = _folderLocks.GetOrAdd(cacheKey, _ => new SemaphoreSlim(1, 1));
+            // DocumentResolver will find the folder (created by FAZA 3) and cache it
+            // No properties needed - folder already exists with correct properties from FAZA 3
+            var dossierFolderId = await _resolver.ResolveAsync(
+                parentFolderId,
+                dossierId,
+                null, // No properties - folder already exists
+                ct).ConfigureAwait(false);
 
-            await folderLock.WaitAsync(ct).ConfigureAwait(false);
-            try
-            {
-                // ========================================
-                // Step 3: Double-check cache (another thread might have created folder while we were waiting)
-                // ========================================
-                if (_folderCache.TryGetValue(cacheKey, out cachedFolderId))
-                {
-                    _fileLogger.LogTrace("Cache HIT after lock (folder created by another thread) for key '{CacheKey}' → Folder ID: {FolderId}",
-                        cacheKey, cachedFolderId);
-                    return cachedFolderId;
-                }
+            _fileLogger.LogTrace("Dossier folder '{DossierId}' → ID: {DossierFolderId}",
+                dossierId, dossierFolderId);
 
-                _fileLogger.LogDebug("Creating destination folder for key '{CacheKey}'...", cacheKey);
-
-                // ========================================
-                // Step 4: Create/Get parent folder (DOSSIERS-PI, DOSSIERS-LE, etc.)
-                // ========================================
-                var parentFolderName = GetParentFolderName(doc.TargetDossierType);
-
-                _fileLogger.LogDebug("Creating parent folder '{ParentFolderName}' under root {RootId}",
-                    parentFolderName, _options.Value.RootDestinationFolderId);
-
-                var parentFolderId = await _resolver.ResolveAsync(
-                    _options.Value.RootDestinationFolderId,
-                    parentFolderName,
-                    ct).ConfigureAwait(false);
-
-                _fileLogger.LogInformation("Parent folder '{ParentFolderName}' → ID: {ParentFolderId}",
-                    parentFolderName, parentFolderId);
-
-                // ========================================
-                // Step 5: Create/Get individual dossier folder (PI102206, LE500342, etc.)
-                // ========================================
-                var dossierId = doc.DossierDestFolderId;
-
-                if (string.IsNullOrWhiteSpace(dossierId))
-                {
-                    _fileLogger.LogError("DossierDestFolderId is empty for document {DocId}, cannot create destination folder", doc.Id);
-                    throw new InvalidOperationException($"DossierDestFolderId is empty for document {doc.Id}");
-                }
-
-                _fileLogger.LogDebug("Creating dossier folder '{DossierId}' under parent {ParentFolderId}",
-                    dossierId, parentFolderId);
-
-                // Read properties from old folder to copy to new folder
-                Dictionary<string, object>? oldFolderProperties = null;
-                try
-                {
-                    var oldFolder = await _read.GetNodeByIdAsync(doc.ParentId, ct).ConfigureAwait(false);
-                    oldFolderProperties = oldFolder?.Entry?.Properties;
-                    _fileLogger.LogDebug("Read {Count} properties from old folder {ParentId}",
-                        oldFolderProperties?.Count ?? 0, doc.ParentId);
-                }
-                catch (Exception ex)
-                {
-                    _fileLogger.LogWarning(ex, "Failed to read properties from old folder {ParentId}, will use minimal properties",
-                        doc.ParentId);
-                }
-
-                var dossierProperties = BuildDossierProperties(doc, oldFolderProperties);
-
-                var dossierFolderId = await _resolver.ResolveAsync(
-                    parentFolderId,
-                    dossierId,
-                    dossierProperties,
-                    ct).ConfigureAwait(false);
-
-                _fileLogger.LogInformation("Dossier folder '{DossierId}' → ID: {DossierFolderId}",
-                    dossierId, dossierFolderId);
-
-                // ========================================
-                // Step 6: Cache the result
-                // ========================================
-                _folderCache.TryAdd(cacheKey, dossierFolderId);
-                _fileLogger.LogTrace("Cached folder ID {FolderId} for key '{CacheKey}'", dossierFolderId, cacheKey);
-
-                // Prevent cache from growing too large
-                if (_folderCache.Count > 50000)
-                {
-                    _fileLogger.LogWarning("Folder cache exceeded 50,000 entries, clearing cache");
-                    _folderCache.Clear();
-                }
-
-                return dossierFolderId;
-            }
-            finally
-            {
-                folderLock.Release();
-            }
+            return dossierFolderId;
         }
 
         /// <summary>
         /// Builds Alfresco properties for dossier folder
+        /// NOTE: This method is NO LONGER USED after refactoring (FAZA 3).
+        /// FolderPreparationService creates all folders with properties BEFORE move.
+        /// Kept for reference only.
         /// </summary>
+        [Obsolete("No longer used - folders are created by FolderPreparationService in FAZA 3")]
         private Dictionary<string, object> BuildDossierProperties(DocStaging doc, Dictionary<string, object>? oldFolderProperties)
         {
             var properties = new Dictionary<string, object>();

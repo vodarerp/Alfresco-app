@@ -1,5 +1,6 @@
 using Alfresco.Contracts.Oracle.Models;
 using Dapper;
+using Migration.Abstraction.Models;
 using SqlServer.Abstraction.Interfaces;
 using Microsoft.Data.SqlClient;
 using System;
@@ -9,6 +10,7 @@ using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 using System.Transactions;
+using Alfresco.Contracts.Models;
 
 namespace SqlServer.Infrastructure.Implementation
 {
@@ -86,6 +88,62 @@ namespace SqlServer.Infrastructure.Implementation
             var count = await Conn.ExecuteScalarAsync<long>(cmd).ConfigureAwait(false);
 
             return count;
+        }
+
+        public async Task<List<UniqueFolderInfo>> GetUniqueDestinationFoldersAsync(CancellationToken ct = default)
+        {
+            // Query DocStaging for all DISTINCT combinations of (TargetDossierType, DossierDestFolderId)
+            // These represent unique destination folders that need to be created
+            // Only include documents that are READY for processing
+            var sql = @"
+                SELECT DISTINCT
+                    TargetDossierType,
+                    DossierDestFolderId,
+                    '' AS FolderPath  -- Will be constructed from DossierDestFolderId
+                FROM DocStaging
+                WHERE Status = 'READY'
+                  AND TargetDossierType IS NOT NULL
+                  AND DossierDestFolderId IS NOT NULL
+                ORDER BY TargetDossierType, DossierDestFolderId";
+
+            var cmd = new CommandDefinition(sql, transaction: Tx, cancellationToken: ct);
+
+            var results = await Conn.QueryAsync<dynamic>(cmd).ConfigureAwait(false);
+
+            // Map to UniqueFolderInfo
+            var folders = results.Select(r => new UniqueFolderInfo
+            {
+                // TargetDossierType maps to root folder (e.g., 500 → PI folder)
+                // This should be resolved by MigrationWorker/FolderPreparationService
+                DestinationRootId = GetDossierRootId((int?)r.TargetDossierType),
+
+                // DossierDestFolderId is the folder path (e.g., "PI102206" or "ACC-12345")
+                FolderPath = r.DossierDestFolderId?.ToString() ?? string.Empty,
+
+                // CacheKey for folder lookup
+                CacheKey = $"{r.TargetDossierType}_{r.DossierDestFolderId}",
+
+                // No properties for now (can be extended later if needed)
+                Properties = null
+            }).ToList();
+
+            return folders;
+        }
+
+        private string GetDossierRootId(int? targetDossierType)
+        {
+            // Map TargetDossierType (DossierType enum) to root folder IDs in Alfresco
+            // This mapping should match the DossierType enum values
+            // Actual folder names: DOSSIERS-LE, DOSSIERS-PI, DOSSIERS-D, DOSSIERS-ACC
+            // TODO: This should be configured externally (e.g., from appsettings.json)
+            return targetDossierType switch
+            {
+                300 => "DOSSIERS-ACC",  // AccountPackage (ACC)
+                400 => "DOSSIERS-LE",   // ClientPL (Legal Entity)
+                500 => "DOSSIERS-PI",   // ClientFL (Physical Individual)
+                700 => "DOSSIERS-D",    // Deposit
+                _ => throw new InvalidOperationException($"Unknown TargetDossierType: {targetDossierType}")
+            };
         }
     }
 }

@@ -2,6 +2,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\Alfresco.Contracts\Alfresco.Contracts.csproj" />
+    <ProjectReference Include="..\Migration.Abstraction\Migration.Abstraction.csproj" />
   </ItemGroup>
 
   <PropertyGroup>
