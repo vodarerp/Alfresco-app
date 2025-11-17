@@ -585,44 +585,80 @@ namespace Migration.Infrastructure.Implementation.Services
             _fileLogger.LogDebug("Processing folder {FolderId} ({Name}, NodeId: {NodeId})",
                 folder.Id, folder.Name, folder.NodeId);
 
-            _fileLogger.LogDebug("Reading documents from Alfresco folder {NodeId}", folder.NodeId);
-            var documents = await _reader.ReadBatchAsync(folder.NodeId!, ct).ConfigureAwait(false);
+            // Use pagination to prevent OutOfMemory for folders with many documents
+            const int PAGE_SIZE = 100; // Process 100 documents at a time
+            int skipCount = 0;
+            int totalProcessed = 0;
+            bool hasMore = true;
 
-            if (documents == null || documents.Count == 0)
+            _fileLogger.LogInformation("Reading documents from Alfresco folder {NodeId} with pagination (pageSize: {PageSize})",
+                folder.NodeId, PAGE_SIZE);
+
+            while (hasMore && !ct.IsCancellationRequested)
+            {
+                _fileLogger.LogDebug("Reading page: skipCount={SkipCount}, maxItems={MaxItems} for folder {FolderId}",
+                    skipCount, PAGE_SIZE, folder.Id);
+
+                var result = await _reader.ReadBatchWithPaginationAsync(folder.NodeId!, skipCount, PAGE_SIZE, ct).ConfigureAwait(false);
+
+                if (result.Documents == null || result.Documents.Count == 0)
+                {
+                    _fileLogger.LogDebug("No more documents in current page for folder {FolderId}", folder.Id);
+                    break;
+                }
+
+                _fileLogger.LogInformation("Found {Count} documents in page (skipCount={SkipCount}) for folder {FolderId}",
+                    result.Documents.Count, skipCount, folder.Id);
+
+                // Process documents from current page
+                var docsToInsert = new List<DocStaging>(result.Documents.Count);
+
+                foreach (var d in result.Documents)
+                {
+                    var item = d.Entry.ToDocStagingInsert();
+                    // ToPath will be determined by MoveService based on document properties
+                    item.ToPath = string.Empty; // Will be populated by MoveService
+                    item.Status = MigrationStatus.Ready.ToDbString();
+
+                    // Apply document mapping using mappers from Faza 1 (database-driven)
+                    await ApplyDocumentMappingAsync(item, folder, d.Entry, ct).ConfigureAwait(false);
+
+                    docsToInsert.Add(item);
+                }
+
+                _fileLogger.LogInformation(
+                    "Prepared {Count} documents for insertion from page (folder {FolderId})",
+                    docsToInsert.Count, folder.Id);
+
+                // Insert documents from current page
+                await InsertDocsAsync(docsToInsert, folder.Id, ct).ConfigureAwait(false);
+
+                totalProcessed += docsToInsert.Count;
+
+                _fileLogger.LogInformation(
+                    "Processed page: {Processed} documents from folder {FolderId}. Total so far: {Total}",
+                    docsToInsert.Count, folder.Id, totalProcessed);
+
+                // Check if there are more documents
+                hasMore = result.HasMore;
+                skipCount += result.Documents.Count;
+            }
+
+            if (totalProcessed == 0)
             {
                 _fileLogger.LogInformation(
                     "No documents found in folder {FolderId} ({Name}, NodeId: {NodeId}) - marking as PROCESSED",
                     folder.Id, folder.Name, folder.NodeId);
-                await MarkFolderAsProcessedAsync(folder.Id, ct).ConfigureAwait(false);
-                return;
             }
-            _fileLogger.LogInformation("Found {Count} documents in folder {FolderId} ({Name})",
-                documents.Count, folder.Id, folder.Name);
-
-            var docsToInsert = new List<DocStaging>(documents.Count);
-
-            foreach (var d in documents)
+            else
             {
-                var item = d.Entry.ToDocStagingInsert();
-                // ToPath will be determined by MoveService based on document properties
-                item.ToPath = string.Empty; // Will be populated by MoveService
-                item.Status = MigrationStatus.Ready.ToDbString();
-
-                // Apply document mapping using mappers from Faza 1 (database-driven)
-                await ApplyDocumentMappingAsync(item, folder, d.Entry, ct).ConfigureAwait(false);
-
-                docsToInsert.Add(item);
+                _fileLogger.LogInformation(
+                    "Successfully processed all pages for folder {FolderId} ({Name}): {Total} documents total",
+                    folder.Id, folder.Name, totalProcessed);
             }
 
-            _fileLogger.LogInformation(
-                "Prepared {Count} documents for insertion (folder {FolderId})",
-                docsToInsert.Count, folder.Id);
-
-            await InsertDocsAndMarkFolderAsync(docsToInsert, folder.Id, ct).ConfigureAwait(false);
-
-            _fileLogger.LogInformation(
-                "Successfully processed folder {FolderId} ({Name}): {Count} documents inserted",
-                folder.Id, folder.Name, docsToInsert.Count);
+            // Mark folder as processed after all pages are done
+            await MarkFolderAsProcessedAsync(folder.Id, ct).ConfigureAwait(false);
 
 
         }
@@ -676,6 +712,50 @@ namespace Migration.Infrastructure.Implementation.Services
             }
 
             //throw new NotImplementedException();
+        }
+
+        /// <summary>
+        /// Inserts documents without marking folder as processed.
+        /// Used in pagination loop where folder is marked after all pages are processed.
+        /// </summary>
+        private async Task InsertDocsAsync(List<DocStaging> docsToInsert, long folderId, CancellationToken ct)
+        {
+            if (docsToInsert == null || docsToInsert.Count == 0)
+            {
+                _fileLogger.LogDebug("No documents to insert for folder {FolderId}", folderId);
+                return;
+            }
+
+            await using var scope = _sp.CreateAsyncScope();
+            var uow = scope.ServiceProvider.GetRequiredService<IUnitOfWork>();
+            var docRepo = scope.ServiceProvider.GetRequiredService<IDocStagingRepository>();
+
+            await uow.BeginAsync().ConfigureAwait(false);
+
+            try
+            {
+                _fileLogger.LogDebug("Inserting {Count} documents for folder {FolderId}",
+                    docsToInsert.Count, folderId);
+
+                int inserted = await docRepo.InsertManyAsync(docsToInsert, ct).ConfigureAwait(false);
+
+                _fileLogger.LogInformation(
+                    "Successfully inserted {Inserted}/{Total} documents for folder {FolderId}",
+                    inserted, docsToInsert.Count, folderId);
+
+                await uow.CommitAsync().ConfigureAwait(false);
+                _fileLogger.LogDebug("Transaction committed for folder {FolderId}", folderId);
+            }
+            catch (Exception ex)
+            {
+                _dbLogger.LogError(ex,
+                    "Failed to insert documents for folder {FolderId}. " +
+                    "Attempted to insert {Count} documents. Rolling back transaction.",
+                    folderId, docsToInsert.Count);
+
+                await uow.RollbackAsync().ConfigureAwait(false);
+                throw;
+            }
         }
 
         //private async Task<List<(string NormalizedName, string DestinationId)>?> BuildParentPathFromDossierAsync(FolderStaging folder, CancellationToken ct)
