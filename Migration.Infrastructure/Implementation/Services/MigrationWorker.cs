@@ -104,10 +104,10 @@ namespace Migration.Infrastructure.Implementation.Services
             try
             {
                 // Use dedicated connection for status reads (no conflict with phase services)
-                var checkpoints = await ExecuteCheckpointOperationAsync(async (conn) =>
+                var checkpoints = await ExecuteCheckpointOperationAsync(async (conn, tran) =>
                 {
                     var sql = "SELECT * FROM PhaseCheckpoints ORDER BY Phase ASC";
-                    var cmd = new CommandDefinition(sql, cancellationToken: ct);
+                    var cmd = new CommandDefinition(sql, transaction: tran, cancellationToken: ct);
                     var results = await conn.QueryAsync<PhaseCheckpoint>(cmd);
                     return results.ToList();
                 }, ct);
@@ -163,7 +163,7 @@ namespace Migration.Infrastructure.Implementation.Services
             {
                 _logger.LogWarning("⚠️  Resetting all migration phases to NotStarted...");
 
-                await ExecuteCheckpointOperationAsync(async (conn) =>
+                await ExecuteCheckpointOperationAsync(async (conn, tran) =>
                 {
                     var sql = @"UPDATE PhaseCheckpoints
                                 SET Status = @status, StartedAt = NULL, CompletedAt = NULL,
@@ -173,7 +173,7 @@ namespace Migration.Infrastructure.Implementation.Services
                     {
                         status = (int)PhaseStatus.NotStarted,
                         updatedAt = DateTime.UtcNow
-                    }, cancellationToken: ct);
+                    }, transaction: tran, cancellationToken: ct);
                     await conn.ExecuteAsync(cmd);
                 }, ct);
 
@@ -192,7 +192,7 @@ namespace Migration.Infrastructure.Implementation.Services
             {
                 _logger.LogWarning("⚠️  Resetting phase {Phase} to NotStarted...", phase);
 
-                await ExecuteCheckpointOperationAsync(async (conn) =>
+                await ExecuteCheckpointOperationAsync(async (conn, tran) =>
                 {
                     var sql = @"UPDATE PhaseCheckpoints
                                 SET Status = @status, StartedAt = NULL, CompletedAt = NULL,
@@ -204,7 +204,7 @@ namespace Migration.Infrastructure.Implementation.Services
                         phase = (int)phase,
                         status = (int)PhaseStatus.NotStarted,
                         updatedAt = DateTime.UtcNow
-                    }, cancellationToken: ct);
+                    }, transaction: tran, cancellationToken: ct);
                     await conn.ExecuteAsync(cmd);
                 }, ct);
 
@@ -233,10 +233,10 @@ namespace Migration.Infrastructure.Implementation.Services
             {
                 // Check if phase is already completed
                 // Use a dedicated SQL connection (NOT shared UnitOfWork) for checkpoint operations
-                checkpoint = await ExecuteCheckpointOperationAsync(async (conn) =>
+                checkpoint = await ExecuteCheckpointOperationAsync(async (conn, tran) =>
                 {
                     var sql = "SELECT * FROM PhaseCheckpoints WHERE Phase = @phase";
-                    var cmd = new CommandDefinition(sql, new { phase = (int)phase }, cancellationToken: ct);
+                    var cmd = new CommandDefinition(sql, new { phase = (int)phase }, transaction: tran, cancellationToken: ct);
                     return await conn.QueryFirstOrDefaultAsync<PhaseCheckpoint>(cmd);
                 }, ct);
 
@@ -249,7 +249,7 @@ namespace Migration.Infrastructure.Implementation.Services
                 // Mark phase as started
                 _logger.LogInformation("{PhaseDisplayName} starting...", phaseDisplayName);
 
-                await ExecuteCheckpointOperationAsync(async (conn) =>
+                await ExecuteCheckpointOperationAsync(async (conn, tran) =>
                 {
                     var sql = @"UPDATE PhaseCheckpoints
                                 SET Status = @status, StartedAt = @startedAt, CompletedAt = NULL,
@@ -261,7 +261,7 @@ namespace Migration.Infrastructure.Implementation.Services
                         status = (int)PhaseStatus.InProgress,
                         startedAt = DateTime.UtcNow,
                         updatedAt = DateTime.UtcNow
-                    }, cancellationToken: ct);
+                    }, transaction: tran, cancellationToken: ct);
                     await conn.ExecuteAsync(cmd);
                 }, ct);
 
@@ -270,7 +270,7 @@ namespace Migration.Infrastructure.Implementation.Services
                 await phaseAction(ct);
 
                 // Mark phase as completed
-                await ExecuteCheckpointOperationAsync(async (conn) =>
+                await ExecuteCheckpointOperationAsync(async (conn, tran) =>
                 {
                     var sql = @"UPDATE PhaseCheckpoints
                                 SET Status = @status, CompletedAt = @completedAt, UpdatedAt = @updatedAt
@@ -281,7 +281,7 @@ namespace Migration.Infrastructure.Implementation.Services
                         status = (int)PhaseStatus.Completed,
                         completedAt = DateTime.UtcNow,
                         updatedAt = DateTime.UtcNow
-                    }, cancellationToken: ct);
+                    }, transaction: tran, cancellationToken: ct);
                     await conn.ExecuteAsync(cmd);
                 }, ct);
 
@@ -294,7 +294,7 @@ namespace Migration.Infrastructure.Implementation.Services
                 // Mark phase as failed
                 try
                 {
-                    await ExecuteCheckpointOperationAsync(async (conn) =>
+                    await ExecuteCheckpointOperationAsync(async (conn, tran) =>
                     {
                         var sql = @"UPDATE PhaseCheckpoints
                                     SET Status = @status, ErrorMessage = @errorMessage, UpdatedAt = @updatedAt
@@ -306,7 +306,7 @@ namespace Migration.Infrastructure.Implementation.Services
                             status = (int)PhaseStatus.Failed,
                             errorMessage = errorMsg,
                             updatedAt = DateTime.UtcNow
-                        }, cancellationToken: ct);
+                        }, transaction: tran, cancellationToken: ct);
                         await conn.ExecuteAsync(cmd);
                     }, ct);
                 }
@@ -329,7 +329,7 @@ namespace Migration.Infrastructure.Implementation.Services
         /// MigrationWorker checkpoint operations create their OWN independent SQL connections
         /// to avoid any conflicts.
         /// </summary>
-        private async Task<T> ExecuteCheckpointOperationAsync<T>(Func<SqlConnection, Task<T>> operation, CancellationToken ct)
+        private async Task<T> ExecuteCheckpointOperationAsync<T>(Func<SqlConnection, SqlTransaction, Task<T>> operation, CancellationToken ct)
         {
             // Create a completely independent SQL connection for checkpoint operations
             // This connection is NOT shared with phase services
@@ -340,8 +340,8 @@ namespace Migration.Infrastructure.Implementation.Services
 
             try
             {
-                // Execute the operation with our dedicated connection
-                var result = await operation(connection);
+                // Execute the operation with our dedicated connection AND transaction
+                var result = await operation(connection, transaction);
 
                 // Commit immediately
                 transaction.Commit();
@@ -366,11 +366,11 @@ namespace Migration.Infrastructure.Implementation.Services
         /// <summary>
         /// Overload for operations that don't return a value
         /// </summary>
-        private async Task ExecuteCheckpointOperationAsync(Func<SqlConnection, Task> operation, CancellationToken ct)
+        private async Task ExecuteCheckpointOperationAsync(Func<SqlConnection, SqlTransaction, Task> operation, CancellationToken ct)
         {
-            await ExecuteCheckpointOperationAsync(async (conn) =>
+            await ExecuteCheckpointOperationAsync(async (conn, tran) =>
             {
-                await operation(conn);
+                await operation(conn, tran);
                 return 0; // Dummy return value
             }, ct);
         }

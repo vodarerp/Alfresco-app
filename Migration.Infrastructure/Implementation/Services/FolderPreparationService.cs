@@ -1,5 +1,6 @@
 using Alfresco.Contracts.Enums;
 using Alfresco.Contracts.Models;
+using Alfresco.Contracts.Options;
 using Alfresco.Contracts.Oracle.Models;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -24,6 +25,7 @@ namespace Migration.Infrastructure.Implementation.Services
         private readonly IPhaseCheckpointRepository _phaseCheckpointRepo;
         private readonly IUnitOfWork _uow;
         private readonly ILogger<FolderPreparationService> _logger;
+        private readonly string _rootDestinationFolderId;
 
         private const int MAX_PARALLELISM = 50; // 30-50 concurrent folder creations
         private const int CHECKPOINT_INTERVAL = 1000; // Save checkpoint every 1000 folders
@@ -36,13 +38,15 @@ namespace Migration.Infrastructure.Implementation.Services
             IDocumentResolver documentResolver,
             IPhaseCheckpointRepository phaseCheckpointRepo,
             IUnitOfWork uow,
-            ILogger<FolderPreparationService> logger)
+            ILogger<FolderPreparationService> logger,
+            IOptions<MigrationOptions> migrationOptions)
         {
             _docRepo = docRepo ?? throw new ArgumentNullException(nameof(docRepo));
             _documentResolver = documentResolver ?? throw new ArgumentNullException(nameof(documentResolver));
             _phaseCheckpointRepo = phaseCheckpointRepo ?? throw new ArgumentNullException(nameof(phaseCheckpointRepo));
             _uow = uow ?? throw new ArgumentNullException(nameof(uow));
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+            _rootDestinationFolderId = migrationOptions?.Value?.RootDestinationFolderId ?? throw new ArgumentNullException(nameof(migrationOptions));
         }
 
         public async Task PrepareAllFoldersAsync(CancellationToken ct = default)
@@ -205,8 +209,17 @@ namespace Migration.Infrastructure.Implementation.Services
         {
             // Use DocumentResolver to create folder hierarchy
             // DocumentResolver uses lock striping (Problem #3) so it's safe for concurrent calls
-            // Pattern: destinationRootId = DOSSIER folder, newFolderName = ACC-xxx or subfolder
 
+            // STEP 1: Create parent dossier folder (e.g., DOSSIERS-ACC) under RootDestinationFolderId if it doesn't exist
+            // folder.DestinationRootId contains the name like "DOSSIERS-ACC", "DOSSIERS-LE", etc.
+            // We need to create this folder under _rootDestinationFolderId first
+            var parentDossierFolderId = await _documentResolver.ResolveAsync(
+                _rootDestinationFolderId,
+                folder.DestinationRootId, // e.g., "DOSSIERS-ACC"
+                null, // No special properties for parent folder
+                ct).ConfigureAwait(false);
+
+            // STEP 2: Create the actual dossier hierarchy under the parent folder
             // Split folder path into parts: "ACC-12345/2024/01" → ["ACC-12345", "2024", "01"]
             var pathParts = folder.FolderPath.Split('/', StringSplitOptions.RemoveEmptyEntries);
 
@@ -216,8 +229,8 @@ namespace Migration.Infrastructure.Implementation.Services
                 return;
             }
 
-            // Create each level in hierarchy
-            var currentParentId = folder.DestinationRootId;
+            // Create each level in hierarchy starting from the parent dossier folder
+            var currentParentId = parentDossierFolderId;
 
             foreach (var folderName in pathParts)
             {
@@ -230,8 +243,8 @@ namespace Migration.Infrastructure.Implementation.Services
             }
 
             _logger.LogDebug(
-                "Created folder hierarchy: {RootId}/{Path} → {FinalId}",
-                folder.DestinationRootId, folder.FolderPath, currentParentId);
+                "Created folder hierarchy: {RootDestinationFolderId}/{ParentFolder}/{Path} → {FinalId}",
+                _rootDestinationFolderId, folder.DestinationRootId, folder.FolderPath, currentParentId);
         }
 
         private async Task<PhaseCheckpoint?> GetCheckpointAsync(CancellationToken ct)
