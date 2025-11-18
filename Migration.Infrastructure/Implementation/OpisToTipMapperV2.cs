@@ -1,7 +1,6 @@
 using Alfresco.Contracts.Oracle.Models;
 using Migration.Abstraction.Interfaces;
 using SqlServer.Abstraction.Interfaces;
-using Microsoft.Extensions.DependencyInjection;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -17,13 +16,15 @@ namespace Migration.Infrastructure.Implementation
     /// VERZIJA 3.0: Koristi DocumentMappingService koji čita podatke iz SQL tabele DocumentMappings.
     /// Zamenjuje statički HeimdallDocumentMapper sa database-driven pristupom.
     /// </summary>
-    public class OpisToTipMapperV2
+    public class OpisToTipMapperV2 : IOpisToTipMapper
     {
-        private readonly IServiceProvider _serviceProvider;
+        private readonly IUnitOfWork _unitOfWork;
+        private readonly IDocumentMappingService _mappingService;
 
-        public OpisToTipMapperV2(IServiceProvider serviceProvider)
+        public OpisToTipMapperV2(IUnitOfWork unitOfWork, IDocumentMappingService mappingService)
         {
-            _serviceProvider = serviceProvider ?? throw new ArgumentNullException(nameof(serviceProvider));
+            _unitOfWork = unitOfWork ?? throw new ArgumentNullException(nameof(unitOfWork));
+            _mappingService = mappingService ?? throw new ArgumentNullException(nameof(mappingService));
         }
 
         /// <summary>
@@ -38,46 +39,43 @@ namespace Migration.Infrastructure.Implementation
             if (string.IsNullOrWhiteSpace(opisDokumenta))
                 return "UNKNOWN";
 
-            await using var scope = _serviceProvider.CreateAsyncScope();
-            var uow = scope.ServiceProvider.GetRequiredService<IUnitOfWork>();
-            var mappingService = scope.ServiceProvider.GetRequiredService<IDocumentMappingService>();
-
-            await uow.BeginAsync(ct: ct).ConfigureAwait(false);
             try
             {
+                await _unitOfWork.BeginAsync(ct: ct).ConfigureAwait(false);
+
                 // Try to find by original name (Naziv field)
-                var mapping = await mappingService.FindByOriginalNameAsync(opisDokumenta, ct).ConfigureAwait(false);
+                var mapping = await _mappingService.FindByOriginalNameAsync(opisDokumenta, ct).ConfigureAwait(false);
 
                 if (mapping != null && !string.IsNullOrWhiteSpace(mapping.SifraDokumentaMigracija))
                 {
-                    await uow.CommitAsync(ct: ct).ConfigureAwait(false);
+                    await _unitOfWork.CommitAsync(ct: ct).ConfigureAwait(false);
                     return mapping.SifraDokumentaMigracija;
                 }
 
                 // Try to find by Serbian name (NazivDokumenta field)
-                mapping = await mappingService.FindBySerbianNameAsync(opisDokumenta, ct).ConfigureAwait(false);
+                mapping = await _mappingService.FindBySerbianNameAsync(opisDokumenta, ct).ConfigureAwait(false);
 
                 if (mapping != null && !string.IsNullOrWhiteSpace(mapping.SifraDokumentaMigracija))
                 {
-                    await uow.CommitAsync(ct: ct).ConfigureAwait(false);
+                    await _unitOfWork.CommitAsync(ct: ct).ConfigureAwait(false);
                     return mapping.SifraDokumentaMigracija;
                 }
 
                 // Try to find by migrated name (NazivDokumentaMigracija field) - supports "- migracija" suffix
-                mapping = await mappingService.FindByMigratedNameAsync(opisDokumenta, ct).ConfigureAwait(false);
+                mapping = await _mappingService.FindByMigratedNameAsync(opisDokumenta, ct).ConfigureAwait(false);
 
                 if (mapping != null && !string.IsNullOrWhiteSpace(mapping.SifraDokumentaMigracija))
                 {
-                    await uow.CommitAsync(ct: ct).ConfigureAwait(false);
+                    await _unitOfWork.CommitAsync(ct: ct).ConfigureAwait(false);
                     return mapping.SifraDokumentaMigracija;
                 }
 
-                await uow.CommitAsync(ct: ct).ConfigureAwait(false);
+                await _unitOfWork.CommitAsync(ct: ct).ConfigureAwait(false);
                 return "UNKNOWN";
             }
-            catch(Exception ex)
+            catch (Exception ex)
             {
-                await uow.RollbackAsync(ct: ct).ConfigureAwait(false);
+                await _unitOfWork.RollbackAsync(ct: ct).ConfigureAwait(false);
                 throw;
             }
         }
@@ -105,15 +103,12 @@ namespace Migration.Infrastructure.Implementation
         /// <returns>Dictionary of all mappings (Naziv/NazivDokumenta → SifraDokumentaMigracija)</returns>
         public async Task<IReadOnlyDictionary<string, string>> GetAllMappingsAsync(CancellationToken ct = default)
         {
-            await using var scope = _serviceProvider.CreateAsyncScope();
-            var uow = scope.ServiceProvider.GetRequiredService<IUnitOfWork>();
-            var mappingService = scope.ServiceProvider.GetRequiredService<IDocumentMappingService>();
-
-            await uow.BeginAsync(ct: ct).ConfigureAwait(false);
             try
             {
+                await _unitOfWork.BeginAsync(ct: ct).ConfigureAwait(false);
+
                 var mappings = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-                var allMappings = await mappingService.GetAllMappingsAsync(ct).ConfigureAwait(false);
+                var allMappings = await _mappingService.GetAllMappingsAsync(ct).ConfigureAwait(false);
 
                 foreach (var mapping in allMappings)
                 {
@@ -139,12 +134,12 @@ namespace Migration.Infrastructure.Implementation
                     }
                 }
 
-                await uow.CommitAsync(ct: ct).ConfigureAwait(false);
+                await _unitOfWork.CommitAsync(ct: ct).ConfigureAwait(false);
                 return mappings;
             }
             catch
             {
-                await uow.RollbackAsync(ct: ct).ConfigureAwait(false);
+                await _unitOfWork.RollbackAsync(ct: ct).ConfigureAwait(false);
                 throw;
             }
         }
@@ -160,32 +155,29 @@ namespace Migration.Infrastructure.Implementation
             if (string.IsNullOrWhiteSpace(opisDokumenta))
                 return null;
 
-            await using var scope = _serviceProvider.CreateAsyncScope();
-            var uow = scope.ServiceProvider.GetRequiredService<IUnitOfWork>();
-            var mappingService = scope.ServiceProvider.GetRequiredService<IDocumentMappingService>();
-
-            await uow.BeginAsync(ct: ct).ConfigureAwait(false);
             try
             {
+                await _unitOfWork.BeginAsync(ct: ct).ConfigureAwait(false);
+
                 // Try all search methods
-                var mapping = await mappingService.FindByOriginalNameAsync(opisDokumenta, ct).ConfigureAwait(false);
+                var mapping = await _mappingService.FindByOriginalNameAsync(opisDokumenta, ct).ConfigureAwait(false);
 
                 if (mapping == null)
                 {
-                    mapping = await mappingService.FindBySerbianNameAsync(opisDokumenta, ct).ConfigureAwait(false);
+                    mapping = await _mappingService.FindBySerbianNameAsync(opisDokumenta, ct).ConfigureAwait(false);
                 }
 
                 if (mapping == null)
                 {
-                    mapping = await mappingService.FindByMigratedNameAsync(opisDokumenta, ct).ConfigureAwait(false);
+                    mapping = await _mappingService.FindByMigratedNameAsync(opisDokumenta, ct).ConfigureAwait(false);
                 }
 
-                await uow.CommitAsync(ct: ct).ConfigureAwait(false);
+                await _unitOfWork.CommitAsync(ct: ct).ConfigureAwait(false);
                 return mapping;
             }
             catch
             {
-                await uow.RollbackAsync(ct: ct).ConfigureAwait(false);
+                await _unitOfWork.RollbackAsync(ct: ct).ConfigureAwait(false);
                 throw;
             }
         }

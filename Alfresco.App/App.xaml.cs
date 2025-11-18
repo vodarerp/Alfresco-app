@@ -286,7 +286,7 @@ namespace Alfresco.App
                     services.AddScoped<Migration.Abstraction.Interfaces.IDocumentMappingService, Migration.Infrastructure.Implementation.DocumentMappingService>();
 
                     // Mappers that use DocumentMappingService
-                    services.AddScoped<Migration.Infrastructure.Implementation.OpisToTipMapperV2>();
+                    services.AddScoped<Migration.Abstraction.Interfaces.IOpisToTipMapper, Migration.Infrastructure.Implementation.OpisToTipMapperV2>();
                     services.AddScoped<Migration.Infrastructure.Implementation.DocumentStatusDetectorV2>();
 
                     #region oracle DI (commented)
