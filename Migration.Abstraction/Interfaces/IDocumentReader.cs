@@ -10,5 +10,7 @@ namespace Migration.Abstraction.Interfaces
     public interface IDocumentReader
     {
         public Task<IReadOnlyList<ListEntry>> ReadBatchAsync(string folderNodeId, CancellationToken ct);
+
+        public Task<IReadOnlyList<ListEntry>> ReadBatchWithPaginationAsync(string folderNodeId, int skipCount, int maxItems, CancellationToken ct);
     }
 }

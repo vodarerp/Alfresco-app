@@ -21,11 +21,17 @@ namespace Migration.Infrastructure.Implementation.Document
         public async Task<IReadOnlyList<ListEntry>> ReadBatchAsync(string folderNodeId, CancellationToken ct)
         {
 
-            var docs = (await _read.GetNodeChildrenAsync(folderNodeId, ct).ConfigureAwait(false)).List?.Entries ?? new(); 
+            var docs = (await _read.GetNodeChildrenAsync(folderNodeId, ct).ConfigureAwait(false)).List?.Entries ?? new();
 
 
             return docs;
             //throw new NotImplementedException();
+        }
+
+        public async Task<IReadOnlyList<ListEntry>> ReadBatchWithPaginationAsync(string folderNodeId, int skipCount, int maxItems, CancellationToken ct)
+        {
+            var docs = (await _read.GetNodeChildrenAsync(folderNodeId, skipCount, maxItems, ct).ConfigureAwait(false)).List?.Entries ?? new();
+            return docs;
         }
     }
 }

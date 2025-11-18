@@ -14,6 +14,8 @@ namespace Alfresco.Abstraction.Interfaces
 
         Task<NodeChildrenResponse> GetNodeChildrenAsync(string nodeId, CancellationToken ct = default);
 
+        Task<NodeChildrenResponse> GetNodeChildrenAsync(string nodeId, int skipCount, int maxItems, CancellationToken ct = default);
+
         Task<NodeChildrenResponse> SearchAsync(PostSearchRequest request, CancellationToken ct = default);
 
         Task<string> GetFolderByRelative(string inNodeId, string inRelativePath, CancellationToken ct = default);
