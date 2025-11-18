@@ -567,19 +567,19 @@ namespace Migration.Infrastructure.Implementation.Services
 
                 var result = await _reader.ReadBatchWithPaginationAsync(folder.NodeId!, skipCount, PAGE_SIZE, ct).ConfigureAwait(false);
 
-                if (result.Documents == null || result.Documents.Count == 0)
+                if (result == null || result.Count == 0)
                 {
                     _fileLogger.LogDebug("No more documents in current page for folder {FolderId}", folder.Id);
                     break;
                 }
 
                 _fileLogger.LogInformation("Found {Count} documents in page (skipCount={SkipCount}) for folder {FolderId}",
-                    result.Documents.Count, skipCount, folder.Id);
+                    result.Count, skipCount, folder.Id);
 
                 // Process documents from current page
-                var docsToInsert = new List<DocStaging>(result.Documents.Count);
+                var docsToInsert = new List<DocStaging>(result.Count);
 
-                foreach (var d in result.Documents)
+                foreach (var d in result)
                 {
                     var item = d.Entry.ToDocStagingInsert();
                     // ToPath will be determined by MoveService based on document properties
@@ -606,8 +606,8 @@ namespace Migration.Infrastructure.Implementation.Services
                     docsToInsert.Count, folder.Id, totalProcessed);
 
                 // Check if there are more documents
-                hasMore = result.HasMore;
-                skipCount += result.Documents.Count;
+                hasMore = result.Count > 0;
+                skipCount += result.Count;
             }
 
             if (totalProcessed == 0)
