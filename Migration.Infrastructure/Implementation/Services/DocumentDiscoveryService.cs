@@ -28,16 +28,15 @@ namespace Migration.Infrastructure.Implementation.Services
         private readonly IDocumentIngestor _ingestor;
         private readonly IDocStagingRepository _docRepo;
         private readonly IFolderStagingRepository _folderRepo;
+        private readonly IMigrationCheckpointRepository _checkpointRepo;
         private readonly IDocumentReader _reader;
         private readonly IOptions<MigrationOptions> _options;
         private readonly IUnitOfWork _unitOfWork;
         private readonly IServiceProvider _sp;
-        //private readonly ILogger<DocumentDiscoveryService> _logger;
-        //private readonly IUnitOfWork _unitOfWork;
         private readonly ILogger _dbLogger;
         private readonly ILogger _fileLogger;
         private readonly ILogger _uiLogger;
-        private readonly OpisToTipMapperV2 _opisToTipMapper;
+        private readonly IOpisToTipMapper _opisToTipMapper;
 
         private long _totalProcessed = 0;
         private long _totalFailed = 0;
@@ -50,24 +49,25 @@ namespace Migration.Infrastructure.Implementation.Services
             IDocumentReader reader,
             IDocStagingRepository docRepo,
             IFolderStagingRepository folderRepo,
+            IMigrationCheckpointRepository checkpointRepo,
             IOptions<MigrationOptions> options,
             IServiceProvider sp,
             IUnitOfWork unitOfWork,
             ILoggerFactory logger,
-            OpisToTipMapperV2 opisToTipMapper)
+            IOpisToTipMapper opisToTipMapper)
         {
             _ingestor = ingestor;
             _reader = reader;
             _docRepo = docRepo;
             _folderRepo = folderRepo;
+            _checkpointRepo = checkpointRepo ?? throw new ArgumentNullException(nameof(checkpointRepo));
             _options = options;
             _sp = sp;
+            _unitOfWork = unitOfWork ?? throw new ArgumentNullException(nameof(unitOfWork));
             _dbLogger = logger.CreateLogger("DbLogger");
             _fileLogger = logger.CreateLogger("FileLogger");
             _uiLogger = logger.CreateLogger("UiLogger");
             _opisToTipMapper = opisToTipMapper ?? throw new ArgumentNullException(nameof(opisToTipMapper));
-           // _logger = logger;
-            // _unitOfWork = unitOfWork;
         }
 
         public async Task<DocumentBatchResult> RunBatchAsync(CancellationToken ct)
@@ -400,46 +400,36 @@ namespace Migration.Infrastructure.Implementation.Services
                 var timeout = TimeSpan.FromMinutes(_options.Value.StuckItemsTimeoutMinutes);
                 _fileLogger.LogDebug("Checking for stuck folders with timeout: {Minutes} minutes", _options.Value.StuckItemsTimeoutMinutes);
 
-                await using var scope = _sp.CreateAsyncScope();
-                var uow = scope.ServiceProvider.GetRequiredService<IUnitOfWork>();
-                var folderRepo = scope.ServiceProvider.GetRequiredService<IFolderStagingRepository>();
+                await _unitOfWork.BeginAsync(ct: ct).ConfigureAwait(false);
 
-                await uow.BeginAsync(ct: ct).ConfigureAwait(false);
-                try
+                var resetCount = await _folderRepo.ResetStuckFolderAsync(
+                    _unitOfWork.Connection,
+                    _unitOfWork.Transaction,
+                    timeout,
+                    ct).ConfigureAwait(false);
+
+                await _unitOfWork.CommitAsync(ct: ct).ConfigureAwait(false);
+
+                if (resetCount > 0)
                 {
-                    var resetCount = await folderRepo.ResetStuckFolderAsync(
-                        uow.Connection,
-                        uow.Transaction,
-                        timeout,
-                        ct).ConfigureAwait(false);
-
-                    await uow.CommitAsync(ct: ct).ConfigureAwait(false);
-
-                    if (resetCount > 0)
-                    {
-                        _fileLogger.LogWarning(
-                            "Reset {Count} stuck folders that were IN PROGRESS for more than {Minutes} minutes",
-                            resetCount, _options.Value.StuckItemsTimeoutMinutes);
-                        _dbLogger.LogWarning(
-                            "Reset {Count} stuck folders (timeout: {Minutes} minutes)",
-                            resetCount, _options.Value.StuckItemsTimeoutMinutes);
-                        _uiLogger.LogWarning("Reset {Count} stuck folders", resetCount);
-                    }
-                    else
-                    {
-                        _fileLogger.LogInformation("No stuck folders found");
-                    }
+                    _fileLogger.LogWarning(
+                        "Reset {Count} stuck folders that were IN PROGRESS for more than {Minutes} minutes",
+                        resetCount, _options.Value.StuckItemsTimeoutMinutes);
+                    _dbLogger.LogWarning(
+                        "Reset {Count} stuck folders (timeout: {Minutes} minutes)",
+                        resetCount, _options.Value.StuckItemsTimeoutMinutes);
+                    _uiLogger.LogWarning("Reset {Count} stuck folders", resetCount);
                 }
-                catch
+                else
                 {
-                    await uow.RollbackAsync(ct: ct).ConfigureAwait(false);
-                    throw;
+                    _fileLogger.LogInformation("No stuck folders found");
                 }
             }
             catch (Exception ex)
             {
                 _fileLogger.LogWarning("Failed to reset stuck folders: {Error}", ex.Message);
                 _dbLogger.LogError(ex, "Failed to reset stuck folders");
+                await _unitOfWork.RollbackAsync(ct).ConfigureAwait(false);
             }
         }
 
@@ -447,44 +437,34 @@ namespace Migration.Infrastructure.Implementation.Services
         {
             try
             {
-                await using var scope = _sp.CreateAsyncScope();
-                var uow = scope.ServiceProvider.GetRequiredService<IUnitOfWork>();
-                var checkpointRepo = scope.ServiceProvider.GetRequiredService<IMigrationCheckpointRepository>();
+                await _unitOfWork.BeginAsync(ct: ct).ConfigureAwait(false);
 
-                await uow.BeginAsync(ct: ct).ConfigureAwait(false);
-                try
+                var checkpoint = await _checkpointRepo.GetByServiceNameAsync(ServiceName, ct).ConfigureAwait(false);
+                await _unitOfWork.CommitAsync(ct: ct).ConfigureAwait(false);
+
+                if (checkpoint != null)
                 {
-                    var checkpoint = await checkpointRepo.GetByServiceNameAsync(ServiceName, ct).ConfigureAwait(false);
-                    await uow.CommitAsync(ct: ct).ConfigureAwait(false);
+                    _totalProcessed = checkpoint.TotalProcessed;
+                    _totalFailed = checkpoint.TotalFailed;
+                    _batchCounter = checkpoint.BatchCounter;
 
-                    if (checkpoint != null)
-                    {
-                        _totalProcessed = checkpoint.TotalProcessed;
-                        _totalFailed = checkpoint.TotalFailed;
-                        _batchCounter = checkpoint.BatchCounter;
-
-                        _fileLogger.LogInformation(
-                            "Checkpoint loaded: {TotalProcessed} processed, {TotalFailed} failed, batch {BatchCounter}",
-                            _totalProcessed, _totalFailed, _batchCounter);
-                    }
-                    else
-                    {
-                        _fileLogger.LogInformation("No checkpoint found, starting fresh");
-                        _totalProcessed = 0;
-                        _totalFailed = 0;
-                        _batchCounter = 0;
-                    }
+                    _fileLogger.LogInformation(
+                        "Checkpoint loaded: {TotalProcessed} processed, {TotalFailed} failed, batch {BatchCounter}",
+                        _totalProcessed, _totalFailed, _batchCounter);
                 }
-                catch
+                else
                 {
-                    await uow.RollbackAsync(ct: ct).ConfigureAwait(false);
-                    throw;
+                    _fileLogger.LogInformation("No checkpoint found, starting fresh");
+                    _totalProcessed = 0;
+                    _totalFailed = 0;
+                    _batchCounter = 0;
                 }
             }
             catch (Exception ex)
             {
                 _fileLogger.LogWarning(ex, "Failed to load checkpoint, starting fresh");
                 _dbLogger.LogError(ex, "Failed to load checkpoint, starting fresh");
+                await _unitOfWork.RollbackAsync(ct: ct).ConfigureAwait(false);
                 _totalProcessed = 0;
                 _totalFailed = 0;
                 _batchCounter = 0;
@@ -495,36 +475,26 @@ namespace Migration.Infrastructure.Implementation.Services
         {
             try
             {
-                await using var scope = _sp.CreateAsyncScope();
-                var uow = scope.ServiceProvider.GetRequiredService<IUnitOfWork>();
-                var checkpointRepo = scope.ServiceProvider.GetRequiredService<IMigrationCheckpointRepository>();
+                await _unitOfWork.BeginAsync(ct: ct).ConfigureAwait(false);
 
-                await uow.BeginAsync(ct: ct).ConfigureAwait(false);
-                try
+                var checkpoint = new MigrationCheckpoint
                 {
-                    var checkpoint = new MigrationCheckpoint
-                    {
-                        ServiceName = ServiceName,
-                        TotalProcessed = _totalProcessed,
-                        TotalFailed = _totalFailed,
-                        BatchCounter = _batchCounter
-                    };
+                    ServiceName = ServiceName,
+                    TotalProcessed = _totalProcessed,
+                    TotalFailed = _totalFailed,
+                    BatchCounter = _batchCounter
+                };
 
-                    await checkpointRepo.UpsertAsync(checkpoint, ct).ConfigureAwait(false);
-                    await uow.CommitAsync(ct: ct).ConfigureAwait(false);
+                await _checkpointRepo.UpsertAsync(checkpoint, ct).ConfigureAwait(false);
+                await _unitOfWork.CommitAsync(ct: ct).ConfigureAwait(false);
 
-                    _fileLogger.LogDebug("Checkpoint saved: {TotalProcessed} processed, {TotalFailed} failed, batch {BatchCounter}",
-                        _totalProcessed, _totalFailed, _batchCounter);
-                }
-                catch
-                {
-                    await uow.RollbackAsync(ct: ct).ConfigureAwait(false);
-                    throw;
-                }
+                _fileLogger.LogDebug("Checkpoint saved: {TotalProcessed} processed, {TotalFailed} failed, batch {BatchCounter}",
+                    _totalProcessed, _totalFailed, _batchCounter);
             }
             catch (Exception ex)
             {
                 _dbLogger.LogWarning(ex, "Failed to save checkpoint");
+                await _unitOfWork.RollbackAsync(ct: ct).ConfigureAwait(false);
             }
         }
 
@@ -532,14 +502,11 @@ namespace Migration.Infrastructure.Implementation.Services
         {
             _fileLogger.LogDebug("Acquiring {BatchSize} folders for processing", batch);
 
-            await using var scope = _sp.CreateAsyncScope();
-            var uow = scope.ServiceProvider.GetRequiredService<IUnitOfWork>();
-            var folderRepo = scope.ServiceProvider.GetRequiredService<IFolderStagingRepository>();
-
-            await uow.BeginAsync(ct: ct).ConfigureAwait(false);
             try
             {
-                var folders = await folderRepo.TakeReadyForProcessingAsync(batch, ct).ConfigureAwait(false);
+                await _unitOfWork.BeginAsync(ct: ct).ConfigureAwait(false);
+
+                var folders = await _folderRepo.TakeReadyForProcessingAsync(batch, ct).ConfigureAwait(false);
                 _fileLogger.LogDebug("Retrieved {Count} folders from database", folders.Count);
 
                 // Batch update instead of N individual updates
@@ -549,24 +516,23 @@ namespace Migration.Infrastructure.Implementation.Services
                     (string?)null
                 ));
 
-                await folderRepo.BatchSetFolderStatusAsync_v1(
-                    uow.Connection,
-                    uow.Transaction,
+                await _folderRepo.BatchSetFolderStatusAsync_v1(
+                    _unitOfWork.Connection,
+                    _unitOfWork.Transaction,
                     updates,
                     ct).ConfigureAwait(false);
 
-                await uow.CommitAsync(ct: ct).ConfigureAwait(false);
+                await _unitOfWork.CommitAsync(ct: ct).ConfigureAwait(false);
                 _fileLogger.LogDebug("Marked {Count} folders as IN PROGRESS", folders.Count);
 
                 return folders;
-
             }
             catch (Exception ex)
             {
                 _fileLogger.LogError("Failed to acquire folders: {Error}", ex.Message);
                 _dbLogger.LogError(ex, "Failed to acquire folders for processing");
 
-                await uow.RollbackAsync(ct).ConfigureAwait(false);
+                await _unitOfWork.RollbackAsync(ct).ConfigureAwait(false);
                 throw;
             }
 
@@ -585,67 +551,97 @@ namespace Migration.Infrastructure.Implementation.Services
             _fileLogger.LogDebug("Processing folder {FolderId} ({Name}, NodeId: {NodeId})",
                 folder.Id, folder.Name, folder.NodeId);
 
-            _fileLogger.LogDebug("Reading documents from Alfresco folder {NodeId}", folder.NodeId);
-            var documents = await _reader.ReadBatchAsync(folder.NodeId!, ct).ConfigureAwait(false);
+            // Use pagination to prevent OutOfMemory for folders with many documents
+            const int PAGE_SIZE = 100; // Process 100 documents at a time
+            int skipCount = 0;
+            int totalProcessed = 0;
+            bool hasMore = true;
 
-            if (documents == null || documents.Count == 0)
+            _fileLogger.LogInformation("Reading documents from Alfresco folder {NodeId} with pagination (pageSize: {PageSize})",
+                folder.NodeId, PAGE_SIZE);
+
+            while (hasMore && !ct.IsCancellationRequested)
+            {
+                _fileLogger.LogDebug("Reading page: skipCount={SkipCount}, maxItems={MaxItems} for folder {FolderId}",
+                    skipCount, PAGE_SIZE, folder.Id);
+
+                var result = await _reader.ReadBatchWithPaginationAsync(folder.NodeId!, skipCount, PAGE_SIZE, ct).ConfigureAwait(false);
+
+                if (result.Documents == null || result.Documents.Count == 0)
+                {
+                    _fileLogger.LogDebug("No more documents in current page for folder {FolderId}", folder.Id);
+                    break;
+                }
+
+                _fileLogger.LogInformation("Found {Count} documents in page (skipCount={SkipCount}) for folder {FolderId}",
+                    result.Documents.Count, skipCount, folder.Id);
+
+                // Process documents from current page
+                var docsToInsert = new List<DocStaging>(result.Documents.Count);
+
+                foreach (var d in result.Documents)
+                {
+                    var item = d.Entry.ToDocStagingInsert();
+                    // ToPath will be determined by MoveService based on document properties
+                    item.ToPath = string.Empty; // Will be populated by MoveService
+                    item.Status = MigrationStatus.Ready.ToDbString();
+
+                    // Apply document mapping using mappers from Faza 1 (database-driven)
+                    await ApplyDocumentMappingAsync(item, folder, d.Entry, ct).ConfigureAwait(false);
+
+                    docsToInsert.Add(item);
+                }
+
+                _fileLogger.LogInformation(
+                    "Prepared {Count} documents for insertion from page (folder {FolderId})",
+                    docsToInsert.Count, folder.Id);
+
+                // Insert documents from current page
+                await InsertDocsAsync(docsToInsert, folder.Id, ct).ConfigureAwait(false);
+
+                totalProcessed += docsToInsert.Count;
+
+                _fileLogger.LogInformation(
+                    "Processed page: {Processed} documents from folder {FolderId}. Total so far: {Total}",
+                    docsToInsert.Count, folder.Id, totalProcessed);
+
+                // Check if there are more documents
+                hasMore = result.HasMore;
+                skipCount += result.Documents.Count;
+            }
+
+            if (totalProcessed == 0)
             {
                 _fileLogger.LogInformation(
                     "No documents found in folder {FolderId} ({Name}, NodeId: {NodeId}) - marking as PROCESSED",
                     folder.Id, folder.Name, folder.NodeId);
-                await MarkFolderAsProcessedAsync(folder.Id, ct).ConfigureAwait(false);
-                return;
             }
-            _fileLogger.LogInformation("Found {Count} documents in folder {FolderId} ({Name})",
-                documents.Count, folder.Id, folder.Name);
-
-            var docsToInsert = new List<DocStaging>(documents.Count);
-
-            foreach (var d in documents)
+            else
             {
-                var item = d.Entry.ToDocStagingInsert();
-                // ToPath will be determined by MoveService based on document properties
-                item.ToPath = string.Empty; // Will be populated by MoveService
-                item.Status = MigrationStatus.Ready.ToDbString();
-
-                // Apply document mapping using mappers from Faza 1 (database-driven)
-                await ApplyDocumentMappingAsync(item, folder, d.Entry, ct).ConfigureAwait(false);
-
-                docsToInsert.Add(item);
+                _fileLogger.LogInformation(
+                    "Successfully processed all pages for folder {FolderId} ({Name}): {Total} documents total",
+                    folder.Id, folder.Name, totalProcessed);
             }
 
-            _fileLogger.LogInformation(
-                "Prepared {Count} documents for insertion (folder {FolderId})",
-                docsToInsert.Count, folder.Id);
-
-            await InsertDocsAndMarkFolderAsync(docsToInsert, folder.Id, ct).ConfigureAwait(false);
-
-            _fileLogger.LogInformation(
-                "Successfully processed folder {FolderId} ({Name}): {Count} documents inserted",
-                folder.Id, folder.Name, docsToInsert.Count);
+            // Mark folder as processed after all pages are done
+            await MarkFolderAsProcessedAsync(folder.Id, ct).ConfigureAwait(false);
 
 
         }
 
         private async Task InsertDocsAndMarkFolderAsync(List<DocStaging> docsToInsert, long folderId, CancellationToken ct)
         {
-
-            await using var scope = _sp.CreateAsyncScope();
-            var uow = scope.ServiceProvider.GetRequiredService<IUnitOfWork>();
-            var docRepo = scope.ServiceProvider.GetRequiredService<IDocStagingRepository>();
-            var folderRepo = scope.ServiceProvider.GetRequiredService<IFolderStagingRepository>();
-
-            await uow.BeginAsync().ConfigureAwait(false);
-
             try
             {
+                await _unitOfWork.BeginAsync(ct: ct).ConfigureAwait(false);
+
                 int inserted = 0;
                 if (docsToInsert.Count > 0)
                 {
                     _fileLogger.LogDebug("Inserting {Count} documents for folder {FolderId}",
                         docsToInsert.Count, folderId);
 
-                    inserted = await docRepo.InsertManyAsync(docsToInsert, ct).ConfigureAwait(false);
+                    inserted = await _docRepo.InsertManyAsync(docsToInsert, ct).ConfigureAwait(false);
 
                     _fileLogger.LogInformation(
                         "Successfully inserted {Inserted}/{Total} documents for folder {FolderId}",
@@ -658,10 +654,10 @@ namespace Migration.Infrastructure.Implementation.Services
                         folderId);
                 }
 
-                await folderRepo.SetStatusAsync(folderId, MigrationStatus.Processed.ToDbString(), null, ct).ConfigureAwait(false);
+                await _folderRepo.SetStatusAsync(folderId, MigrationStatus.Processed.ToDbString(), null, ct).ConfigureAwait(false);
                 _fileLogger.LogDebug("Marked folder {FolderId} as PROCESSED", folderId);
 
-                await uow.CommitAsync().ConfigureAwait(false);
+                await _unitOfWork.CommitAsync(ct).ConfigureAwait(false);
                 _fileLogger.LogDebug("Transaction committed for folder {FolderId}", folderId);
             }
             catch (Exception ex)
@@ -671,11 +667,49 @@ namespace Migration.Infrastructure.Implementation.Services
                     "Attempted to insert {Count} documents. Rolling back transaction.",
                     folderId, docsToInsert.Count);
 
-                await uow.RollbackAsync().ConfigureAwait(false);
+                await _unitOfWork.RollbackAsync(ct).ConfigureAwait(false);
                 throw;
             }
+        }
 
-            //throw new NotImplementedException();
+        /// <summary>
+        /// Inserts documents without marking folder as processed.
+        /// Used in pagination loop where folder is marked after all pages are processed.
+        /// </summary>
+        private async Task InsertDocsAsync(List<DocStaging> docsToInsert, long folderId, CancellationToken ct)
+        {
+            if (docsToInsert == null || docsToInsert.Count == 0)
+            {
+                _fileLogger.LogDebug("No documents to insert for folder {FolderId}", folderId);
+                return;
+            }
+
+            try
+            {
+                await _unitOfWork.BeginAsync(ct: ct).ConfigureAwait(false);
+
+                _fileLogger.LogDebug("Inserting {Count} documents for folder {FolderId}",
+                    docsToInsert.Count, folderId);
+
+                int inserted = await _docRepo.InsertManyAsync(docsToInsert, ct).ConfigureAwait(false);
+
+                _fileLogger.LogInformation(
+                    "Successfully inserted {Inserted}/{Total} documents for folder {FolderId}",
+                    inserted, docsToInsert.Count, folderId);
+
+                await _unitOfWork.CommitAsync(ct).ConfigureAwait(false);
+                _fileLogger.LogDebug("Transaction committed for folder {FolderId}", folderId);
+            }
+            catch (Exception ex)
+            {
+                _dbLogger.LogError(ex,
+                    "Failed to insert documents for folder {FolderId}. " +
+                    "Attempted to insert {Count} documents. Rolling back transaction.",
+                    folderId, docsToInsert.Count);
+
+                await _unitOfWork.RollbackAsync(ct).ConfigureAwait(false);
+                throw;
+            }
         }
 
         //private async Task<List<(string NormalizedName, string DestinationId)>?> BuildParentPathFromDossierAsync(FolderStaging folder, CancellationToken ct)
@@ -773,24 +807,21 @@ namespace Migration.Infrastructure.Implementation.Services
 
         private async Task MarkFolderAsProcessedAsync(long id, CancellationToken ct)
         {
-            await using var scope = _sp.CreateAsyncScope();
-            var uow = scope.ServiceProvider.GetRequiredService<IUnitOfWork>();
-            var folderRepo = scope.ServiceProvider.GetRequiredService<IFolderStagingRepository>();
-
-            await uow.BeginAsync(ct: ct).ConfigureAwait(false);
             try
             {
-                await folderRepo.SetStatusAsync(
+                await _unitOfWork.BeginAsync(ct: ct).ConfigureAwait(false);
+
+                await _folderRepo.SetStatusAsync(
                     id,
                     MigrationStatus.Processed.ToDbString(),
                     null,
                     ct).ConfigureAwait(false);
 
-                await uow.CommitAsync(ct: ct).ConfigureAwait(false);
+                await _unitOfWork.CommitAsync(ct: ct).ConfigureAwait(false);
             }
             catch
             {
-                await uow.RollbackAsync(ct: ct).ConfigureAwait(false);
+                await _unitOfWork.RollbackAsync(ct: ct).ConfigureAwait(false);
                 throw;
             }
         }
@@ -799,13 +830,10 @@ namespace Migration.Infrastructure.Implementation.Services
            ConcurrentBag<(long FolderId, Exception Error)> errors,
            CancellationToken ct)
         {
-            await using var scope = _sp.CreateAsyncScope();
-            var uow = scope.ServiceProvider.GetRequiredService<IUnitOfWork>();
-            var folderRepo = scope.ServiceProvider.GetRequiredService<IFolderStagingRepository>();
-
-            await uow.BeginAsync(ct: ct).ConfigureAwait(false);
             try
             {
+                await _unitOfWork.BeginAsync(ct: ct).ConfigureAwait(false);
+
                 // Koristi batch extension method
                 var updates = errors.Select(e => (
                     e.FolderId,
@@ -815,20 +843,20 @@ namespace Migration.Infrastructure.Implementation.Services
                         : e.Error.Message
                 ));
 
-                await folderRepo.BatchSetFolderStatusAsync_v1(
-                    uow.Connection,
-                    uow.Transaction,
+                await _folderRepo.BatchSetFolderStatusAsync_v1(
+                    _unitOfWork.Connection,
+                    _unitOfWork.Transaction,
                     updates,
                     ct).ConfigureAwait(false);
 
-                await uow.CommitAsync(ct: ct).ConfigureAwait(false);
+                await _unitOfWork.CommitAsync(ct: ct).ConfigureAwait(false);
 
                 _fileLogger.LogWarning("Marked {Count} folders as failed", errors.Count);
             }
             catch (Exception ex)
             {
                 _dbLogger.LogError(ex, "Failed to mark folders as failed");
-                await uow.RollbackAsync(ct: ct).ConfigureAwait(false);
+                await _unitOfWork.RollbackAsync(ct: ct).ConfigureAwait(false);
             }
         }
 
