@@ -29,6 +29,8 @@ namespace Migration.Infrastructure.Implementation.Services
     {
         private readonly IFolderIngestor _ingestor;
         private readonly IFolderReader _reader;
+        private readonly IFolderStagingRepository _folderRepo;
+        private readonly IMigrationCheckpointRepository _checkpointRepo;
         private readonly IOptions<MigrationOptions> _options;
         private MultiFolderDiscoveryCursor? _multiFolderCursor = null;
         private readonly IServiceProvider _sp;
@@ -37,7 +39,6 @@ namespace Migration.Infrastructure.Implementation.Services
         private readonly ILogger _fileLogger;
         private readonly ILogger _uiLogger;
         private readonly IClientApi? _clientApi;
-        //private readonly ILogger<FolderDiscoveryService> _logger;
 
         private readonly object _cursorLock = new();
 
@@ -49,6 +50,8 @@ namespace Migration.Infrastructure.Implementation.Services
         public FolderDiscoveryService(
             IFolderIngestor ingestor,
             IFolderReader reader,
+            IFolderStagingRepository folderRepo,
+            IMigrationCheckpointRepository checkpointRepo,
             IOptions<MigrationOptions> options,
             IServiceProvider sp,
             IUnitOfWork unitOfWork,
@@ -57,11 +60,12 @@ namespace Migration.Infrastructure.Implementation.Services
         {
             _ingestor = ingestor;
             _reader = reader;
+            _folderRepo = folderRepo ?? throw new ArgumentNullException(nameof(folderRepo));
+            _checkpointRepo = checkpointRepo ?? throw new ArgumentNullException(nameof(checkpointRepo));
             _options = options;
             _sp = sp;
-            _unitOfWork = unitOfWork;
+            _unitOfWork = unitOfWork ?? throw new ArgumentNullException(nameof(unitOfWork));
             _clientApi = clientApi;
-            //_logger = logger;
             _dbLogger = logger.CreateLogger("DbLogger");
             _fileLogger = logger.CreateLogger("FileLogger");
             _uiLogger = logger.CreateLogger("UiLogger");
@@ -483,67 +487,57 @@ namespace Migration.Infrastructure.Implementation.Services
         {
             try
             {
-                await using var scope = _sp.CreateAsyncScope();
-                var uow = scope.ServiceProvider.GetRequiredService<IUnitOfWork>();
-                var checkpointRepo = scope.ServiceProvider.GetRequiredService<IMigrationCheckpointRepository>();
+                await _unitOfWork.BeginAsync(ct: ct).ConfigureAwait(false);
 
-                await uow.BeginAsync(ct: ct).ConfigureAwait(false);
-                try
+                var checkpoint = await _checkpointRepo.GetByServiceNameAsync(ServiceName, ct).ConfigureAwait(false);
+                await _unitOfWork.CommitAsync(ct: ct).ConfigureAwait(false);
+
+                if (checkpoint != null)
                 {
-                    var checkpoint = await checkpointRepo.GetByServiceNameAsync(ServiceName, ct).ConfigureAwait(false);
-                    await uow.CommitAsync(ct: ct).ConfigureAwait(false);
+                    _totalInserted = checkpoint.TotalProcessed;
 
-                    if (checkpoint != null)
+                    if (!string.IsNullOrEmpty(checkpoint.CheckpointData))
                     {
-                        _totalInserted = checkpoint.TotalProcessed;
-
-                        if (!string.IsNullOrEmpty(checkpoint.CheckpointData))
+                        try
                         {
-                            try
+                            // NOTE: FolderSeekCursor model was updated to include LastObjectName (composite cursor)
+                            // Old checkpoints (with 2-parameter cursor) will fail to deserialize
+                            // In that case, we start fresh from the beginning
+                            var multiCursor = JsonSerializer.Deserialize<MultiFolderDiscoveryCursor>(checkpoint.CheckpointData);
+                            lock (_cursorLock)
                             {
-                                // NOTE: FolderSeekCursor model was updated to include LastObjectName (composite cursor)
-                                // Old checkpoints (with 2-parameter cursor) will fail to deserialize
-                                // In that case, we start fresh from the beginning
-                                var multiCursor = JsonSerializer.Deserialize<MultiFolderDiscoveryCursor>(checkpoint.CheckpointData);
-                                lock (_cursorLock)
-                                {
-                                    _multiFolderCursor = multiCursor;
-                                }
-
-                                _fileLogger.LogInformation(
-                                    "Checkpoint loaded: {TotalProcessed} processed, on folder {FolderType} (index {Index})",
-                                    _totalInserted, multiCursor?.CurrentFolderType, multiCursor?.CurrentFolderIndex);
+                                _multiFolderCursor = multiCursor;
                             }
-                            catch (JsonException ex)
-                            {
-                                _fileLogger.LogWarning(ex,
-                                    "Failed to deserialize checkpoint data (likely old format). Starting from beginning. " +
-                                    "TotalProcessed count ({TotalProcessed}) is preserved.",
-                                    _totalInserted);
 
-                                // Start fresh, but keep TotalProcessed count
-                                _multiFolderCursor = null;
-                            }
+                            _fileLogger.LogInformation(
+                                "Checkpoint loaded: {TotalProcessed} processed, on folder {FolderType} (index {Index})",
+                                _totalInserted, multiCursor?.CurrentFolderType, multiCursor?.CurrentFolderIndex);
                         }
-                        else
+                        catch (JsonException ex)
                         {
-                            _fileLogger.LogInformation("Checkpoint loaded: {TotalProcessed} processed (no cursor)", _totalInserted);
+                            _fileLogger.LogWarning(ex,
+                                "Failed to deserialize checkpoint data (likely old format). Starting from beginning. " +
+                                "TotalProcessed count ({TotalProcessed}) is preserved.",
+                                _totalInserted);
+
+                            // Start fresh, but keep TotalProcessed count
+                            _multiFolderCursor = null;
                         }
                     }
                     else
                     {
-                        _fileLogger.LogInformation("No checkpoint found, starting fresh");
+                        _fileLogger.LogInformation("Checkpoint loaded: {TotalProcessed} processed (no cursor)", _totalInserted);
                     }
                 }
-                catch
+                else
                 {
-                    await uow.RollbackAsync(ct: ct).ConfigureAwait(false);
-                    throw;
+                    _fileLogger.LogInformation("No checkpoint found, starting fresh");
                 }
             }
             catch (Exception ex)
             {
                 _dbLogger.LogWarning(ex, "Failed to load checkpoint, starting fresh");
+                await _unitOfWork.RollbackAsync(ct: ct).ConfigureAwait(false);
             }
         }
 
@@ -557,37 +551,27 @@ namespace Migration.Infrastructure.Implementation.Services
                     currentMultiCursor = _multiFolderCursor;
                 }
 
-                await using var scope = _sp.CreateAsyncScope();
-                var uow = scope.ServiceProvider.GetRequiredService<IUnitOfWork>();
-                var checkpointRepo = scope.ServiceProvider.GetRequiredService<IMigrationCheckpointRepository>();
+                await _unitOfWork.BeginAsync(ct: ct).ConfigureAwait(false);
 
-                await uow.BeginAsync(ct: ct).ConfigureAwait(false);
-                try
+                var checkpoint = new MigrationCheckpoint
                 {
-                    var checkpoint = new MigrationCheckpoint
-                    {
-                        ServiceName = ServiceName,
-                        CheckpointData = currentMultiCursor != null ? JsonSerializer.Serialize(currentMultiCursor) : null,
-                        LastProcessedId = currentMultiCursor?.CurrentCursor?.LastObjectId,
-                        LastProcessedAt = currentMultiCursor?.CurrentCursor?.LastObjectCreated.UtcDateTime,
-                        TotalProcessed = _totalInserted,
-                        TotalFailed = 0
-                    };
+                    ServiceName = ServiceName,
+                    CheckpointData = currentMultiCursor != null ? JsonSerializer.Serialize(currentMultiCursor) : null,
+                    LastProcessedId = currentMultiCursor?.CurrentCursor?.LastObjectId,
+                    LastProcessedAt = currentMultiCursor?.CurrentCursor?.LastObjectCreated.UtcDateTime,
+                    TotalProcessed = _totalInserted,
+                    TotalFailed = 0
+                };
 
-                    await checkpointRepo.UpsertAsync(checkpoint, ct).ConfigureAwait(false);
-                    await uow.CommitAsync(ct: ct).ConfigureAwait(false);
+                await _checkpointRepo.UpsertAsync(checkpoint, ct).ConfigureAwait(false);
+                await _unitOfWork.CommitAsync(ct: ct).ConfigureAwait(false);
 
-                    _fileLogger.LogDebug("Checkpoint saved: {TotalProcessed} processed", _totalInserted);
-                }
-                catch
-                {
-                    await uow.RollbackAsync(ct: ct).ConfigureAwait(false);
-                    throw;
-                }
+                _fileLogger.LogDebug("Checkpoint saved: {TotalProcessed} processed", _totalInserted);
             }
             catch (Exception ex)
             {
                 _dbLogger.LogWarning(ex, "Failed to save checkpoint");
+                await _unitOfWork.RollbackAsync(ct: ct).ConfigureAwait(false);
             }
         }
 
@@ -603,15 +587,12 @@ namespace Migration.Infrastructure.Implementation.Services
 
             _fileLogger.LogDebug("Inserting {Count} folders into staging table", folders.Count);
 
-            await using var scope = _sp.CreateAsyncScope();
-            var uow = scope.ServiceProvider.GetRequiredService<IUnitOfWork>();
-            var folderRepo = scope.ServiceProvider.GetRequiredService<IFolderStagingRepository>();
-
-            await uow.BeginAsync(IsolationLevel.ReadCommitted, ct).ConfigureAwait(false);
             try
             {
-                var inserted = await folderRepo.InsertManyAsync(folders, ct).ConfigureAwait(false);
-                await uow.CommitAsync(ct: ct).ConfigureAwait(false);
+                await _unitOfWork.BeginAsync(IsolationLevel.ReadCommitted, ct).ConfigureAwait(false);
+
+                var inserted = await _folderRepo.InsertManyAsync(folders, ct).ConfigureAwait(false);
+                await _unitOfWork.CommitAsync(ct: ct).ConfigureAwait(false);
 
                 _fileLogger.LogInformation("Successfully inserted {Count} folders into staging", inserted);
                 return inserted;
@@ -621,7 +602,7 @@ namespace Migration.Infrastructure.Implementation.Services
                 _fileLogger.LogError("Failed to insert {Count} folders: {Error}", folders.Count, ex.Message);
                 _dbLogger.LogError(ex, "Failed to insert {Count} folders", folders.Count);
 
-                await uow.RollbackAsync(ct: ct).ConfigureAwait(false);
+                await _unitOfWork.RollbackAsync(ct: ct).ConfigureAwait(false);
                 throw;
             }
         }

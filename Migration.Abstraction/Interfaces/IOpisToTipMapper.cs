@@ -28,18 +28,19 @@ namespace Migration.Abstraction.Interfaces
         Task<bool> IsKnownOpisAsync(string opisDokumenta, CancellationToken ct = default);
 
         /// <summary>
+        /// Gets all registered mappings from DocumentMappingService (for debugging/testing purposes).
+        /// </summary>
+        /// <param name="opisDokumenta">Document description from Alfresco</param>
+        /// <param name="ct">Cancellation token</param>
+        /// <returns>Dictionary of all mappings (Naziv/NazivDokumenta → SifraDokumentaMigracija)</returns>
+        Task<IReadOnlyDictionary<string, string>> GetAllMappingsAsync(CancellationToken ct = default);
+
+        /// <summary>
         /// Gets the full mapping info from DocumentMappingService for given document description.
         /// </summary>
         /// <param name="opisDokumenta">Document description from Alfresco</param>
         /// <param name="ct">Cancellation token</param>
         /// <returns>Full mapping or null if not found</returns>
         Task<DocumentMapping?> GetFullMappingAsync(string opisDokumenta, CancellationToken ct = default);
-
-        /// <summary>
-        /// Gets all registered mappings (for debugging/testing purposes).
-        /// </summary>
-        /// <param name="ct">Cancellation token</param>
-        /// <returns>Dictionary of all mappings (Naziv/NazivDokumenta → SifraDokumentaMigracija)</returns>
-        Task<IReadOnlyDictionary<string, string>> GetAllMappingsAsync(CancellationToken ct = default);
     }
 }
