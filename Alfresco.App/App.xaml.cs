@@ -304,7 +304,7 @@ namespace Alfresco.App
 
                     services.AddTransient<IFolderReader, FolderReader>();
                     services.AddTransient<IFolderIngestor,FolderIngestor>();
-                    services.AddSingleton<IFolderDiscoveryService, FolderDiscoveryService>();
+                    services.AddScoped<IFolderDiscoveryService, FolderDiscoveryService>();
 
                     // Folder path and management services
                     services.AddSingleton<IFolderPathService, Migration.Infrastructure.Implementation.FolderPathService>();
@@ -313,13 +313,13 @@ namespace Alfresco.App
                     services.AddTransient<IDocumentReader, DocumentReader>();
                     services.AddTransient<IDocumentResolver, DocumentResolver>();
                     services.AddTransient<IDocumentIngestor, DocumentIngestor>();
-                    services.AddSingleton<IDocumentDiscoveryService, DocumentDiscoveryService>();
+                    services.AddScoped<IDocumentDiscoveryService, DocumentDiscoveryService>();
 
                     
                     
                     services.AddTransient<IMoveReader, MoveReader>();
                     services.AddTransient<IMoveExecutor, MoveExecutor>();
-                    services.AddSingleton<IMoveService, MoveService>();
+                    services.AddScoped<IMoveService, MoveService>();
 
                     services.AddSingleton<IAlfrescoDbReader, AlfrescoDbReader>();
 
