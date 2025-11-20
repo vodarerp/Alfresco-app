@@ -106,8 +106,8 @@ public static class Program
                             // Distribute folders across client types
                             var clientType = cfg.ClientTypes[i % cfg.ClientTypes.Length];
                             var coreId = cfg.StartingCoreId + i;
-                            // IMPORTANT: Create OLD format WITH "-" for migration testing
-                            folderName = $"{clientType}-{coreId}"; // e.g., PI-102206, LE-500342, ACC-13001926
+                            // Format: Create without "-" separator
+                            folderName = $"{clientType}{coreId}"; // e.g., PI102206, LE500342, ACC13001926
                             parentId = dosieFolders[clientType]; // DOSSIERS-PI, DOSSIERS-LE, etc.
                         }
                         else
@@ -176,8 +176,8 @@ public static class Program
                                 var contractDate = DateTime.UtcNow.AddDays(-new Random(coreId).Next(1, 365));
                                 var contractNumber = contractDate.ToString("yyyyMMdd");
 
-                                // Create DE folder: DE-{CoreId}-{ContractNumber}
-                                var depositFolderName = $"DE-{coreId}-{contractNumber}";
+                                // Create DE folder: DE{CoreId}{ContractNumber}
+                                var depositFolderName = $"DE{coreId}{contractNumber}";
                                 var depositParentId = dosieFolders["DE"]; // DOSSIERS-DE folder
 
                                 try
@@ -833,8 +833,8 @@ public static class Program
         properties["cm:title"] = $"Deposit Dossier {coreId} - {contractNumber}";
         properties["cm:description"] = $"Deposit dossier for CoreId {coreId}, Contract {contractNumber}";
 
-        // Unique folder identifier: DE-{CoreId}-{ContractNumber}
-        var uniqueFolderId = $"DE-{coreId}-{contractNumber}";
+        // Unique folder identifier: DE{CoreId}{ContractNumber}
+        var uniqueFolderId = $"DE{coreId}{contractNumber}";
         properties["ecm:uniqueFolderId"] = uniqueFolderId;
         properties["ecm:folderId"] = uniqueFolderId;
 
@@ -1095,7 +1095,7 @@ public static class Program
         properties["ecm:productType"] = properties["ecm:bnkTypeOfProduct"];
 
         // Unique folder identifier
-        string uniqueFolderId = clientType == "PI" ? $"PI-{coreId}" : $"LE-{coreId}";
+        string uniqueFolderId = clientType == "PI" ? $"PI{coreId}" : $"LE{coreId}";
         properties["ecm:uniqueFolderId"] = uniqueFolderId;
         properties["ecm:folderId"] = uniqueFolderId;
 
@@ -1303,9 +1303,9 @@ public static class Program
         properties["cm:title"] = $"Deposit Dossier {coreId}";
         properties["cm:description"] = $"Deposit dossier for CoreId {coreId}";
 
-        // Test Case 18: Unique identifier format DE-{CoreId}-{ProductType}-{ContractNumber}
+        // Test Case 18: Unique identifier format DE{CoreId}{ProductType}{ContractNumber}
         var timestamp = DateTime.UtcNow.ToString("yyyyMMddHHmmss");
-        var uniqueFolderId = $"DE-{coreId}-{productType}-{contractNumber}_{timestamp}";
+        var uniqueFolderId = $"DE{coreId}{productType}{contractNumber}_{timestamp}";
         properties["ecm:uniqueFolderId"] = uniqueFolderId;
         properties["ecm:folderId"] = uniqueFolderId;
 
