@@ -289,7 +289,8 @@ namespace Alfresco.App
                     services.AddScoped<Migration.Abstraction.Interfaces.IDocumentMappingService, Migration.Infrastructure.Implementation.DocumentMappingService>();
 
                     // Mappers that use DocumentMappingService
-                    services.AddScoped<Migration.Abstraction.Interfaces.IOpisToTipMapper, Migration.Infrastructure.Implementation.OpisToTipMapperV2>();
+                    // Using OptimizedOpisToTipMapper with in-memory caching (30× faster than OpisToTipMapperV2)
+                    services.AddScoped<Migration.Abstraction.Interfaces.IOpisToTipMapper, Migration.Infrastructure.Implementation.Mappers.OptimizedOpisToTipMapper>();
                     services.AddScoped<Migration.Infrastructure.Implementation.DocumentStatusDetectorV2>();
 
                     #region oracle DI (commented)
@@ -307,7 +308,7 @@ namespace Alfresco.App
 
                     services.AddTransient<IFolderReader, FolderReader>();
                     services.AddTransient<IFolderIngestor,FolderIngestor>();
-                    services.AddScoped<IFolderDiscoveryService, FolderDiscoveryService>();
+                    services.AddSingleton<IFolderDiscoveryService, FolderDiscoveryService>();
 
                     // Folder path and management services
                     services.AddSingleton<IFolderPathService, Migration.Infrastructure.Implementation.FolderPathService>();
@@ -316,13 +317,13 @@ namespace Alfresco.App
                     services.AddTransient<IDocumentReader, DocumentReader>();
                     services.AddTransient<IDocumentResolver, DocumentResolver>();
                     services.AddTransient<IDocumentIngestor, DocumentIngestor>();
-                    services.AddScoped<IDocumentDiscoveryService, DocumentDiscoveryService>();
+                    services.AddSingleton<IDocumentDiscoveryService, DocumentDiscoveryService>();
 
                     
                     
                     services.AddTransient<IMoveReader, MoveReader>();
                     services.AddTransient<IMoveExecutor, MoveExecutor>();
-                    services.AddScoped<IMoveService, MoveService>();
+                    services.AddSingleton<IMoveService, MoveService>();
 
                     // NEW: FolderPreparationService (FAZA 3 - parallel folder creation)
                     services.AddSingleton<IFolderPreparationService, FolderPreparationService>();

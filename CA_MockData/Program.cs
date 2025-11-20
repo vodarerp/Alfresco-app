@@ -20,7 +20,7 @@ public static class Program
             BaseUrl = "http://localhost:8080/",
             Username =  "admin",
             Password = "admin",
-            RootParentId = "93acf420-1f9d-4a16-acf4-201f9d6a16f0",
+            RootParentId = "d795adcd-090e-4b6f-95ad-cd090e3b6f9e",
             FolderCount = 10,
             DocsPerFolder = 3,
             DegreeOfParallelism = 8,

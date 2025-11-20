@@ -29,13 +29,12 @@ namespace Migration.Infrastructure.Implementation.Services
         private readonly IMoveReader _moveReader;
         private readonly IMoveExecutor _moveExecutor;
         private readonly IDocStagingRepository _docRepo;
-        private readonly IMigrationCheckpointRepository _checkpointRepo;
         private readonly IDocumentResolver _resolver;
         private readonly IAlfrescoWriteApi _write;
         private readonly IAlfrescoReadApi _read;
         private readonly IOptions<MigrationOptions> _options;
         private readonly IServiceProvider _sp;
-        private readonly IUnitOfWork _unitOfWork;
+        //private readonly ILogger<MoveService> _fileLogger;
 
         private readonly ILogger _dbLogger;
         private readonly ILogger _fileLogger;
@@ -52,29 +51,16 @@ namespace Migration.Infrastructure.Implementation.Services
         // Folder caching is now handled by DocumentResolver (with lock striping)
         // All folders are pre-created by FolderPreparationService in FAZA 3
 
-        public MoveService(
-            IMoveReader moveService,
-            IMoveExecutor moveExecutor,
-            IDocStagingRepository docRepo,
-            IMigrationCheckpointRepository checkpointRepo,
-            IDocumentResolver resolver,
-            IAlfrescoWriteApi write,
-            IAlfrescoReadApi read,
-            IOptions<MigrationOptions> options,
-            IServiceProvider sp,
-            IUnitOfWork unitOfWork,
-            ILoggerFactory logger)
+        public MoveService(IMoveReader moveService, IMoveExecutor moveExecutor, IDocStagingRepository docRepo, IDocumentResolver resolver, IAlfrescoWriteApi write, IAlfrescoReadApi read, IOptions<MigrationOptions> options, IServiceProvider sp, ILoggerFactory logger)
         {
             _moveReader = moveService;
             _moveExecutor = moveExecutor;
-            _docRepo = docRepo ?? throw new ArgumentNullException(nameof(docRepo));
-            _checkpointRepo = checkpointRepo ?? throw new ArgumentNullException(nameof(checkpointRepo));
+            _docRepo = docRepo;
             _resolver = resolver;
             _write = write;
             _read = read;
             _options = options;
             _sp = sp;
-            _unitOfWork = unitOfWork ?? throw new ArgumentNullException(nameof(unitOfWork));
             _dbLogger = logger.CreateLogger("DbLogger");
             _fileLogger = logger.CreateLogger("FileLogger");
             _uiLogger = logger.CreateLogger("UiLogger");
@@ -300,36 +286,46 @@ namespace Migration.Infrastructure.Implementation.Services
                 var timeout = TimeSpan.FromMinutes(_options.Value.StuckItemsTimeoutMinutes);
                 _fileLogger.LogDebug("Checking for stuck documents with timeout: {Minutes} minutes", _options.Value.StuckItemsTimeoutMinutes);
 
-                await _unitOfWork.BeginAsync(ct: ct).ConfigureAwait(false);
+                await using var scope = _sp.CreateAsyncScope();
+                var uow = scope.ServiceProvider.GetRequiredService<IUnitOfWork>();
+                var docRepo = scope.ServiceProvider.GetRequiredService<IDocStagingRepository>();
 
-                var resetCount = await _docRepo.ResetStuckDocumentsAsync(
-                    _unitOfWork.Connection,
-                    _unitOfWork.Transaction,
-                    timeout,
-                    ct).ConfigureAwait(false);
-
-                await _unitOfWork.CommitAsync(ct: ct).ConfigureAwait(false);
-
-                if (resetCount > 0)
+                await uow.BeginAsync(ct: ct).ConfigureAwait(false);
+                try
                 {
-                    _fileLogger.LogWarning(
-                        "Reset {Count} stuck documents that were IN PROGRESS for more than {Minutes} minutes",
-                        resetCount, _options.Value.StuckItemsTimeoutMinutes);
-                    _dbLogger.LogWarning(
-                        "Reset {Count} stuck documents (timeout: {Minutes} minutes)",
-                        resetCount, _options.Value.StuckItemsTimeoutMinutes);
-                    _uiLogger.LogWarning("Reset {Count} stuck documents", resetCount);
+                    var resetCount = await docRepo.ResetStuckDocumentsAsync(
+                        uow.Connection,
+                        uow.Transaction,
+                        timeout,
+                        ct).ConfigureAwait(false);
+
+                    await uow.CommitAsync(ct: ct).ConfigureAwait(false);
+
+                    if (resetCount > 0)
+                    {
+                        _fileLogger.LogWarning(
+                            "Reset {Count} stuck documents that were IN PROGRESS for more than {Minutes} minutes",
+                            resetCount, _options.Value.StuckItemsTimeoutMinutes);
+                        _dbLogger.LogWarning(
+                            "Reset {Count} stuck documents (timeout: {Minutes} minutes)",
+                            resetCount, _options.Value.StuckItemsTimeoutMinutes);
+                        _uiLogger.LogWarning("Reset {Count} stuck documents", resetCount);
+                    }
+                    else
+                    {
+                        _fileLogger.LogInformation("No stuck documents found");
+                    }
                 }
-                else
+                catch
                 {
-                    _fileLogger.LogInformation("No stuck documents found");
+                    await uow.RollbackAsync(ct: ct).ConfigureAwait(false);
+                    throw;
                 }
             }
             catch (Exception ex)
             {
                 _fileLogger.LogWarning("Failed to reset stuck documents: {Error}", ex.Message);
                 _dbLogger.LogError(ex, "Failed to reset stuck documents");
-                await _unitOfWork.RollbackAsync(ct: ct).ConfigureAwait(false);
             }
         }
 
@@ -338,38 +334,47 @@ namespace Migration.Infrastructure.Implementation.Services
             try
             {
                 _fileLogger.LogDebug("Loading checkpoint for Move service...");
+                await using var scope = _sp.CreateAsyncScope();
+                var uow = scope.ServiceProvider.GetRequiredService<IUnitOfWork>();
+                var checkpointRepo = scope.ServiceProvider.GetRequiredService<IMigrationCheckpointRepository>();
 
-                await _unitOfWork.BeginAsync(ct: ct).ConfigureAwait(false);
-
-                var checkpoint = await _checkpointRepo.GetByServiceNameAsync(ServiceName, ct).ConfigureAwait(false);
-                await _unitOfWork.CommitAsync(ct: ct).ConfigureAwait(false);
-
-                if (checkpoint != null)
+                await uow.BeginAsync(ct: ct).ConfigureAwait(false);
+                try
                 {
-                    _totalMoved = checkpoint.TotalProcessed;
-                    _totalFailed = checkpoint.TotalFailed;
-                    _batchCounter = checkpoint.BatchCounter;
+                    var checkpoint = await checkpointRepo.GetByServiceNameAsync(ServiceName, ct).ConfigureAwait(false);
+                    await uow.CommitAsync(ct: ct).ConfigureAwait(false);
 
-                    _fileLogger.LogInformation(
-                        "Checkpoint loaded: {TotalMoved} moved, {TotalFailed} failed, batch {BatchCounter}",
-                        _totalMoved, _totalFailed, _batchCounter);
-                    _dbLogger.LogInformation(
-                        "Checkpoint loaded: {TotalMoved} moved, {TotalFailed} failed, batch {BatchCounter}",
-                        _totalMoved, _totalFailed, _batchCounter);
+                    if (checkpoint != null)
+                    {
+                        _totalMoved = checkpoint.TotalProcessed;
+                        _totalFailed = checkpoint.TotalFailed;
+                        _batchCounter = checkpoint.BatchCounter;
+
+                        _fileLogger.LogInformation(
+                            "Checkpoint loaded: {TotalMoved} moved, {TotalFailed} failed, batch {BatchCounter}",
+                            _totalMoved, _totalFailed, _batchCounter);
+                        _dbLogger.LogInformation(
+                            "Checkpoint loaded: {TotalMoved} moved, {TotalFailed} failed, batch {BatchCounter}",
+                            _totalMoved, _totalFailed, _batchCounter);
+                    }
+                    else
+                    {
+                        _fileLogger.LogInformation("No checkpoint found, starting fresh");
+                        _totalMoved = 0;
+                        _totalFailed = 0;
+                        _batchCounter = 0;
+                    }
                 }
-                else
+                catch
                 {
-                    _fileLogger.LogInformation("No checkpoint found, starting fresh");
-                    _totalMoved = 0;
-                    _totalFailed = 0;
-                    _batchCounter = 0;
+                    await uow.RollbackAsync(ct: ct).ConfigureAwait(false);
+                    throw;
                 }
             }
             catch (Exception ex)
             {
                 _fileLogger.LogWarning("Failed to load checkpoint, starting fresh: {Error}", ex.Message);
                 _dbLogger.LogError(ex, "Failed to load checkpoint, starting fresh");
-                await _unitOfWork.RollbackAsync(ct: ct).ConfigureAwait(false);
                 _totalMoved = 0;
                 _totalFailed = 0;
                 _batchCounter = 0;
@@ -380,26 +385,36 @@ namespace Migration.Infrastructure.Implementation.Services
         {
             try
             {
-                await _unitOfWork.BeginAsync(ct: ct).ConfigureAwait(false);
+                await using var scope = _sp.CreateAsyncScope();
+                var uow = scope.ServiceProvider.GetRequiredService<IUnitOfWork>();
+                var checkpointRepo = scope.ServiceProvider.GetRequiredService<IMigrationCheckpointRepository>();
 
-                var checkpoint = new MigrationCheckpoint
+                await uow.BeginAsync(ct: ct).ConfigureAwait(false);
+                try
                 {
-                    ServiceName = ServiceName,
-                    TotalProcessed = _totalMoved,
-                    TotalFailed = _totalFailed,
-                    BatchCounter = _batchCounter
-                };
+                    var checkpoint = new MigrationCheckpoint
+                    {
+                        ServiceName = ServiceName,
+                        TotalProcessed = _totalMoved,
+                        TotalFailed = _totalFailed,
+                        BatchCounter = _batchCounter
+                    };
 
-                await _checkpointRepo.UpsertAsync(checkpoint, ct).ConfigureAwait(false);
-                await _unitOfWork.CommitAsync(ct: ct).ConfigureAwait(false);
+                    await checkpointRepo.UpsertAsync(checkpoint, ct).ConfigureAwait(false);
+                    await uow.CommitAsync(ct: ct).ConfigureAwait(false);
 
-                _fileLogger.LogDebug("Checkpoint saved: {TotalMoved} moved, {TotalFailed} failed, batch {BatchCounter}",
-                    _totalMoved, _totalFailed, _batchCounter);
+                    _fileLogger.LogDebug("Checkpoint saved: {TotalMoved} moved, {TotalFailed} failed, batch {BatchCounter}",
+                        _totalMoved, _totalFailed, _batchCounter);
+                }
+                catch
+                {
+                    await uow.RollbackAsync(ct: ct).ConfigureAwait(false);
+                    throw;
+                }
             }
             catch (Exception ex)
             {
                 _fileLogger.LogWarning(ex, "Failed to save checkpoint");
-                await _unitOfWork.RollbackAsync(ct: ct).ConfigureAwait(false);
             }
         }
 
@@ -407,26 +422,29 @@ namespace Migration.Infrastructure.Implementation.Services
         {
             _fileLogger.LogDebug("Acquiring {BatchSize} documents for processing", batch);
 
+            await using var scope = _sp.CreateAsyncScope();
+            var uow = scope.ServiceProvider.GetRequiredService<IUnitOfWork>();
+            var docRepo = scope.ServiceProvider.GetRequiredService<IDocStagingRepository>();
+
+            await uow.BeginAsync(ct: ct).ConfigureAwait(false);
             try
             {
-                await _unitOfWork.BeginAsync(ct: ct).ConfigureAwait(false);
-
-                var documents = await _docRepo.TakeReadyForProcessingAsync(batch, ct).ConfigureAwait(false);
+                var documents = await docRepo.TakeReadyForProcessingAsync(batch, ct).ConfigureAwait(false);
                 _fileLogger.LogDebug("Retrieved {Count} documents from database", documents.Count);
-
+                
                 var updates = documents.Select(d => (
                     d.Id,
                     MigrationStatus.InProgress.ToDbString(),
                     (string?)null
                 ));
 
-                await _docRepo.BatchSetDocumentStatusAsync_v1(
-                    _unitOfWork.Connection,
-                    _unitOfWork.Transaction,
+                await docRepo.BatchSetDocumentStatusAsync_v1(
+                    uow.Connection,
+                    uow.Transaction,
                     updates,
                     ct).ConfigureAwait(false);
 
-                await _unitOfWork.CommitAsync(ct).ConfigureAwait(false);
+                await uow.CommitAsync().ConfigureAwait(false);
                 _fileLogger.LogDebug("Marked {Count} documents as IN PROGRESS", documents.Count);
 
                 return documents;
@@ -435,9 +453,10 @@ namespace Migration.Infrastructure.Implementation.Services
             {
                 _fileLogger.LogError("Failed to acquire documents: {Error}", ex.Message);
                 _dbLogger.LogError(ex, "Failed to acquire documents for move");
-                await _unitOfWork.RollbackAsync(ct).ConfigureAwait(false);
+                await uow.RollbackAsync().ConfigureAwait(false);
                 throw;
             }
+
         }
 
         /// <summary>
@@ -631,10 +650,13 @@ namespace Migration.Infrastructure.Implementation.Services
             ConcurrentBag<(long DocId, Exception Error)> errors,
             CancellationToken ct)
         {
+            await using var scope = _sp.CreateAsyncScope();
+            var uow = scope.ServiceProvider.GetRequiredService<IUnitOfWork>();
+            var docRepo = scope.ServiceProvider.GetRequiredService<IDocStagingRepository>();
+
+            await uow.BeginAsync(ct: ct).ConfigureAwait(false);
             try
             {
-                await _unitOfWork.BeginAsync(ct: ct).ConfigureAwait(false);
-
                 // Koristi batch extension method umesto pojedinačnih update-a
                 var updates = errors.Select(e => (
                     e.DocId,
@@ -644,20 +666,20 @@ namespace Migration.Infrastructure.Implementation.Services
                         : e.Error.Message
                 ));
 
-                await _docRepo.BatchSetDocumentStatusAsync_v1(
-                    _unitOfWork.Connection,
-                    _unitOfWork.Transaction,
+                await docRepo.BatchSetDocumentStatusAsync_v1(
+                    uow.Connection,
+                    uow.Transaction,
                     updates,
                     ct).ConfigureAwait(false);
 
-                await _unitOfWork.CommitAsync(ct: ct).ConfigureAwait(false);
+                await uow.CommitAsync(ct: ct).ConfigureAwait(false);
 
                 _fileLogger.LogWarning("Marked {Count} documents as failed", errors.Count);
             }
             catch (Exception ex)
             {
                 _dbLogger.LogError(ex, "Failed to mark documents as failed");
-                await _unitOfWork.RollbackAsync(ct: ct).ConfigureAwait(false);
+                await uow.RollbackAsync(ct: ct).ConfigureAwait(false);
             }
         }
 
@@ -665,10 +687,13 @@ namespace Migration.Infrastructure.Implementation.Services
             ConcurrentBag<long> docsIds,
             CancellationToken ct)
         {
+            await using var scope = _sp.CreateAsyncScope();
+            var uow = scope.ServiceProvider.GetRequiredService<IUnitOfWork>();
+            var docRepo = scope.ServiceProvider.GetRequiredService<IDocStagingRepository>();
+
+            await uow.BeginAsync(ct: ct).ConfigureAwait(false);
             try
             {
-                await _unitOfWork.BeginAsync(ct: ct).ConfigureAwait(false);
-
                 // Koristi batch extension method umesto pojedinačnih update-a
                 var updates = docsIds.Select(id => (
                     id,
@@ -676,20 +701,20 @@ namespace Migration.Infrastructure.Implementation.Services
                     (string?)null
                 ));
 
-                await _docRepo.BatchSetDocumentStatusAsync_v1(
-                    _unitOfWork.Connection,
-                    _unitOfWork.Transaction,
+                await docRepo.BatchSetDocumentStatusAsync_v1(
+                    uow.Connection,
+                    uow.Transaction,
                     updates,
                     ct).ConfigureAwait(false);
 
-                await _unitOfWork.CommitAsync(ct: ct).ConfigureAwait(false);
+                await uow.CommitAsync(ct: ct).ConfigureAwait(false);
 
                 _fileLogger.LogWarning("Marked {Count} documents as succesed", docsIds.Count);
             }
             catch (Exception ex)
             {
                 _dbLogger.LogError(ex, "Failed to mark documents as succesed");
-                await _unitOfWork.RollbackAsync(ct: ct).ConfigureAwait(false);
+                await uow.RollbackAsync(ct: ct).ConfigureAwait(false);
             }
         }
 

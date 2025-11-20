@@ -1,6 +1,7 @@
 using Alfresco.Contracts.Oracle.Models;
 using Migration.Abstraction.Interfaces;
 using SqlServer.Abstraction.Interfaces;
+using Microsoft.Extensions.DependencyInjection;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -18,13 +19,11 @@ namespace Migration.Infrastructure.Implementation
     /// </summary>
     public class OpisToTipMapperV2 : IOpisToTipMapper
     {
-        private readonly IUnitOfWork _unitOfWork;
-        private readonly IDocumentMappingService _mappingService;
+        private readonly IServiceProvider _serviceProvider;
 
-        public OpisToTipMapperV2(IUnitOfWork unitOfWork, IDocumentMappingService mappingService)
+        public OpisToTipMapperV2(IServiceProvider serviceProvider)
         {
-            _unitOfWork = unitOfWork ?? throw new ArgumentNullException(nameof(unitOfWork));
-            _mappingService = mappingService ?? throw new ArgumentNullException(nameof(mappingService));
+            _serviceProvider = serviceProvider ?? throw new ArgumentNullException(nameof(serviceProvider));
         }
 
         /// <summary>
@@ -39,31 +38,48 @@ namespace Migration.Infrastructure.Implementation
             if (string.IsNullOrWhiteSpace(opisDokumenta))
                 return "UNKNOWN";
 
-            // Try to find by original name (Naziv field)
-            var mapping = await _mappingService.FindByOriginalNameAsync(opisDokumenta, ct).ConfigureAwait(false);
+            await using var scope = _serviceProvider.CreateAsyncScope();
+            var uow = scope.ServiceProvider.GetRequiredService<IUnitOfWork>();
+            var mappingService = scope.ServiceProvider.GetRequiredService<IDocumentMappingService>();
 
-            if (mapping != null && !string.IsNullOrWhiteSpace(mapping.SifraDokumentaMigracija))
+            await uow.BeginAsync(ct: ct).ConfigureAwait(false);
+            try
             {
-                return mapping.SifraDokumentaMigracija;
+                // Try to find by original name (Naziv field)
+                var mapping = await mappingService.FindByOriginalNameAsync(opisDokumenta, ct).ConfigureAwait(false);
+
+                if (mapping != null && !string.IsNullOrWhiteSpace(mapping.SifraDokumentaMigracija))
+                {
+                    await uow.CommitAsync(ct: ct).ConfigureAwait(false);
+                    return mapping.SifraDokumentaMigracija;
+                }
+
+                // Try to find by Serbian name (NazivDokumenta field)
+                mapping = await mappingService.FindBySerbianNameAsync(opisDokumenta, ct).ConfigureAwait(false);
+
+                if (mapping != null && !string.IsNullOrWhiteSpace(mapping.SifraDokumentaMigracija))
+                {
+                    await uow.CommitAsync(ct: ct).ConfigureAwait(false);
+                    return mapping.SifraDokumentaMigracija;
+                }
+
+                // Try to find by migrated name (NazivDokumentaMigracija field) - supports "- migracija" suffix
+                mapping = await mappingService.FindByMigratedNameAsync(opisDokumenta, ct).ConfigureAwait(false);
+
+                if (mapping != null && !string.IsNullOrWhiteSpace(mapping.SifraDokumentaMigracija))
+                {
+                    await uow.CommitAsync(ct: ct).ConfigureAwait(false);
+                    return mapping.SifraDokumentaMigracija;
+                }
+
+                await uow.CommitAsync(ct: ct).ConfigureAwait(false);
+                return "UNKNOWN";
             }
-
-            // Try to find by Serbian name (NazivDokumenta field)
-            mapping = await _mappingService.FindBySerbianNameAsync(opisDokumenta, ct).ConfigureAwait(false);
-
-            if (mapping != null && !string.IsNullOrWhiteSpace(mapping.SifraDokumentaMigracija))
+            catch(Exception ex)
             {
-                return mapping.SifraDokumentaMigracija;
+                await uow.RollbackAsync(ct: ct).ConfigureAwait(false);
+                throw;
             }
-
-            // Try to find by migrated name (NazivDokumentaMigracija field) - supports "- migracija" suffix
-            mapping = await _mappingService.FindByMigratedNameAsync(opisDokumenta, ct).ConfigureAwait(false);
-
-            if (mapping != null && !string.IsNullOrWhiteSpace(mapping.SifraDokumentaMigracija))
-            {
-                return mapping.SifraDokumentaMigracija;
-            }
-
-            return "UNKNOWN";
         }
 
         /// <summary>
@@ -89,34 +105,48 @@ namespace Migration.Infrastructure.Implementation
         /// <returns>Dictionary of all mappings (Naziv/NazivDokumenta → SifraDokumentaMigracija)</returns>
         public async Task<IReadOnlyDictionary<string, string>> GetAllMappingsAsync(CancellationToken ct = default)
         {
-            var mappings = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-            var allMappings = await _mappingService.GetAllMappingsAsync(ct).ConfigureAwait(false);
+            await using var scope = _serviceProvider.CreateAsyncScope();
+            var uow = scope.ServiceProvider.GetRequiredService<IUnitOfWork>();
+            var mappingService = scope.ServiceProvider.GetRequiredService<IDocumentMappingService>();
 
-            foreach (var mapping in allMappings)
+            await uow.BeginAsync(ct: ct).ConfigureAwait(false);
+            try
             {
-                if (string.IsNullOrWhiteSpace(mapping.SifraDokumentaMigracija))
-                    continue;
+                var mappings = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+                var allMappings = await mappingService.GetAllMappingsAsync(ct).ConfigureAwait(false);
 
-                // Add English name mapping
-                if (!string.IsNullOrWhiteSpace(mapping.Naziv) && !mappings.ContainsKey(mapping.Naziv))
+                foreach (var mapping in allMappings)
                 {
-                    mappings[mapping.Naziv] = mapping.SifraDokumentaMigracija;
+                    if (string.IsNullOrWhiteSpace(mapping.SifraDokumentaMigracija))
+                        continue;
+
+                    // Add English name mapping
+                    if (!string.IsNullOrWhiteSpace(mapping.Naziv) && !mappings.ContainsKey(mapping.Naziv))
+                    {
+                        mappings[mapping.Naziv] = mapping.SifraDokumentaMigracija;
+                    }
+
+                    // Add Serbian name mapping
+                    if (!string.IsNullOrWhiteSpace(mapping.NazivDokumenta) && !mappings.ContainsKey(mapping.NazivDokumenta))
+                    {
+                        mappings[mapping.NazivDokumenta] = mapping.SifraDokumentaMigracija;
+                    }
+
+                    // Add migrated name mapping (with "- migracija" suffix)
+                    if (!string.IsNullOrWhiteSpace(mapping.NazivDokumentaMigracija) && !mappings.ContainsKey(mapping.NazivDokumentaMigracija))
+                    {
+                        mappings[mapping.NazivDokumentaMigracija] = mapping.SifraDokumentaMigracija;
+                    }
                 }
 
-                // Add Serbian name mapping
-                if (!string.IsNullOrWhiteSpace(mapping.NazivDokumenta) && !mappings.ContainsKey(mapping.NazivDokumenta))
-                {
-                    mappings[mapping.NazivDokumenta] = mapping.SifraDokumentaMigracija;
-                }
-
-                // Add migrated name mapping (with "- migracija" suffix)
-                if (!string.IsNullOrWhiteSpace(mapping.NazivDokumentaMigracija) && !mappings.ContainsKey(mapping.NazivDokumentaMigracija))
-                {
-                    mappings[mapping.NazivDokumentaMigracija] = mapping.SifraDokumentaMigracija;
-                }
+                await uow.CommitAsync(ct: ct).ConfigureAwait(false);
+                return mappings;
             }
-
-            return mappings;
+            catch
+            {
+                await uow.RollbackAsync(ct: ct).ConfigureAwait(false);
+                throw;
+            }
         }
 
         /// <summary>
@@ -130,20 +160,34 @@ namespace Migration.Infrastructure.Implementation
             if (string.IsNullOrWhiteSpace(opisDokumenta))
                 return null;
 
-            // Try all search methods
-            var mapping = await _mappingService.FindByOriginalNameAsync(opisDokumenta, ct).ConfigureAwait(false);
+            await using var scope = _serviceProvider.CreateAsyncScope();
+            var uow = scope.ServiceProvider.GetRequiredService<IUnitOfWork>();
+            var mappingService = scope.ServiceProvider.GetRequiredService<IDocumentMappingService>();
 
-            if (mapping == null)
+            await uow.BeginAsync(ct: ct).ConfigureAwait(false);
+            try
             {
-                mapping = await _mappingService.FindBySerbianNameAsync(opisDokumenta, ct).ConfigureAwait(false);
-            }
+                // Try all search methods
+                var mapping = await mappingService.FindByOriginalNameAsync(opisDokumenta, ct).ConfigureAwait(false);
 
-            if (mapping == null)
+                if (mapping == null)
+                {
+                    mapping = await mappingService.FindBySerbianNameAsync(opisDokumenta, ct).ConfigureAwait(false);
+                }
+
+                if (mapping == null)
+                {
+                    mapping = await mappingService.FindByMigratedNameAsync(opisDokumenta, ct).ConfigureAwait(false);
+                }
+
+                await uow.CommitAsync(ct: ct).ConfigureAwait(false);
+                return mapping;
+            }
+            catch
             {
-                mapping = await _mappingService.FindByMigratedNameAsync(opisDokumenta, ct).ConfigureAwait(false);
+                await uow.RollbackAsync(ct: ct).ConfigureAwait(false);
+                throw;
             }
-
-            return mapping;
         }
     }
 }
