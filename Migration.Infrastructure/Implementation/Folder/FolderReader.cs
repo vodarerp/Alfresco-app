@@ -117,8 +117,10 @@ namespace Migration.Infrastructure.Implementation.Folder
 
             var response = await _read.SearchAsync(req, ct).ConfigureAwait(false);
             var result = response?.List?.Entries ?? new List<ListEntry>();
+            var hasMoreItems = response?.List?.Pagination?.HasMoreItems;
 
-            _fileLogger.LogDebug("AFTS query returned {Count} folders in root {RootId}", result.Count, inRequest.RootId);
+            _fileLogger.LogDebug("AFTS query returned {Count} folders in root {RootId}, HasMoreItems: {HasMoreItems}",
+                result.Count, inRequest.RootId, hasMoreItems);
 
             FolderSeekCursor? next = null;
 
@@ -133,7 +135,97 @@ namespace Migration.Infrastructure.Implementation.Folder
                     last.Name ?? string.Empty);  // Include name for tie-breaking
             }
 
-            return new FolderReaderResult(Items: result, next);
+            return new FolderReaderResult(Items: result, Next: next, HasMoreItems: hasMoreItems);
+        }
+
+        /// <summary>
+        /// Reads a batch of folders using CMIS query language with pagination support.
+        /// This method supports date filtering and proper skip/take logic for large result sets.
+        /// </summary>
+        public async Task<FolderReaderResult> ReadBatchAsync_v2(
+            FolderReaderRequest inRequest,
+            string? dateFrom,
+            string? dateTo,
+            bool useDateFilter,
+            CancellationToken ct)
+        {
+            _fileLogger.LogDebug("Reading folders using CMIS from root {RootId} with filter '{NameFilter}', Skip: {Skip}, Take: {Take}, UseDateFilter: {UseDateFilter}",
+                inRequest.RootId, inRequest.NameFilter, inRequest.Skip, inRequest.Take, useDateFilter);
+
+            // Extract parent dossier type from name filter (e.g., "PI", "LE", "D", "PL", "FL")
+            // The name filter should be the dossier type prefix
+            var parentDossierType = string.IsNullOrWhiteSpace(inRequest.NameFilter) ? "" : inRequest.NameFilter.Trim();
+
+            // Build CMIS query
+            var query = new StringBuilder();
+            query.Append("SELECT * FROM cmis:folder ");
+            query.Append($"WHERE IN_FOLDER('{inRequest.RootId}') ");
+
+            // Name filtering: match folders starting with ParentDossierType but NOT containing hyphen after prefix
+            // Example: PI%, but NOT PI-%
+            if (!string.IsNullOrWhiteSpace(parentDossierType))
+            {
+                query.Append($"AND cmis:name LIKE '{parentDossierType}%' ");
+                query.Append($"AND NOT (cmis:name LIKE '{parentDossierType}-%') ");
+            }
+
+            // Date filtering (if enabled and dates are provided)
+            if (useDateFilter)
+            {
+                if (!string.IsNullOrWhiteSpace(dateFrom))
+                {
+                    query.Append($"AND cmis:creationDate >= TIMESTAMP '{dateFrom}' ");
+                    _fileLogger.LogDebug("Applied dateFrom filter: {DateFrom}", dateFrom);
+                }
+
+                if (!string.IsNullOrWhiteSpace(dateTo))
+                {
+                    query.Append($"AND cmis:creationDate <= TIMESTAMP '{dateTo}' ");
+                    _fileLogger.LogDebug("Applied dateTo filter: {DateTo}", dateTo);
+                }
+            }
+
+            // Order by creation date and name for consistent pagination
+            query.Append("ORDER BY cmis:creationDate ASC, cmis:name ASC");
+
+            var req = new PostSearchRequest()
+            {
+                Query = new QueryRequest()
+                {
+                    Language = "cmis",
+                    Query = query.ToString()
+                },
+                Paging = new PagingRequest()
+                {
+                    MaxItems = inRequest.Take,
+                    SkipCount = inRequest.Skip
+                },
+                Include = new[] { "properties" },
+                Sort = null
+            };
+
+            _fileLogger.LogDebug("CMIS Query: {Query}", query.ToString());
+
+            var response = await _read.SearchAsync(req, ct).ConfigureAwait(false);
+            var result = response?.List?.Entries ?? new List<ListEntry>();
+            var hasMoreItems = response?.List?.Pagination?.HasMoreItems;
+
+            _fileLogger.LogDebug("CMIS query returned {Count} folders in root {RootId}, HasMoreItems: {HasMoreItems}",
+                result.Count, inRequest.RootId, hasMoreItems);
+
+            // For v2, we use skip/take instead of cursor-based pagination
+            // Next cursor is calculated based on hasMoreItems from API
+            FolderSeekCursor? next = null;
+            if (result.Count > 0)
+            {
+                var last = result[^1].Entry;
+                next = new FolderSeekCursor(
+                    last.Id,
+                    last.CreatedAt,
+                    last.Name ?? string.Empty);
+            }
+
+            return new FolderReaderResult(Items: result, Next: next, HasMoreItems: hasMoreItems);
         }
 
         /// <summary>

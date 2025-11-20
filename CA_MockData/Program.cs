@@ -20,7 +20,7 @@ public static class Program
             BaseUrl = "http://localhost:8080/",
             Username =  "admin",
             Password = "admin",
-            RootParentId = "41903f04-b128-4081-903f-04b1281081d2",
+            RootParentId = "fe01d60d-9df8-4659-81d6-0d9df8765921",
             FolderCount = 10,
             DocsPerFolder = 3,
             DegreeOfParallelism = 8,
@@ -54,7 +54,7 @@ public static class Program
         {
             Console.WriteLine("Creating dosie folder structure...");
             // Add DE (Deposit) to the list of client types to create folders for
-            var allClientTypes = cfg.ClientTypes.Concat(new[] { "DE" }).ToArray();
+            var allClientTypes = cfg.ClientTypes.Concat(new[] { "D" }).ToArray();
 
             foreach (var clientType in allClientTypes)
             {
@@ -177,8 +177,8 @@ public static class Program
                                 var contractNumber = contractDate.ToString("yyyyMMdd");
 
                                 // Create DE folder: DE{CoreId}{ContractNumber}
-                                var depositFolderName = $"DE{coreId}{contractNumber}";
-                                var depositParentId = dosieFolders["DE"]; // DOSSIERS-DE folder
+                                var depositFolderName = $"D{coreId}{contractNumber}";
+                                var depositParentId = dosieFolders["D"]; // DOSSIERS-DE folder
 
                                 try
                                 {
@@ -834,7 +834,7 @@ public static class Program
         properties["cm:description"] = $"Deposit dossier for CoreId {coreId}, Contract {contractNumber}";
 
         // Unique folder identifier: DE{CoreId}{ContractNumber}
-        var uniqueFolderId = $"DE{coreId}{contractNumber}";
+        var uniqueFolderId = $"D{coreId}{contractNumber}";
         properties["ecm:uniqueFolderId"] = uniqueFolderId;
         properties["ecm:folderId"] = uniqueFolderId;
 

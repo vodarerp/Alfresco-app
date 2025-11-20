@@ -74,5 +74,32 @@ namespace Alfresco.Contracts.Options
         /// CoreId is typically extracted from folder names (e.g., "PL-10000003" contains CoreId "10000003")
         /// </summary>
         public List<string>? TargetCoreIds { get; set; }
+
+        /// <summary>
+        /// If true, uses ReadBatchAsync_v2 method with CMIS query language instead of AFTS.
+        /// This enables skip/take pagination and date filtering.
+        /// Default: false (use AFTS-based ReadBatchAsync)
+        /// </summary>
+        public bool UseV2Reader { get; set; } = false;
+
+        /// <summary>
+        /// If true, includes date filtering in CMIS queries (cmis:creationDate).
+        /// Used by ReadBatchAsync_v2 method.
+        /// </summary>
+        public bool UseDateFilter { get; set; } = false;
+
+        /// <summary>
+        /// Start date for date filtering in CMIS queries (inclusive).
+        /// Format: yyyy-MM-ddTHH:mm:ss.fffZ
+        /// Only used when UseDateFilter is true.
+        /// </summary>
+        public string? DateFrom { get; set; }
+
+        /// <summary>
+        /// End date for date filtering in CMIS queries (inclusive).
+        /// Format: yyyy-MM-ddTHH:mm:ss.fffZ
+        /// Only used when UseDateFilter is true.
+        /// </summary>
+        public string? DateTo { get; set; }
     }
 }

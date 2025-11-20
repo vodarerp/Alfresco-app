@@ -90,7 +90,7 @@ namespace Migration.Infrastructure.Implementation.Services
             }
 
             // If no cursor exists, discover DOSSIER subfolders
-            if (currentMultiCursor == null || currentMultiCursor.SubfolderMap.Count == 0)
+            if (currentMultiCursor == null)
             {
                 _fileLogger.LogInformation("Discovering DOSSIER subfolders in root {RootId}...", rootDiscoveryId);
                 _dbLogger.LogInformation("Starting DOSSIER subfolder discovery");
@@ -111,14 +111,51 @@ namespace Migration.Infrastructure.Implementation.Services
                 {
                     SubfolderMap = subfolders,
                     CurrentFolderIndex = 0,
-                    CurrentFolderType = subfolders.Keys.First(),
-                    CurrentCursor = null
+                    CurrentFolderType = subfolders.Keys.OrderBy(k => k).First(),
+                    CurrentCursor = null,
+                    CurrentSkipCount = 0
                 };
 
                 lock (_cursorLock)
                 {
                     _multiFolderCursor = currentMultiCursor;
                 }
+            }
+            // If cursor was loaded from checkpoint but SubfolderMap is empty, re-discover folders
+            else if (currentMultiCursor.SubfolderMap.Count == 0)
+            {
+                _fileLogger.LogWarning("Checkpoint loaded but SubfolderMap is empty, re-discovering DOSSIER subfolders");
+                var subfolders = await _reader.FindDossierSubfoldersAsync(rootDiscoveryId, folderTypes, ct).ConfigureAwait(false);
+
+                if (subfolders.Count == 0)
+                {
+                    _fileLogger.LogWarning("No DOSSIER subfolders found matching criteria");
+                    return new FolderBatchResult(0);
+                }
+
+                // Preserve the checkpoint progress (CurrentFolderIndex, CurrentSkipCount) but update SubfolderMap
+                lock (_cursorLock)
+                {
+                    _multiFolderCursor!.SubfolderMap = subfolders;
+
+                    // Validate that CurrentFolderIndex still exists in the new SubfolderMap
+                    var restoredOrderedTypes = subfolders.Keys.OrderBy(k => k).ToList();
+                    if (_multiFolderCursor.CurrentFolderIndex >= restoredOrderedTypes.Count)
+                    {
+                        _fileLogger.LogWarning(
+                            "CurrentFolderIndex {Index} is out of range for {Count} folder types. Resetting to 0.",
+                            _multiFolderCursor.CurrentFolderIndex, restoredOrderedTypes.Count);
+                        _multiFolderCursor.CurrentFolderIndex = 0;
+                        _multiFolderCursor.CurrentSkipCount = 0;
+                    }
+
+                    _multiFolderCursor.CurrentFolderType = restoredOrderedTypes[_multiFolderCursor.CurrentFolderIndex];
+                }
+
+                currentMultiCursor = _multiFolderCursor;
+                _fileLogger.LogInformation(
+                    "Restored checkpoint: processing folder type {FolderType} at index {Index} with skip count {Skip}",
+                    currentMultiCursor.CurrentFolderType, currentMultiCursor.CurrentFolderIndex, currentMultiCursor.CurrentSkipCount);
             }
 
             // Get current subfolder to process
@@ -142,21 +179,54 @@ namespace Migration.Infrastructure.Implementation.Services
                     string.Join(", ", targetCoreIds));
             }
 
-            // Read batch from current subfolder
-            var folderRequest = new FolderReaderRequest(
-                RootId: currentFolderId,
-                NameFilter: nameFilter,
-                Skip: 0,
-                Take: batch,
-                Cursor: currentMultiCursor.CurrentCursor,
-                TargetCoreIds: targetCoreIds);
+            // Determine which reader method to use
+            var useV2Reader = _options.Value.FolderDiscovery.UseV2Reader;
+            var useDateFilter = _options.Value.FolderDiscovery.UseDateFilter;
+            var dateFrom = _options.Value.FolderDiscovery.DateFrom;
+            var dateTo = _options.Value.FolderDiscovery.DateTo;
 
-            var page = await _reader.ReadBatchAsync(folderRequest, ct).ConfigureAwait(false);
+            FolderReaderResult page;
 
-            // If no more items in current subfolder, move to next
-            if (!page.HasMore || page.Items.Count == 0)
+            if (useV2Reader)
             {
-                _fileLogger.LogInformation("Finished processing DOSSIER-{Type}, moving to next subfolder", currentType);
+                // Use v2 method with CMIS and skip/take pagination
+                _fileLogger.LogDebug("Using ReadBatchAsync_v2 (CMIS) for folder discovery");
+
+                var folderRequest = new FolderReaderRequest(
+                    RootId: currentFolderId,
+                    NameFilter: currentType,  // Pass the folder type (e.g., "PI", "PL") for CMIS LIKE query
+                    Skip: currentMultiCursor.CurrentSkipCount,
+                    Take: batch,
+                    Cursor: null,  // v2 doesn't use cursor
+                    TargetCoreIds: null);  // v2 doesn't support CoreId filtering (yet)
+
+                page = await _reader.ReadBatchAsync_v2(
+                    folderRequest,
+                    dateFrom,
+                    dateTo,
+                    useDateFilter,
+                    ct).ConfigureAwait(false);
+            }
+            else
+            {
+                // Use original method with AFTS and cursor-based pagination
+                _fileLogger.LogDebug("Using ReadBatchAsync (AFTS) for folder discovery");
+
+                var folderRequest = new FolderReaderRequest(
+                    RootId: currentFolderId,
+                    NameFilter: nameFilter,
+                    Skip: 0,
+                    Take: batch,
+                    Cursor: currentMultiCursor.CurrentCursor,
+                    TargetCoreIds: targetCoreIds);
+
+                page = await _reader.ReadBatchAsync(folderRequest, ct).ConfigureAwait(false);
+            }
+
+            // If no items returned, move to next subfolder
+            if (page.Items.Count == 0)
+            {
+                _fileLogger.LogInformation("No items returned for DOSSIER-{Type}, moving to next subfolder", currentType);
 
                 lock (_cursorLock)
                 {
@@ -165,6 +235,7 @@ namespace Migration.Infrastructure.Implementation.Services
                     {
                         _multiFolderCursor.CurrentFolderType = orderedTypes[_multiFolderCursor.CurrentFolderIndex];
                         _multiFolderCursor.CurrentCursor = null;
+                        _multiFolderCursor.CurrentSkipCount = 0;  // Reset skip count for new folder
                     }
                 }
 
@@ -187,10 +258,46 @@ namespace Migration.Infrastructure.Implementation.Services
 
             var inserted = await InsertFoldersAsync(foldersToInsert, ct).ConfigureAwait(false);
 
-            // Update cursor
+            // Check if there are more items AFTER processing current batch
+            if (!page.HasMore)
+            {
+                _fileLogger.LogInformation("Finished processing DOSSIER-{Type}, moving to next subfolder", currentType);
+
+                lock (_cursorLock)
+                {
+                    _multiFolderCursor!.CurrentFolderIndex++;
+                    if (_multiFolderCursor.CurrentFolderIndex < orderedTypes.Count)
+                    {
+                        _multiFolderCursor.CurrentFolderType = orderedTypes[_multiFolderCursor.CurrentFolderIndex];
+                        _multiFolderCursor.CurrentCursor = null;
+                        _multiFolderCursor.CurrentSkipCount = 0;  // Reset skip count for new folder
+                    }
+                }
+
+                // Save checkpoint
+                if (!ct.IsCancellationRequested)
+                {
+                    await SaveCheckpointAsync(ct).ConfigureAwait(false);
+                }
+
+                // Recursively call to start processing next folder
+                return await RunBatchAsync(ct).ConfigureAwait(false);
+            }
+
+            // Update cursor/skip count based on which reader was used
             lock (_cursorLock)
             {
-                _multiFolderCursor!.CurrentCursor = page.Next;
+                if (useV2Reader)
+                {
+                    // For v2, increment skip count by the batch size
+                    _multiFolderCursor!.CurrentSkipCount += batch;
+                    _fileLogger.LogDebug("Updated skip count to {SkipCount} for next batch", _multiFolderCursor.CurrentSkipCount);
+                }
+                else
+                {
+                    // For v1, update the cursor
+                    _multiFolderCursor!.CurrentCursor = page.Next;
+                }
             }
 
             Interlocked.Add(ref _totalInserted, foldersToInsert.Count);

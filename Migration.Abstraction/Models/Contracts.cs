@@ -36,9 +36,13 @@ namespace Migration.Abstraction.Models
 
     public sealed record FolderReaderRequest(string RootId, string NameFilter, int Skip, int Take, FolderSeekCursor? Cursor, List<string>? TargetCoreIds = null);
 
-    public sealed record FolderReaderResult(IReadOnlyList<ListEntry> Items, FolderSeekCursor? Next) 
+    public sealed record FolderReaderResult(IReadOnlyList<ListEntry> Items, FolderSeekCursor? Next, bool? HasMoreItems = null)
     {
-        public bool HasMore => Items != null && Items.Count > 0 && Next is not null;
+        /// <summary>
+        /// Indicates whether there are more items to fetch.
+        /// Uses HasMoreItems from API if available, otherwise falls back to cursor-based check.
+        /// </summary>
+        public bool HasMore => HasMoreItems ?? (Items != null && Items.Count > 0 && Next is not null);
     }
 
     /// <summary>
@@ -73,6 +77,11 @@ namespace Migration.Abstraction.Models
         /// Index of current folder in ordered list
         /// </summary>
         public int CurrentFolderIndex { get; set; }
+
+        /// <summary>
+        /// Current skip count for skip/take pagination (used by ReadBatchAsync_v2)
+        /// </summary>
+        public int CurrentSkipCount { get; set; } = 0;
     }
 
     public sealed record MoveReaderResponse(long DocStagingId, string DocumentNodeId, string FolderDestId);
