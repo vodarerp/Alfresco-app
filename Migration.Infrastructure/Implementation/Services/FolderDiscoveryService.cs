@@ -27,17 +27,14 @@ namespace Migration.Infrastructure.Implementation.Services
 {
     public class FolderDiscoveryService : IFolderDiscoveryService
     {
-        private readonly IFolderIngestor _ingestor;
         private readonly IFolderReader _reader;
         private readonly IOptions<MigrationOptions> _options;
         private MultiFolderDiscoveryCursor? _multiFolderCursor = null;
-        private readonly IServiceProvider _sp;
-        private readonly IUnitOfWork _unitOfWork;
+        private readonly IServiceScopeFactory _scopeFactory;
         private readonly ILogger _dbLogger;
         private readonly ILogger _fileLogger;
         private readonly ILogger _uiLogger;
         private readonly IClientApi? _clientApi;
-        //private readonly ILogger<FolderDiscoveryService> _logger;
 
         private readonly object _cursorLock = new();
 
@@ -50,18 +47,17 @@ namespace Migration.Infrastructure.Implementation.Services
             IFolderIngestor ingestor,
             IFolderReader reader,
             IOptions<MigrationOptions> options,
-            IServiceProvider sp,
-            IUnitOfWork unitOfWork,
+            IServiceScopeFactory scopeFactory,
             ILoggerFactory logger,
             IClientApi? clientApi = null)
         {
-            _ingestor = ingestor;
+           
             _reader = reader;
             _options = options;
-            _sp = sp;
-            _unitOfWork = unitOfWork;
+            _scopeFactory = scopeFactory;
+           
             _clientApi = clientApi;
-            //_logger = logger;
+            
             _dbLogger = logger.CreateLogger("DbLogger");
             _fileLogger = logger.CreateLogger("FileLogger");
             _uiLogger = logger.CreateLogger("UiLogger");
@@ -348,28 +344,7 @@ namespace Migration.Infrastructure.Implementation.Services
 
             // Try to get total count
             long totalCount = 0;
-            //try
-            //{
-            //    var rootDiscoveryId = _options.Value.RootDiscoveryFolderId;
-            //    var nameFilter = _options.Value.FolderDiscovery.NameFilter ?? "-";
-
-            //    _fileLogger.LogInformation("Attempting to count total folders...");
-            //    totalCount = await _reader.CountTotalFoldersAsync(rootDiscoveryId, nameFilter, ct).ConfigureAwait(false);
-
-            //    if (totalCount >= 0)
-            //    {
-            //        _fileLogger.LogInformation("Total folders to discover: {TotalCount}", totalCount);
-            //    }
-            //    else
-            //    {
-            //        _fileLogger.LogWarning("Count not supported by Alfresco, progress will show processed items only");
-            //    }
-            //}
-            //catch (Exception ex)
-            //{
-            //    _fileLogger.LogWarning(ex, "Failed to count total folders, continuing without total count");
-            //    totalCount = 0;
-            //}
+            
 
             // Initial progress report
             var progress = new WorkerProgress
@@ -483,7 +458,7 @@ namespace Migration.Infrastructure.Implementation.Services
         {
             try
             {
-                await using var scope = _sp.CreateAsyncScope();
+                await using var scope = _scopeFactory.CreateAsyncScope();
                 var uow = scope.ServiceProvider.GetRequiredService<IUnitOfWork>();
                 var checkpointRepo = scope.ServiceProvider.GetRequiredService<IMigrationCheckpointRepository>();
 
@@ -557,7 +532,7 @@ namespace Migration.Infrastructure.Implementation.Services
                     currentMultiCursor = _multiFolderCursor;
                 }
 
-                await using var scope = _sp.CreateAsyncScope();
+                await using var scope = _scopeFactory.CreateAsyncScope();
                 var uow = scope.ServiceProvider.GetRequiredService<IUnitOfWork>();
                 var checkpointRepo = scope.ServiceProvider.GetRequiredService<IMigrationCheckpointRepository>();
 
@@ -603,7 +578,7 @@ namespace Migration.Infrastructure.Implementation.Services
 
             _fileLogger.LogDebug("Inserting {Count} folders into staging table", folders.Count);
 
-            await using var scope = _sp.CreateAsyncScope();
+            await using var scope = _scopeFactory.CreateAsyncScope();
             var uow = scope.ServiceProvider.GetRequiredService<IUnitOfWork>();
             var folderRepo = scope.ServiceProvider.GetRequiredService<IFolderStagingRepository>();
 
@@ -698,102 +673,6 @@ namespace Migration.Infrastructure.Implementation.Services
 
         #endregion
 
-        #region Older version - wroking (commented)
-        //public async Task<FolderBatchResult> RunBatchAsync(CancellationToken ct)
-        //{
-        //    _logger.LogInformation("RunBatchAsync Started");
-
-        //    var cnt = 0;
-        //    var batch = _options.Value.DocumentDiscovery.BatchSize ?? _options.Value.BatchSize;
-        //    var dop = _options.Value.DocumentDiscovery.MaxDegreeOfParallelism ?? _options.Value.MaxDegreeOfParallelism;
-
-
-        //    var folderRequest = new FolderReaderRequest(
-        //        _options.Value.RootDiscoveryFolderId, _options.Value.FolderDiscovery.NameFilter ?? "-", 0, batch, _cursor
-        //        );
-
-        //    _logger.LogInformation("_reader.ReadBatchAsync called");
-        //    var page = await _reader.ReadBatchAsync(folderRequest, ct);
-
-        //    if (!page.HasMore) return new FolderBatchResult(cnt);
-        //    //using var scope = _sp.CreateScope();
-
-        //    //var uow = scope.ServiceProvider.GetRequiredService<IUnitOfWork>();
-        //    await _unitOfWork.BeginAsync(IsolationLevel.ReadCommitted, ct);
-        //    try
-        //    {
-        //        var toInsert = page.Items.ToList().ToFolderStagingListInsert();
-
-        //        if (toInsert.Count > 0)
-        //        {
-        //            _logger.LogInformation("_ingestor.InserManyAsync called");
-
-        //            cnt = await _ingestor.InserManyAsync(toInsert, ct);
-        //        }
-        //        _cursor = page.Next;
-        //        await _unitOfWork.CommitAsync();
-        //        _logger.LogInformation("RunBatchAsync Commited");
-        //        return new FolderBatchResult(cnt);
-        //    }
-        //    catch (Exception ex)
-        //    {
-        //        await _unitOfWork.RollbackAsync();
-        //        _logger.LogInformation("RunBatchAsync Rollback");
-        //        _logger.LogError("RunBatchAsync crashed!! {errMsg}!", ex.Message);
-        //        return new FolderBatchResult(0);
-
-        //    }
-
-
-
-
-        //}
-
-        //public async Task RunLoopAsync(CancellationToken ct)
-        //{
-        //    int BatchCounter = 1, couter = 0;
-        //    var delay = _options.Value.IdleDelayInMs;
-        //    _logger.LogInformation("Worker Started");
-        //    while (!ct.IsCancellationRequested)
-        //    {
-        //        using (_logger.BeginScope(new Dictionary<string, object> { ["BatchCounter"] = BatchCounter }))
-        //        {
-        //            try
-        //            {
-        //                _logger.LogInformation($"Batch Started");
-
-        //                var resRun = await RunBatchAsync(ct);
-
-        //                if (resRun.InsertedCount == 0)
-        //                {
-        //                    _logger.LogInformation($"No more documents to process, exiting loop.");
-        //                    couter++;
-        //                    if (couter == _options.Value.BreakEmptyResults)
-        //                    {
-        //                        _logger.LogInformation($" Break after {couter} empty results");
-        //                        break;
-        //                    }
-        //                    if (delay > 0)
-        //                        await Task.Delay(delay, ct);
-        //                }
-        //                var between = _options.Value.DelayBetweenBatchesInMs;
-        //                if (between > 0)
-        //                    await Task.Delay(between, ct);
-        //                _logger.LogInformation($"Batch Done");
-
-        //            }
-        //            catch (Exception ex)
-        //            {
-        //                _logger.LogError($"RunLoopAsync Exception: {ex.Message}.");
-        //                if (delay > 0)
-        //                    await Task.Delay(delay, ct);
-        //            }
-        //        }
-        //        BatchCounter++;
-        //        couter = 0;
-        //    }
-        //    _logger.LogInformation("RunLoopAsync END");
-        //} 
-        #endregion
+     
     }
 }

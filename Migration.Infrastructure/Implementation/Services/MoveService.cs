@@ -33,7 +33,7 @@ namespace Migration.Infrastructure.Implementation.Services
         private readonly IAlfrescoWriteApi _write;
         private readonly IAlfrescoReadApi _read;
         private readonly IOptions<MigrationOptions> _options;
-        private readonly IServiceProvider _sp;
+        private readonly IServiceScopeFactory _scopeFactory;
         //private readonly ILogger<MoveService> _fileLogger;
 
         private readonly ILogger _dbLogger;
@@ -51,7 +51,15 @@ namespace Migration.Infrastructure.Implementation.Services
         // Folder caching is now handled by DocumentResolver (with lock striping)
         // All folders are pre-created by FolderPreparationService in FAZA 3
 
-        public MoveService(IMoveReader moveService, IMoveExecutor moveExecutor, IDocStagingRepository docRepo, IDocumentResolver resolver, IAlfrescoWriteApi write, IAlfrescoReadApi read, IOptions<MigrationOptions> options, IServiceProvider sp, ILoggerFactory logger)
+        public MoveService(IMoveReader moveService, 
+                           IMoveExecutor moveExecutor, 
+                           IDocStagingRepository docRepo,
+                           IDocumentResolver resolver,
+                           IAlfrescoWriteApi write, 
+                           IAlfrescoReadApi read, 
+                           IOptions<MigrationOptions> options,
+                           IServiceScopeFactory scopeFactory, 
+                           ILoggerFactory logger)
         {
             _moveReader = moveService;
             _moveExecutor = moveExecutor;
@@ -60,7 +68,7 @@ namespace Migration.Infrastructure.Implementation.Services
             _write = write;
             _read = read;
             _options = options;
-            _sp = sp;
+            _scopeFactory = scopeFactory;
             _dbLogger = logger.CreateLogger("DbLogger");
             _fileLogger = logger.CreateLogger("FileLogger");
             _uiLogger = logger.CreateLogger("UiLogger");
@@ -286,7 +294,7 @@ namespace Migration.Infrastructure.Implementation.Services
                 var timeout = TimeSpan.FromMinutes(_options.Value.StuckItemsTimeoutMinutes);
                 _fileLogger.LogDebug("Checking for stuck documents with timeout: {Minutes} minutes", _options.Value.StuckItemsTimeoutMinutes);
 
-                await using var scope = _sp.CreateAsyncScope();
+                await using var scope = _scopeFactory.CreateAsyncScope();
                 var uow = scope.ServiceProvider.GetRequiredService<IUnitOfWork>();
                 var docRepo = scope.ServiceProvider.GetRequiredService<IDocStagingRepository>();
 
@@ -334,7 +342,7 @@ namespace Migration.Infrastructure.Implementation.Services
             try
             {
                 _fileLogger.LogDebug("Loading checkpoint for Move service...");
-                await using var scope = _sp.CreateAsyncScope();
+                await using var scope = _scopeFactory.CreateAsyncScope();
                 var uow = scope.ServiceProvider.GetRequiredService<IUnitOfWork>();
                 var checkpointRepo = scope.ServiceProvider.GetRequiredService<IMigrationCheckpointRepository>();
 
@@ -385,7 +393,7 @@ namespace Migration.Infrastructure.Implementation.Services
         {
             try
             {
-                await using var scope = _sp.CreateAsyncScope();
+                await using var scope = _scopeFactory.CreateAsyncScope();
                 var uow = scope.ServiceProvider.GetRequiredService<IUnitOfWork>();
                 var checkpointRepo = scope.ServiceProvider.GetRequiredService<IMigrationCheckpointRepository>();
 
@@ -422,7 +430,7 @@ namespace Migration.Infrastructure.Implementation.Services
         {
             _fileLogger.LogDebug("Acquiring {BatchSize} documents for processing", batch);
 
-            await using var scope = _sp.CreateAsyncScope();
+            await using var scope = _scopeFactory.CreateAsyncScope();
             var uow = scope.ServiceProvider.GetRequiredService<IUnitOfWork>();
             var docRepo = scope.ServiceProvider.GetRequiredService<IDocStagingRepository>();
 
@@ -525,7 +533,7 @@ namespace Migration.Infrastructure.Implementation.Services
                 _fileLogger.LogDebug("Looking up DocumentMapping for document {DocId} with ecm:docDesc='{DocDesc}'",
                     doc.Id, doc.DocDescription);
 
-                await using var mappingScope = _sp.CreateAsyncScope();
+                await using var mappingScope = _scopeFactory.CreateAsyncScope();
                 var uow = mappingScope.ServiceProvider.GetRequiredService<IUnitOfWork>();
                 var mappingService = mappingScope.ServiceProvider.GetRequiredService<IDocumentMappingService>();
 
@@ -650,7 +658,7 @@ namespace Migration.Infrastructure.Implementation.Services
             ConcurrentBag<(long DocId, Exception Error)> errors,
             CancellationToken ct)
         {
-            await using var scope = _sp.CreateAsyncScope();
+            await using var scope = _scopeFactory.CreateAsyncScope();
             var uow = scope.ServiceProvider.GetRequiredService<IUnitOfWork>();
             var docRepo = scope.ServiceProvider.GetRequiredService<IDocStagingRepository>();
 
@@ -687,7 +695,7 @@ namespace Migration.Infrastructure.Implementation.Services
             ConcurrentBag<long> docsIds,
             CancellationToken ct)
         {
-            await using var scope = _sp.CreateAsyncScope();
+            await using var scope = _scopeFactory.CreateAsyncScope();
             var uow = scope.ServiceProvider.GetRequiredService<IUnitOfWork>();
             var docRepo = scope.ServiceProvider.GetRequiredService<IDocStagingRepository>();
 
@@ -739,29 +747,7 @@ namespace Migration.Infrastructure.Implementation.Services
 
             // Try to get total count of documents to move
             long totalCount = 0;
-            //try
-            //{
-            //    _fileLogger.LogInformation("Attempting to count total documents to move...");
-
-            //    await using var scope = _sp.CreateAsyncScope();
-            //    var docRepo = scope.ServiceProvider.GetRequiredService<IDocStagingRepository>();
-
-            //    totalCount = await docRepo.CountReadyForProcessingAsync(ct).ConfigureAwait(false);
-
-            //    if (totalCount >= 0)
-            //    {
-            //        _fileLogger.LogInformation("Total documents to move: {TotalCount}", totalCount);
-            //    }
-            //    else
-            //    {
-            //        _fileLogger.LogWarning("Count not available, progress will show processed items only");
-            //    }
-            //}
-            //catch (Exception ex)
-            //{
-            //    _fileLogger.LogWarning(ex, "Failed to count total documents, continuing without total count");
-            //    totalCount = 0;
-            //}
+           
 
             // Initial progress report
             var progress = new WorkerProgress
@@ -865,15 +851,7 @@ namespace Migration.Infrastructure.Implementation.Services
             return completedSuccessfully;
         }
 
-        /// <summary>
-        /// Determines parent folder name based on TargetDossierType
-        /// Per Analiza_migracije_v2.md:
-        /// - ClientFL (500) → "DOSSIERS-PI"
-        /// - ClientPL (400) → "DOSSIERS-LE"
-        /// - AccountPackage (300) → "DOSSIERS-ACC"
-        /// - Deposit (700) → "DOSSIERS-D"
-        /// - Unknown (999) → "DOSSIERS-UNKNOWN"
-        /// </summary>
+       
         private string GetParentFolderName(int? targetDossierType)
         {
             if (!targetDossierType.HasValue)
@@ -899,38 +877,10 @@ namespace Migration.Infrastructure.Implementation.Services
             return folderName;
         }
 
-        /// <summary>
-        /// Creates or gets destination folder for document migration with caching
-        ///
-        /// Process:
-        /// 1. Check cache first (key = "TargetDossierType_DossierDestFolderId")
-        /// 2. Acquire lock per cache key to prevent race conditions
-        /// 3. Double-check cache (another thread might have created folder while waiting for lock)
-        /// 4. Create/Get parent folder (e.g., "DOSSIERS-PI")
-        /// 5. Create/Get individual dossier folder (e.g., "PI102206")
-        /// 6. Cache the result
-        ///
-        /// Returns: Folder ID in new Alfresco where document should be moved
-        /// </summary>
-        /// <summary>
-        /// Gets destination folder ID for document.
-        /// OPTIMIZED: After FAZA 3 (FolderPreparationService), all folders already exist.
-        /// DocumentResolver will find them (cache hit ~100%) without creating new ones.
-        /// This eliminates the need for complex lock-based folder creation logic.
-        /// </summary>
+       
         private async Task<string> CreateOrGetDestinationFolder(DocStaging doc, CancellationToken ct)
         {
-            // ========================================
-            // SIMPLIFIED LOGIC (POST-REFACTORING):
-            // All folders are created by FolderPreparationService in FAZA 3,
-            // so we just need to resolve the path. DocumentResolver will:
-            // 1. Check its cache (likely hit)
-            // 2. Query Alfresco if cache miss (folder exists)
-            // 3. Cache the result for future calls
-            // NO FOLDER CREATION HAPPENS HERE!
-            // ========================================
-
-            // Step 1: Get parent folder (DOSSIERS-PI, DOSSIERS-LE, etc.)
+            
             var parentFolderName = GetParentFolderName(doc.TargetDossierType);
 
             _fileLogger.LogDebug("Resolving parent folder '{ParentFolderName}' under root {RootId}",
@@ -956,8 +906,7 @@ namespace Migration.Infrastructure.Implementation.Services
             _fileLogger.LogDebug("Resolving dossier folder '{DossierId}' under parent {ParentFolderId}",
                 dossierId, parentFolderId);
 
-            // DocumentResolver will find the folder (created by FAZA 3) and cache it
-            // No properties needed - folder already exists with correct properties from FAZA 3
+            
             var dossierFolderId = await _resolver.ResolveAsync(
                 parentFolderId,
                 dossierId,
@@ -970,12 +919,7 @@ namespace Migration.Infrastructure.Implementation.Services
             return dossierFolderId;
         }
 
-        /// <summary>
-        /// Builds Alfresco properties for dossier folder
-        /// NOTE: This method is NO LONGER USED after refactoring (FAZA 3).
-        /// FolderPreparationService creates all folders with properties BEFORE move.
-        /// Kept for reference only.
-        /// </summary>
+       
         [Obsolete("No longer used - folders are created by FolderPreparationService in FAZA 3")]
         private Dictionary<string, object> BuildDossierProperties(DocStaging doc, Dictionary<string, object>? oldFolderProperties)
         {
@@ -1186,196 +1130,5 @@ namespace Migration.Infrastructure.Implementation.Services
         #endregion
 
 
-        #region Old version - working (commented)
-        //public async Task<MoveBatchResult> RunBatchAsync(CancellationToken ct)
-        //{
-        //    var toRet = new MoveBatchResult(0, 0);
-        //    int ctnDone = 0, ctnFailed = 0;
-        //    //ct.ThrowIfCancellationRequested();
-        //    var batch = _options.Value.MoveService.BatchSize ?? _options.Value.BatchSize;
-        //    var dop = _options.Value.MoveService.MaxDegreeOfParallelism ?? _options.Value.MaxDegreeOfParallelism;
-
-        //    IReadOnlyList<DocStaging> documents = null;
-
-        //    await using (var scope = _sp.CreateAsyncScope())
-        //    {
-        //        var uow = scope.ServiceProvider.GetRequiredService<IUnitOfWork>();
-        //        var dr = scope.ServiceProvider.GetRequiredService<IDocStagingRepository>();
-
-        //        await uow.BeginAsync(ct: ct);
-
-        //        try
-        //        {
-        //            _fileLogger.LogInformation($"TakeReadyForProcessingAsync.");
-        //            documents = await dr.TakeReadyForProcessingAsync(batch, ct);
-        //            _fileLogger.LogInformation($"TakeReadyForProcessingAsync returned {documents.Count}. Setitng up to status in prog!");
-
-        //            foreach (var d in documents)
-        //                await dr.SetStatusAsync(d.Id, "IN PROG", null, ct);
-
-        //            await uow.CommitAsync();
-        //            _fileLogger.LogInformation($"Statuses changed. Commit DOne!");
-
-        //        }
-        //        catch (Exception ex)
-        //        {
-        //            __dbLogger.LogError($"Exception: {ex.Message}!");
-
-        //            await uow.RollbackAsync();
-        //            throw;
-        //        }
-        //    }
-
-
-        //    if (documents != null && documents.Count > 0)
-        //    {
-
-        //        await Parallel.ForEachAsync(documents, new ParallelOptions
-        //        {
-        //            CancellationToken = ct,
-        //            MaxDegreeOfParallelism = dop
-        //        },
-        //        async (doc, token) =>
-        //        {
-        //            await using var scope = _sp.CreateAsyncScope();
-        //            var uow = scope.ServiceProvider.GetRequiredService<IUnitOfWork>();
-        //            var dr = scope.ServiceProvider.GetRequiredService<IDocStagingRepository>();
-        //            using (_fileLogger.BeginScope(new Dictionary<string, object> { ["DocumentId"] = doc.Id }))
-        //            {
-        //                _fileLogger.LogInformation($"Prepare document {doc.Id} for move.");
-        //                _fileLogger.LogInformation($"DocId: {doc.NodeId} Destination: {doc.ToPath}.");
-
-        //                await uow.BeginAsync();
-        //                try
-        //                {
-
-        //                    if (await _moveExecutor.MoveAsync(doc.NodeId, doc.ToPath, token))
-        //                    {
-        //                        _fileLogger.LogInformation($"Document {doc.Id} moved. Changing status.");
-
-        //                        await dr.SetStatusAsync(doc.Id, "DONE", null, token);
-        //                    }
-
-        //                    Interlocked.Increment(ref ctnDone);
-        //                    await uow.CommitAsync(ct: token);
-        //                    _fileLogger.LogInformation($"Document {doc.Id} commited.");
-
-        //                }
-        //                catch (Exception ex)
-        //                {
-        //                    _fileLogger.LogInformation($"Exception: {ex.Message}.");
-
-        //                    await uow.RollbackAsync(ct: token);
-        //                    await using var failScope = _sp.CreateAsyncScope();
-        //                    var failUow = failScope.ServiceProvider.GetRequiredService<IUnitOfWork>();
-        //                    var failFr = failScope.ServiceProvider.GetRequiredService<IFolderStagingRepository>();
-
-        //                    await failUow.BeginAsync(ct: token);
-        //                    await failFr.FailAsync(doc.Id, ex.Message, token);
-        //                    await failUow.CommitAsync(ct: token);
-
-        //                }
-        //            }
-        //        });
-
-
-
-        //    }
-
-        //    #region Commented 
-
-        //    //    var readyDocuments = await _moveReader.ReadBatchAsync(batch, ct);
-
-        //    //if (readyDocuments == null || readyDocuments.Count == 0)
-        //    //{
-        //    //    //iLogger.LogInformation("No documents ready for move."); Todo
-        //    //    return toRet;
-        //    //}
-
-        //    //foreach (var item in readyDocuments)
-        //    //{
-
-        //    //    try
-        //    //    {
-        //    //        if (await _moveExecutor.MoveAsync(item.DocumentNodeId, item.FolderDestId, ct))
-        //    //        {
-        //    //            //loger
-        //    //            await _docRepo.SetStatusAsync(item.DocStagingId, "DONE", null, ct);
-
-        //    //            //Interlocked.Increment(ref ctnDone);
-        //    //            ctnDone++;
-
-        //    //        }
-        //    //        else
-        //    //        {
-        //    //            //logert
-        //    //        }
-
-        //    //    }
-        //    //    catch (Exception)
-        //    //    {
-        //    //        await _docRepo.SetStatusAsync(item.DocStagingId, "FAILED", "Docuemt FAILD to execute MVOE", ct);
-
-        //    //        //Interlocked.Increment(ref ctnFailed);
-        //    //        ctnFailed++;
-
-        //    //    }
-
-        //    //}
-
-        //    #endregion
-
-
-
-
-        //    var delay = _options.Value.DocumentDiscovery.DelayBetweenBatchesInMs ?? _options.Value.DelayBetweenBatchesInMs;
-        //    //_fileLogger.LogInformation("No more documents to process, exiting loop."); TODO
-        //    if (delay > 0)
-        //        await Task.Delay(delay, ct);
-        //    return toRet;
-        //}
-
-        //public async Task RunLoopAsync(CancellationToken ct)
-        //{
-        //    int BatchCounter = 1, counter = 0;
-        //    var delay = _options.Value.IdleDelayInMs;
-        //    _fileLogger.LogInformation("Worker Started");
-        //    while (!ct.IsCancellationRequested)
-        //    {
-        //        using (_fileLogger.BeginScope(new Dictionary<string, object> { ["BatchCnt"] = BatchCounter }))
-        //        {
-        //            try
-        //            {
-        //                _fileLogger.LogInformation($"Batch Started");
-
-        //                var resRun = await RunBatchAsync(ct);
-        //                if (resRun.Done == 0 && resRun.Failed == 0)
-        //                {
-        //                    _fileLogger.LogInformation($"No more documents to process, exiting loop.");
-        //                    counter++;
-        //                    if (counter == _options.Value.BreakEmptyResults)
-        //                    {
-        //                        _fileLogger.LogInformation($" Break after {counter} empty results");
-        //                        break;
-        //                    }
-        //                    //var delay = _options.Value.IdleDelayInMs;
-        //                    //_fileLogger.LogInformation("No more documents to process, exiting loop."); TODO
-        //                    if (delay > 0)
-        //                        await Task.Delay(delay, ct);
-        //                }
-        //                BatchCounter++;
-        //            }
-        //            catch (Exception ex)
-        //            {
-        //                __dbLogger.LogError($"RunLoopAsync Exception: {ex.Message}.");
-        //                if (delay > 0)
-        //                    await Task.Delay(delay, ct); ;
-        //            }
-        //        }
-        //        BatchCounter++;
-        //        counter = 0;
-        //    }
-        //} 
-        #endregion
     }
 }

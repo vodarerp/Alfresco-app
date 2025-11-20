@@ -19,11 +19,11 @@ namespace Migration.Infrastructure.Implementation
     /// </summary>
     public class OpisToTipMapperV2 : IOpisToTipMapper
     {
-        private readonly IServiceProvider _serviceProvider;
+        private readonly IServiceScopeFactory _scopeFactory;
 
-        public OpisToTipMapperV2(IServiceProvider serviceProvider)
+        public OpisToTipMapperV2(IServiceScopeFactory scopeFactory)
         {
-            _serviceProvider = serviceProvider ?? throw new ArgumentNullException(nameof(serviceProvider));
+            _scopeFactory = scopeFactory ?? throw new ArgumentNullException(nameof(scopeFactory));
         }
 
         /// <summary>
@@ -38,7 +38,7 @@ namespace Migration.Infrastructure.Implementation
             if (string.IsNullOrWhiteSpace(opisDokumenta))
                 return "UNKNOWN";
 
-            await using var scope = _serviceProvider.CreateAsyncScope();
+            await using var scope = _scopeFactory.CreateAsyncScope();
             var uow = scope.ServiceProvider.GetRequiredService<IUnitOfWork>();
             var mappingService = scope.ServiceProvider.GetRequiredService<IDocumentMappingService>();
 
@@ -105,7 +105,7 @@ namespace Migration.Infrastructure.Implementation
         /// <returns>Dictionary of all mappings (Naziv/NazivDokumenta → SifraDokumentaMigracija)</returns>
         public async Task<IReadOnlyDictionary<string, string>> GetAllMappingsAsync(CancellationToken ct = default)
         {
-            await using var scope = _serviceProvider.CreateAsyncScope();
+            await using var scope = _scopeFactory.CreateAsyncScope();
             var uow = scope.ServiceProvider.GetRequiredService<IUnitOfWork>();
             var mappingService = scope.ServiceProvider.GetRequiredService<IDocumentMappingService>();
 
@@ -160,7 +160,7 @@ namespace Migration.Infrastructure.Implementation
             if (string.IsNullOrWhiteSpace(opisDokumenta))
                 return null;
 
-            await using var scope = _serviceProvider.CreateAsyncScope();
+            await using var scope = _scopeFactory.CreateAsyncScope();
             var uow = scope.ServiceProvider.GetRequiredService<IUnitOfWork>();
             var mappingService = scope.ServiceProvider.GetRequiredService<IDocumentMappingService>();
 
