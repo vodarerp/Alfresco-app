@@ -16,8 +16,19 @@ namespace SqlServer.Infrastructure.Implementation
     public class SqlServerRepository<T, TKey> : IRepository<T, TKey>
     {
         protected readonly IUnitOfWork _unitOfWork;
-        protected IDbConnection Conn => _unitOfWork.Connection;
-        protected IDbTransaction Tx => _unitOfWork.Transaction;
+
+        // Get connection - if UnitOfWork has active transaction use it, otherwise throw
+        protected IDbConnection Conn
+        {
+            get
+            {
+                // UnitOfWork.Connection will throw if connection not initialized
+                // This is intentional - we want operations to fail fast if UnitOfWork not properly initialized
+                return _unitOfWork.Connection;
+            }
+        }
+
+        protected IDbTransaction? Tx => _unitOfWork.Transaction;
 
         public SqlServerRepository(IUnitOfWork uow) => _unitOfWork = uow;
 
@@ -64,11 +75,12 @@ namespace SqlServer.Infrastructure.Implementation
 
             var columns = SqlServerHelpers<T>.TableProps.Where(o => !o.IsIdentity).ToArray();
             var colNames = string.Join(", ", columns.Select(c => c.Col));
-            var paramNames = string.Join(", ", columns.Select(c => $"@{c.Col}"));
 
-            string sql = $"INSERT INTO {TableName} ({colNames}) VALUES ({paramNames})";
-
-            var batchSize = 1000;
+            // Batch size for multi-row INSERT statements
+            // SQL Server has a limit of 2100 parameters per query
+            // Calculate safe batch size: 2000 / number of columns (with safety margin)
+            var maxRowsPerBatch = Math.Max(1, 2000 / columns.Length);
+            var batchSize = Math.Min(1000, maxRowsPerBatch);
             int totalInserted = 0;
 
             for (int offset = 0; offset < listEntities.Count; offset += batchSize)
@@ -77,25 +89,32 @@ namespace SqlServer.Infrastructure.Implementation
 
                 var batch = listEntities.Skip(offset).Take(batchSize).ToList();
 
-                // Use parameterized batch insert for SQL Server
-                var batchParameters = new List<DynamicParameters>();
-                foreach (var entity in batch)
+                // Build multi-row INSERT statement
+                // Example: INSERT INTO Table (col1, col2) VALUES (@col1_0, @col2_0), (@col1_1, @col2_1), ...
+                var valuesClauses = new List<string>();
+                var dp = new DynamicParameters();
+
+                for (int i = 0; i < batch.Count; i++)
                 {
-                    var dp = new DynamicParameters();
+                    var entity = batch[i];
+                    var paramList = new List<string>();
+
                     foreach (var col in columns)
                     {
+                        var paramName = $"@{col.Col}_{i}";
                         var val = col.Prop.GetValue(entity);
-                        dp.Add($"@{col.Col}", val);
+                        dp.Add(paramName, val);
+                        paramList.Add(paramName);
                     }
-                    batchParameters.Add(dp);
+
+                    valuesClauses.Add($"({string.Join(", ", paramList)})");
                 }
 
-                // Execute batch
-                foreach (var param in batchParameters)
-                {
-                    var cmd = new CommandDefinition(sql, param, Tx, cancellationToken: ct);
-                    totalInserted += await Conn.ExecuteAsync(cmd).ConfigureAwait(false);
-                }
+                // Single INSERT with multiple value rows
+                string sql = $"INSERT INTO {TableName} ({colNames}) VALUES {string.Join(", ", valuesClauses)}";
+
+                var cmd = new CommandDefinition(sql, dp, Tx, cancellationToken: ct);
+                totalInserted += await Conn.ExecuteAsync(cmd).ConfigureAwait(false);
             }
 
             return totalInserted;

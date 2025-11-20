@@ -76,10 +76,10 @@ namespace Migration.Infrastructure.Implementation.Document
             );
         }
 
-        public async Task<IReadOnlyList<ListEntry>> ReadBatchWithPaginationAsync(string folderNodeId, int skipCount, int maxItems, CancellationToken ct)
-        {
-            var docs = (await _read.GetNodeChildrenAsync(folderNodeId, skipCount, maxItems, ct).ConfigureAwait(false)).List?.Entries ?? new();
-            return docs;
-        }
+        //public async Task<IReadOnlyList<ListEntry>> ReadBatchWithPaginationAsync(string folderNodeId, int skipCount, int maxItems, CancellationToken ct)
+        //{
+        //    var docs = (await _read.GetNodeChildrenAsync(folderNodeId, skipCount, maxItems, ct).ConfigureAwait(false)).List?.Entries ?? new();
+        //    return docs;
+        //}
     }
 }

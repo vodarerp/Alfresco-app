@@ -22,7 +22,19 @@ namespace SqlServer.Infrastructure.Implementation
             _connString = inConnString;
         }
 
-        public IDbConnection Connection => _conn ?? throw new InvalidOperationException("DBConnection not set.");
+        public IDbConnection Connection
+        {
+            get
+            {
+                if (_conn is null)
+                    throw new InvalidOperationException("DBConnection not set. Call BeginAsync first.");
+
+                if (_conn.State == ConnectionState.Closed || _conn.State == ConnectionState.Broken)
+                    throw new InvalidOperationException($"DBConnection is {_conn.State}. Call BeginAsync first.");
+
+                return _conn;
+            }
+        }
 
         public IDbTransaction? Transaction => _tx;
 
@@ -36,14 +48,23 @@ namespace SqlServer.Infrastructure.Implementation
                 return;
             }
 
-            // Create new connection if not exists or was disposed
+            // Create new connection if not exists or was disposed/closed
             if (_conn is null || _conn.State == ConnectionState.Closed || _conn.State == ConnectionState.Broken)
             {
-                _conn?.Dispose(); // Clean up broken connection if exists
-                _conn = new SqlConnection(_connString);
-            }
+                // Dispose old connection if it exists
+                if (_conn is not null)
+                {
+                    try
+                    {
+                        await _conn.DisposeAsync().ConfigureAwait(false);
+                    }
+                    catch { /* ignore disposal errors */ }
+                }
 
-            if (_conn.State != ConnectionState.Open)
+                _conn = new SqlConnection(_connString);
+                await _conn.OpenAsync(ct).ConfigureAwait(false);
+            }
+            else if (_conn.State != ConnectionState.Open)
             {
                 await _conn.OpenAsync(ct).ConfigureAwait(false);
             }
@@ -87,15 +108,30 @@ namespace SqlServer.Infrastructure.Implementation
         {
             if (!IsActive) return;
 
-            _tx?.Rollback();
-            _tx?.Dispose();
-            _tx = null;
-
-            // Close connection after rollback to return it to the pool immediately
-            if (_conn is not null)
+            try
             {
-                await _conn.DisposeAsync().ConfigureAwait(false);
-                _conn = null;
+                _tx?.Rollback();
+            }
+            catch (InvalidOperationException)
+            {
+                // Transaction already completed or connection closed - ignore
+            }
+            catch (SqlException ex) when (ex.Number == 3903)
+            {
+                // Error 3903: "The ROLLBACK TRANSACTION request has no corresponding BEGIN TRANSACTION"
+                // This can happen if transaction was already completed - ignore
+            }
+            finally
+            {
+                _tx?.Dispose();
+                _tx = null;
+
+                // Close connection after rollback to return it to the pool immediately
+                if (_conn is not null)
+                {
+                    await _conn.DisposeAsync().ConfigureAwait(false);
+                    _conn = null;
+                }
             }
         }
     }

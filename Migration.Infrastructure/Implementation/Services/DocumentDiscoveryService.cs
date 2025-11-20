@@ -567,19 +567,19 @@ namespace Migration.Infrastructure.Implementation.Services
 
                 var result = await _reader.ReadBatchWithPaginationAsync(folder.NodeId!, skipCount, PAGE_SIZE, ct).ConfigureAwait(false);
 
-                if (result == null || result.Count == 0)
+                if (result == null || result.Documents.Count == 0)
                 {
                     _fileLogger.LogDebug("No more documents in current page for folder {FolderId}", folder.Id);
                     break;
                 }
 
                 _fileLogger.LogInformation("Found {Count} documents in page (skipCount={SkipCount}) for folder {FolderId}",
-                    result.Count, skipCount, folder.Id);
+                    result.Documents.Count, skipCount, folder.Id);
 
                 // Process documents from current page
-                var docsToInsert = new List<DocStaging>(result.Count);
+                var docsToInsert = new List<DocStaging>(result.Documents.Count);
 
-                foreach (var d in result)
+                foreach (var d in result.Documents)
                 {
                     var item = d.Entry.ToDocStagingInsert();
                     // ToPath will be determined by MoveService based on document properties
@@ -587,7 +587,29 @@ namespace Migration.Infrastructure.Implementation.Services
                     item.Status = MigrationStatus.Ready.ToDbString();
 
                     // Apply document mapping using mappers from Faza 1 (database-driven)
-                    await ApplyDocumentMappingAsync(item, folder, d.Entry, ct).ConfigureAwait(false);
+                    // Uses scoped UnitOfWork to avoid connection conflicts
+                    await using (var scope = _sp.CreateAsyncScope())
+                    {
+                        var scopedUow = scope.ServiceProvider.GetRequiredService<IUnitOfWork>();
+                        var scopedMapper = scope.ServiceProvider.GetRequiredService<IOpisToTipMapper>();
+
+                        await scopedUow.BeginAsync(ct: ct).ConfigureAwait(false);
+                        try
+                        {
+                            var mappedType = await scopedMapper.GetTipDokumentaAsync(d.Entry.Properties?.GetValueOrDefault("ecm:opisDokumenta")?.ToString() ?? "", ct).ConfigureAwait(false);
+                            // Apply the mapping result to item
+                            if (!string.IsNullOrWhiteSpace(mappedType))
+                            {
+                                item.DocumentType = mappedType;
+                            }
+                            await scopedUow.CommitAsync(ct: ct).ConfigureAwait(false);
+                        }
+                        catch
+                        {
+                            try { await scopedUow.RollbackAsync(ct: ct).ConfigureAwait(false); } catch { }
+                            // Continue with defaults on mapping failure
+                        }
+                    }
 
                     docsToInsert.Add(item);
                 }
@@ -684,20 +706,24 @@ namespace Migration.Infrastructure.Implementation.Services
                 return;
             }
 
+            await using var scope = _sp.CreateAsyncScope();
+            var scopedUow = scope.ServiceProvider.GetRequiredService<IUnitOfWork>();
+            var scopedDocRepo = scope.ServiceProvider.GetRequiredService<IDocStagingRepository>();
+
             try
             {
-                await _unitOfWork.BeginAsync(ct: ct).ConfigureAwait(false);
+                await scopedUow.BeginAsync(ct: ct).ConfigureAwait(false);
 
                 _fileLogger.LogDebug("Inserting {Count} documents for folder {FolderId}",
                     docsToInsert.Count, folderId);
 
-                int inserted = await _docRepo.InsertManyAsync(docsToInsert, ct).ConfigureAwait(false);
+                int inserted = await scopedDocRepo.InsertManyAsync(docsToInsert, ct).ConfigureAwait(false);
 
                 _fileLogger.LogInformation(
                     "Successfully inserted {Inserted}/{Total} documents for folder {FolderId}",
                     inserted, docsToInsert.Count, folderId);
 
-                await _unitOfWork.CommitAsync(ct).ConfigureAwait(false);
+                await scopedUow.CommitAsync(ct).ConfigureAwait(false);
                 _fileLogger.LogDebug("Transaction committed for folder {FolderId}", folderId);
             }
             catch (Exception ex)
@@ -707,7 +733,7 @@ namespace Migration.Infrastructure.Implementation.Services
                     "Attempted to insert {Count} documents. Rolling back transaction.",
                     folderId, docsToInsert.Count);
 
-                await _unitOfWork.RollbackAsync(ct).ConfigureAwait(false);
+                try { await scopedUow.RollbackAsync(ct).ConfigureAwait(false); } catch { }
                 throw;
             }
         }
