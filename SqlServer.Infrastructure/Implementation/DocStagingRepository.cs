@@ -145,5 +145,28 @@ namespace SqlServer.Infrastructure.Implementation
                 _ => throw new InvalidOperationException($"Unknown TargetDossierType: {targetDossierType}")
             };
         }
+
+        public async Task<int> UpdateDestinationFolderIdAsync(
+            string dossierDestFolderId,
+            string alfrescoFolderId,
+            CancellationToken ct = default)
+        {
+            var sql = @"
+                UPDATE DocStaging
+                SET DestinationFolderId = @AlfrescoFolderId,
+                    UpdatedAt = GETUTCDATE()
+                WHERE DossierDestFolderId = @DossierDestFolderId
+                  AND DestinationFolderId IS NULL";  // Only update if not already set
+
+            var parameters = new DynamicParameters();
+            parameters.Add("@DossierDestFolderId", dossierDestFolderId);
+            parameters.Add("@AlfrescoFolderId", alfrescoFolderId);
+
+            var cmd = new CommandDefinition(sql, parameters, Tx, cancellationToken: ct);
+
+            var rowsAffected = await Conn.ExecuteAsync(cmd).ConfigureAwait(false);
+
+            return rowsAffected;
+        }
     }
 }

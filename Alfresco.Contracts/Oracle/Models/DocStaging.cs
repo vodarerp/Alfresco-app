@@ -161,6 +161,16 @@ namespace Alfresco.Contracts.Oracle.Models
         /// </summary>
         public string? DossierDestFolderId { get; set; }
 
+        /// <summary>
+        /// ACTUAL Alfresco Folder UUID where document will be moved
+        /// Populated by FolderPreparationService in FAZA 3 after creating folder hierarchy
+        /// Used by MoveService in FAZA 4 for direct move operation (no folder resolution needed)
+        /// Example: "abc-123-def-456-ghi-789" (Alfresco node UUID)
+        /// This is the final destination folder ID after resolving the full path:
+        /// RootDestinationFolderId / DOSSIERS-{type} / {DossierDestFolderId}
+        /// </summary>
+        public string? DestinationFolderId { get; set; }
+
     }
 }
 

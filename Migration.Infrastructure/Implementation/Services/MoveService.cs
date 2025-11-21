@@ -29,15 +29,14 @@ namespace Migration.Infrastructure.Implementation.Services
         private readonly IMoveReader _moveReader;
         private readonly IMoveExecutor _moveExecutor;
         private readonly IDocStagingRepository _docRepo;
-        private readonly IDocumentResolver _resolver;
         private readonly IAlfrescoWriteApi _write;
         private readonly IAlfrescoReadApi _read;
         private readonly IOptions<MigrationOptions> _options;
         private readonly IServiceScopeFactory _scopeFactory;
-        //private readonly ILogger<MoveService> _fileLogger;
 
         private readonly ILogger _dbLogger;
         private readonly ILogger _fileLogger;
+        private readonly ILogger _uiLogger;
 
         private long _totalMoved = 0;
         private long _totalFailed = 0;
@@ -45,26 +44,22 @@ namespace Migration.Infrastructure.Implementation.Services
 
         private const string ServiceName = "Move";
 
-        private readonly ILogger _uiLogger;
+        // NOTE: Removed dependencies after refactoring:
+        // - IDocumentResolver: No longer needed - folders pre-resolved by FolderPreparationService
+        // - _folderCache and _folderLocks: Folder IDs stored in DocStaging.DestinationFolderId
 
-        // NOTE: Removed _folderCache and _folderLocks after refactoring
-        // Folder caching is now handled by DocumentResolver (with lock striping)
-        // All folders are pre-created by FolderPreparationService in FAZA 3
-
-        public MoveService(IMoveReader moveService, 
-                           IMoveExecutor moveExecutor, 
+        public MoveService(IMoveReader moveService,
+                           IMoveExecutor moveExecutor,
                            IDocStagingRepository docRepo,
-                           IDocumentResolver resolver,
-                           IAlfrescoWriteApi write, 
-                           IAlfrescoReadApi read, 
+                           IAlfrescoWriteApi write,
+                           IAlfrescoReadApi read,
                            IOptions<MigrationOptions> options,
-                           IServiceScopeFactory scopeFactory, 
+                           IServiceScopeFactory scopeFactory,
                            ILoggerFactory logger)
         {
             _moveReader = moveService;
             _moveExecutor = moveExecutor;
             _docRepo = docRepo;
-            _resolver = resolver;
             _write = write;
             _read = read;
             _options = options;
@@ -470,13 +465,14 @@ namespace Migration.Infrastructure.Implementation.Services
         /// <summary>
         /// Migrates single document from old to new Alfresco
         ///
-        /// Process:
-        /// 1. Create/Get destination folder (with caching)
-        /// 2. Move document to destination folder
+        /// Process (SIMPLIFIED after refactoring):
+        /// 1. Validate that DestinationFolderId is populated (by FolderPreparationService in FAZA 3)
+        /// 2. Move/Copy document to pre-resolved destination folder (direct folder ID, no resolution)
         /// 3. Lookup DocumentMapping to get migrated document type and name
-        /// 4. Update document properties in new Alfresco
+        /// 4. Update document properties (ecm:docType and ecm:naziv) in new Alfresco
         ///
         /// Per Analiza_migracije_v2.md: All metadata prepared by DocumentDiscoveryService
+        /// Per Refactoring: All folders pre-created and IDs cached by FolderPreparationService
         /// </summary>
         private async Task<bool> MoveSingleDocumentAsync(DocStaging doc, CancellationToken ct)
         {
@@ -484,38 +480,41 @@ namespace Migration.Infrastructure.Implementation.Services
             {
                 ["DocumentId"] = doc.Id,
                 ["NodeId"] = doc.NodeId,
-                ["DossierDestId"] = doc.DossierDestFolderId ?? "null",
-                ["TargetDossierType"] = doc.TargetDossierType?.ToString() ?? "null"
+                ["DestinationFolderId"] = doc.DestinationFolderId ?? "null"
             });
 
             try
             {
                 // ========================================
-                // STEP 1: Create/Get destination folder
+                // VALIDATION: Ensure DestinationFolderId is populated by FolderPreparationService (FAZA 3)
                 // ========================================
-                _fileLogger.LogDebug("Creating destination folder for document {DocId}", doc.Id);
-                var destFolderId = await CreateOrGetDestinationFolder(doc, ct).ConfigureAwait(false);
+                if (string.IsNullOrWhiteSpace(doc.DestinationFolderId))
+                {
+                    throw new InvalidOperationException(
+                        $"DestinationFolderId is NULL for document {doc.Id} (NodeId: {doc.NodeId}). " +
+                        $"FolderPreparationService (FAZA 3) must run first and populate this field!");
+                }
 
-                _fileLogger.LogInformation("Destination folder for document {DocId}: {FolderId}",
-                    doc.Id, destFolderId);
+                _fileLogger.LogDebug("Using pre-resolved DestinationFolderId: {FolderId} for document {DocId}",
+                    doc.DestinationFolderId, doc.Id);
 
                 // ========================================
-                // STEP 2: Move or Copy document to destination folder
+                // STEP 1: Move or Copy document to destination folder
                 // ========================================
                 var useCopy = _options.Value.MoveService.UseCopy;
                 var operationName = useCopy ? "Copying" : "Moving";
 
                 _fileLogger.LogDebug("{Operation} document {DocId} (NodeId: {NodeId}) to folder {FolderId}",
-                    operationName, doc.Id, doc.NodeId, destFolderId);
+                    operationName, doc.Id, doc.NodeId, doc.DestinationFolderId);
 
                 bool success;
                 if (useCopy)
                 {
-                    success = await _moveExecutor.CopyAsync(doc.NodeId, destFolderId, ct).ConfigureAwait(false);
+                    success = await _moveExecutor.CopyAsync(doc.NodeId, doc.DestinationFolderId, ct).ConfigureAwait(false);
                 }
                 else
                 {
-                    success = await _moveExecutor.MoveAsync(doc.NodeId, destFolderId, ct).ConfigureAwait(false);
+                    success = await _moveExecutor.MoveAsync(doc.NodeId, doc.DestinationFolderId, ct).ConfigureAwait(false);
                 }
 
                 if (!success)
@@ -525,10 +524,10 @@ namespace Migration.Infrastructure.Implementation.Services
                 }
 
                 _fileLogger.LogInformation("Document {DocId} successfully {Operation} to {FolderId}",
-                    doc.Id, useCopy ? "copied" : "moved", destFolderId);
+                    doc.Id, useCopy ? "copied" : "moved", doc.DestinationFolderId);
 
                 // ========================================
-                // STEP 3: Lookup DocumentMapping to get migrated docType and naziv
+                // STEP 2: Lookup DocumentMapping to get migrated docType and naziv
                 // ========================================
                 _fileLogger.LogDebug("Looking up DocumentMapping for document {DocId} with ecm:docDesc='{DocDesc}'",
                     doc.Id, doc.DocDescription);
@@ -589,9 +588,9 @@ namespace Migration.Infrastructure.Implementation.Services
                 }
 
                 // ========================================
-                // STEP 4: Read existing document properties and update only ecm:docType and ecm:naziv
+                // STEP 3: Update document properties (ecm:docType and ecm:naziv)
                 // ========================================
-                _fileLogger.LogDebug("Reading existing properties for document {DocId} (NodeId: {NodeId})", doc.Id, doc.NodeId);
+                _fileLogger.LogDebug("Updating properties for document {DocId} (NodeId: {NodeId})", doc.Id, doc.NodeId);
 
                 // Read current document properties from Alfresco
                 var existingNode = await _read.GetNodeByIdAsync(doc.NodeId, ct).ConfigureAwait(false);
@@ -851,76 +850,15 @@ namespace Migration.Infrastructure.Implementation.Services
             return completedSuccessfully;
         }
 
-       
-        private string GetParentFolderName(int? targetDossierType)
-        {
-            if (!targetDossierType.HasValue)
-            {
-                _fileLogger.LogWarning("TargetDossierType is null, defaulting to DOSSIERS-UNKNOWN");
-                return "DOSSIERS-UNKNOWN";
-            }
+        // ====================================================================
+        // REMOVED METHODS (No longer needed after FolderPreparationService refactoring)
+        // ====================================================================
+        // - GetParentFolderName() → Folder mapping now handled by FolderPreparationService
+        // - CreateOrGetDestinationFolder() → Folders pre-created, IDs stored in DocStaging.DestinationFolderId
+        // - BuildDossierProperties() → Properties set during folder creation in FAZA 3
+        // ====================================================================
 
-            var dossierType = (DossierType)targetDossierType.Value;
-
-            var folderName = dossierType switch
-            {
-                DossierType.ClientFL => "DOSSIERS-PI",       // 500
-                DossierType.ClientPL => "DOSSIERS-LE",       // 400
-                DossierType.AccountPackage => "DOSSIERS-ACC", // 300
-                DossierType.Deposit => "DOSSIERS-D",         // 700
-                _ => "DOSSIERS-UNKNOWN"                      // 999 or other
-            };
-
-            _fileLogger.LogTrace("Mapped DossierType {DossierType} ({Code}) → Parent folder '{FolderName}'",
-                dossierType, targetDossierType.Value, folderName);
-
-            return folderName;
-        }
-
-       
-        private async Task<string> CreateOrGetDestinationFolder(DocStaging doc, CancellationToken ct)
-        {
-            
-            var parentFolderName = GetParentFolderName(doc.TargetDossierType);
-
-            _fileLogger.LogDebug("Resolving parent folder '{ParentFolderName}' under root {RootId}",
-                parentFolderName, _options.Value.RootDestinationFolderId);
-
-            var parentFolderId = await _resolver.ResolveAsync(
-                _options.Value.RootDestinationFolderId,
-                parentFolderName,
-                ct).ConfigureAwait(false);
-
-            _fileLogger.LogTrace("Parent folder '{ParentFolderName}' → ID: {ParentFolderId}",
-                parentFolderName, parentFolderId);
-
-            // Step 2: Get individual dossier folder (PI102206, LE500342, etc.)
-            var dossierId = doc.DossierDestFolderId;
-
-            if (string.IsNullOrWhiteSpace(dossierId))
-            {
-                _fileLogger.LogError("DossierDestFolderId is empty for document {DocId}, cannot resolve destination folder", doc.Id);
-                throw new InvalidOperationException($"DossierDestFolderId is empty for document {doc.Id}");
-            }
-
-            _fileLogger.LogDebug("Resolving dossier folder '{DossierId}' under parent {ParentFolderId}",
-                dossierId, parentFolderId);
-
-            
-            var dossierFolderId = await _resolver.ResolveAsync(
-                parentFolderId,
-                dossierId,
-                null, // No properties - folder already exists
-                ct).ConfigureAwait(false);
-
-            _fileLogger.LogTrace("Dossier folder '{DossierId}' → ID: {DossierFolderId}",
-                dossierId, dossierFolderId);
-
-            return dossierFolderId;
-        }
-
-       
-        [Obsolete("No longer used - folders are created by FolderPreparationService in FAZA 3")]
+        [Obsolete("No longer used - folders are created by FolderPreparationService in FAZA 3", true)]
         private Dictionary<string, object> BuildDossierProperties(DocStaging doc, Dictionary<string, object>? oldFolderProperties)
         {
             var properties = new Dictionary<string, object>();

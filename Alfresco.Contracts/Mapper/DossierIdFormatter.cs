@@ -7,31 +7,45 @@ namespace Alfresco.Contracts.Mapper
     /// Handles dossier ID format conversion between old and new Alfresco systems
     ///
     /// Standard dossiers:
-    /// - OLD format: {Prefix}-{CoreId} (with hyphen) - Example: PI-102206, LE-500342
-    /// - NEW format: {Prefix}{CoreId} (without hyphen) - Example: PI102206, LE500342
+    /// - OLD format (in old Alfresco): May or may not have hyphen (PI-102206 or PI102206)
+    /// - NEW format (required in new Alfresco): {Prefix}-{CoreId} WITH hyphen - Example: PI-102206, LE-500342, ACC-13001926
     ///
     /// Deposit dossiers:
-    /// - NEW format: DE{CoreId}-{ProductType}_{ContractNumber}
-    /// - Example: DE500342-00008_12345
+    /// - NEW format: DE-{CoreId}-{ProductType}_{ContractNumber}
+    /// - Example: DE-500342-00008_12345
     /// </summary>
     public static class DossierIdFormatter
     {
         /// <summary>
-        /// Converts OLD dossier format to NEW format by removing the hyphen
+        /// Converts dossier ID to NEW format by ensuring it has a hyphen
+        /// If hyphen already exists, returns as-is
+        /// If no hyphen, adds it between prefix and CoreId
         /// </summary>
-        /// <param name="oldDossierId">Old dossier ID with hyphen (e.g., "PI-102206")</param>
-        /// <returns>New dossier ID without hyphen (e.g., "PI102206")</returns>
+        /// <param name="oldDossierId">Dossier ID (with or without hyphen)</param>
+        /// <returns>New dossier ID WITH hyphen (e.g., "PI-102206")</returns>
         /// <example>
-        /// ConvertToNewFormat("PI-102206") → "PI102206"
-        /// ConvertToNewFormat("LE-500342") → "LE500342"
-        /// ConvertToNewFormat("ACC-13001926") → "ACC13001926"
+        /// ConvertToNewFormat("PI-102206") → "PI-102206" (already has hyphen)
+        /// ConvertToNewFormat("PI102206") → "PI-102206" (adds hyphen)
+        /// ConvertToNewFormat("LE500342") → "LE-500342" (adds hyphen)
+        /// ConvertToNewFormat("ACC13001926") → "ACC-13001926" (adds hyphen)
         /// </example>
         public static string ConvertToNewFormat(string oldDossierId)
         {
             if (string.IsNullOrWhiteSpace(oldDossierId))
                 return string.Empty;
 
-            return oldDossierId.Replace("-", "");
+            // If already has hyphen, return as-is
+            if (oldDossierId.Contains("-"))
+                return oldDossierId.ToUpperInvariant();
+
+            // Extract prefix and CoreId, then recombine with hyphen
+            var prefix = ExtractPrefix(oldDossierId);
+            var coreId = ExtractCoreId(oldDossierId);
+
+            if (string.IsNullOrWhiteSpace(prefix) || string.IsNullOrWhiteSpace(coreId))
+                return oldDossierId.ToUpperInvariant(); // Fallback to original
+
+            return CreateNewDossierId(prefix, coreId);
         }
 
         /// <summary>
@@ -84,51 +98,34 @@ namespace Alfresco.Contracts.Mapper
         }
 
         /// <summary>
-        /// Creates a NEW dossier ID from prefix and CoreId
+        /// Creates a NEW dossier ID from prefix and CoreId WITH hyphen
         /// </summary>
         /// <param name="prefix">Dossier prefix (e.g., "PI", "LE", "ACC")</param>
         /// <param name="coreId">Core ID (numeric part)</param>
-        /// <returns>New dossier ID without hyphen</returns>
+        /// <returns>New dossier ID WITH hyphen (format: PREFIX-COREID)</returns>
         /// <example>
-        /// CreateNewDossierId("ACC", "500342") → "ACC500342"
-        /// CreateNewDossierId("pi", "102206") → "PI102206"
-        /// CreateNewDossierId("D", "500342") → "D500342"
+        /// CreateNewDossierId("ACC", "500342") → "ACC-500342"
+        /// CreateNewDossierId("pi", "102206") → "PI-102206"
+        /// CreateNewDossierId("D", "500342") → "D-500342"
         /// </example>
         public static string CreateNewDossierId(string prefix, string coreId)
         {
             if (string.IsNullOrWhiteSpace(prefix) || string.IsNullOrWhiteSpace(coreId))
                 return string.Empty;
 
-            return $"{prefix.ToUpperInvariant()}{coreId}";
+            return $"{prefix.ToUpperInvariant()}-{coreId}";
         }
 
         /// <summary>
-        /// Checks if dossier ID is in OLD format (contains hyphen)
+        /// Checks if dossier ID is in OLD format (without hyphen)
         /// </summary>
         /// <param name="dossierId">Dossier ID to check</param>
-        /// <returns>True if OLD format (with hyphen), false otherwise</returns>
+        /// <returns>True if OLD format (without hyphen), false otherwise</returns>
         /// <example>
-        /// IsOldFormat("PI-102206") → true
-        /// IsOldFormat("PI102206") → false
+        /// IsOldFormat("PI102206") → true
+        /// IsOldFormat("PI-102206") → false
         /// </example>
         public static bool IsOldFormat(string dossierId)
-        {
-            if (string.IsNullOrWhiteSpace(dossierId))
-                return false;
-
-            return dossierId.Contains("-");
-        }
-
-        /// <summary>
-        /// Checks if dossier ID is in NEW format (no hyphen)
-        /// </summary>
-        /// <param name="dossierId">Dossier ID to check</param>
-        /// <returns>True if NEW format (without hyphen), false otherwise</returns>
-        /// <example>
-        /// IsNewFormat("PI102206") → true
-        /// IsNewFormat("PI-102206") → false
-        /// </example>
-        public static bool IsNewFormat(string dossierId)
         {
             if (string.IsNullOrWhiteSpace(dossierId))
                 return false;
@@ -137,15 +134,32 @@ namespace Alfresco.Contracts.Mapper
         }
 
         /// <summary>
-        /// Creates deposit dossier ID in the format: DE{CoreId}-{ProductType}_{ContractNumber}
+        /// Checks if dossier ID is in NEW format (with hyphen)
+        /// </summary>
+        /// <param name="dossierId">Dossier ID to check</param>
+        /// <returns>True if NEW format (with hyphen), false otherwise</returns>
+        /// <example>
+        /// IsNewFormat("PI-102206") → true
+        /// IsNewFormat("PI102206") → false
+        /// </example>
+        public static bool IsNewFormat(string dossierId)
+        {
+            if (string.IsNullOrWhiteSpace(dossierId))
+                return false;
+
+            return dossierId.Contains("-");
+        }
+
+        /// <summary>
+        /// Creates deposit dossier ID in the format: DE-{CoreId}-{ProductType}_{ContractNumber}
         /// </summary>
         /// <param name="coreId">Client Core ID</param>
         /// <param name="productType">Product type code (e.g., "00008")</param>
         /// <param name="contractNumber">Contract number</param>
         /// <returns>Deposit dossier ID</returns>
         /// <example>
-        /// CreateDepositDossierId("500342", "00008", "12345") → "DE500342-00008_12345"
-        /// CreateDepositDossierId("102206", "00010", "67890") → "DE102206-00010_67890"
+        /// CreateDepositDossierId("500342", "00008", "12345") → "DE-500342-00008_12345"
+        /// CreateDepositDossierId("102206", "00010", "67890") → "DE-102206-00010_67890"
         /// </example>
         public static string CreateDepositDossierId(string coreId, string productType, string contractNumber)
         {
@@ -156,7 +170,7 @@ namespace Alfresco.Contracts.Mapper
                 return string.Empty;
             }
 
-            return $"DE{coreId}-{productType}_{contractNumber}";
+            return $"DE-{coreId}-{productType}_{contractNumber}";
         }
 
         /// <summary>
@@ -179,12 +193,14 @@ namespace Alfresco.Contracts.Mapper
 
         /// <summary>
         /// Parses deposit dossier ID and extracts its components
+        /// Supports both old format (DE{CoreId}-...) and new format (DE-{CoreId}-...)
         /// </summary>
-        /// <param name="depositDossierId">Deposit dossier ID (e.g., "DE500342-00008_12345")</param>
+        /// <param name="depositDossierId">Deposit dossier ID (e.g., "DE-500342-00008_12345" or "DE500342-00008_12345")</param>
         /// <returns>Tuple with (CoreId, ProductType, ContractNumber) or null if invalid format</returns>
         /// <example>
+        /// ParseDepositDossierId("DE-500342-00008_12345") → ("500342", "00008", "12345")
         /// ParseDepositDossierId("DE500342-00008_12345") → ("500342", "00008", "12345")
-        /// ParseDepositDossierId("PI102206") → null
+        /// ParseDepositDossierId("PI-102206") → null
         /// </example>
         public static (string CoreId, string ProductType, string ContractNumber)? ParseDepositDossierId(string depositDossierId)
         {
@@ -193,11 +209,14 @@ namespace Alfresco.Contracts.Mapper
 
             try
             {
-                // Expected format: DE{CoreId}-{ProductType}_{ContractNumber}
-                // Example: DE500342-00008_12345
+                // Expected format: DE-{CoreId}-{ProductType}_{ContractNumber} (NEW)
+                //              or: DE{CoreId}-{ProductType}_{ContractNumber} (OLD)
+                // Example: DE-500342-00008_12345 or DE500342-00008_12345
 
-                // Remove "DE" prefix
-                var withoutPrefix = depositDossierId.Substring(2);
+                // Remove "DE" or "DE-" prefix
+                var withoutPrefix = depositDossierId.StartsWith("DE-", StringComparison.OrdinalIgnoreCase)
+                    ? depositDossierId.Substring(3)  // "DE-500342-00008_12345" → "500342-00008_12345"
+                    : depositDossierId.Substring(2);  // "DE500342-00008_12345" → "500342-00008_12345"
 
                 // Split by "-" to get CoreId and rest
                 var parts = withoutPrefix.Split('-');
@@ -228,7 +247,7 @@ namespace Alfresco.Contracts.Mapper
         /// <param name="depositDossierId">Deposit dossier ID</param>
         /// <returns>Core ID or empty string if invalid</returns>
         /// <example>
-        /// ExtractCoreIdFromDeposit("DE500342-00008_12345") → "500342"
+        /// ExtractCoreIdFromDeposit("DE-500342-00008_12345") → "500342"
         /// </example>
         public static string ExtractCoreIdFromDeposit(string depositDossierId)
         {
@@ -242,7 +261,7 @@ namespace Alfresco.Contracts.Mapper
         /// <param name="depositDossierId">Deposit dossier ID</param>
         /// <returns>Product type or empty string if invalid</returns>
         /// <example>
-        /// ExtractProductTypeFromDeposit("DE500342-00008_12345") → "00008"
+        /// ExtractProductTypeFromDeposit("DE-500342-00008_12345") → "00008"
         /// </example>
         public static string ExtractProductTypeFromDeposit(string depositDossierId)
         {
@@ -256,7 +275,7 @@ namespace Alfresco.Contracts.Mapper
         /// <param name="depositDossierId">Deposit dossier ID</param>
         /// <returns>Contract number or empty string if invalid</returns>
         /// <example>
-        /// ExtractContractNumberFromDeposit("DE500342-00008_12345") → "12345"
+        /// ExtractContractNumberFromDeposit("DE-500342-00008_12345") → "12345"
         /// </example>
         public static string ExtractContractNumberFromDeposit(string depositDossierId)
         {
@@ -265,16 +284,18 @@ namespace Alfresco.Contracts.Mapper
         }
 
         /// <summary>
-        /// Converts dossier ID to ACC format based on target dossier type
-        /// Used when documents are migrated to DOSSIER-ACC (Account Package)
+        /// Converts dossier ID to target format based on target dossier type
+        /// Used when documents are migrated to different dossier types (e.g., DOSSIER-ACC)
+        /// Ensures output has hyphen between prefix and CoreId
         /// </summary>
-        /// <param name="oldDossierId">Old dossier ID (e.g., "PI-102206", "LE-500342")</param>
-        /// <param name="targetDossierType">Target dossier type (300 = ACC)</param>
-        /// <returns>New dossier ID with correct prefix</returns>
+        /// <param name="oldDossierId">Old dossier ID (e.g., "PI-102206", "PI102206", "LE-500342")</param>
+        /// <param name="targetDossierType">Target dossier type (300 = ACC, 400 = LE, 500 = PI, 700 = DE)</param>
+        /// <returns>New dossier ID with correct prefix and hyphen</returns>
         /// <example>
-        /// ConvertForTargetType("PI-102206", 300) → "ACC102206"
-        /// ConvertForTargetType("LE-500342", 300) → "ACC500342"
-        /// ConvertForTargetType("PI-102206", 500) → "PI102206" (no change, not ACC)
+        /// ConvertForTargetType("PI-102206", 300) → "ACC-102206"
+        /// ConvertForTargetType("PI102206", 300) → "ACC-102206" (adds hyphen)
+        /// ConvertForTargetType("LE-500342", 300) → "ACC-500342"
+        /// ConvertForTargetType("PI-102206", 500) → "PI-102206" (keeps same prefix)
         /// </example>
         public static string ConvertForTargetType(string oldDossierId, int targetDossierType)
         {
@@ -303,14 +324,16 @@ namespace Alfresco.Contracts.Mapper
         /// <summary>
         /// Converts old dossier format to new format with prefix change if needed
         /// Based on Enums.DossierType enum values
+        /// Ensures output has hyphen between prefix and CoreId
         /// </summary>
-        /// <param name="oldDossierId">Old dossier ID (e.g., "PI-102206")</param>
+        /// <param name="oldDossierId">Old dossier ID (e.g., "PI-102206" or "PI102206")</param>
         /// <param name="targetDossierType">Target dossier type from Enums.DossierType</param>
-        /// <returns>New dossier ID with correct prefix and no hyphen</returns>
+        /// <returns>New dossier ID with correct prefix and hyphen</returns>
         /// <example>
-        /// ConvertWithPrefixChange("PI-102206", Enums.DossierType.AccountPackage) → "ACC102206"
-        /// ConvertWithPrefixChange("LE-500342", Enums.DossierType.AccountPackage) → "ACC500342"
-        /// ConvertWithPrefixChange("PI-102206", Enums.DossierType.ClientFL) → "PI102206"
+        /// ConvertWithPrefixChange("PI-102206", Enums.DossierType.AccountPackage) → "ACC-102206"
+        /// ConvertWithPrefixChange("PI102206", Enums.DossierType.AccountPackage) → "ACC-102206"
+        /// ConvertWithPrefixChange("LE-500342", Enums.DossierType.AccountPackage) → "ACC-500342"
+        /// ConvertWithPrefixChange("PI-102206", Enums.DossierType.ClientFL) → "PI-102206"
         /// </example>
         public static string ConvertWithPrefixChange(string oldDossierId, Enums.DossierType targetDossierType)
         {

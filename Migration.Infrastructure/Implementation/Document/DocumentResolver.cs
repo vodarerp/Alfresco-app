@@ -41,12 +41,37 @@ namespace Migration.Infrastructure.Implementation.Document
             _folderManager = folderManager ?? throw new ArgumentNullException(nameof(folderManager));
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         }
+        /// <summary>
+        /// Resolves folder by name with backward compatibility (creates if missing)
+        /// </summary>
         public async Task<string> ResolveAsync(string destinationRootId, string newFolderName, CancellationToken ct)
         {
-            return await ResolveAsync(destinationRootId, newFolderName, null, ct).ConfigureAwait(false);
+            return await ResolveAsync(destinationRootId, newFolderName, null, true, ct).ConfigureAwait(false);
         }
 
+        /// <summary>
+        /// Resolves folder by name with properties (creates if missing)
+        /// </summary>
         public async Task<string> ResolveAsync(string destinationRootId, string newFolderName, Dictionary<string, object>? properties, CancellationToken ct)
+        {
+            return await ResolveAsync(destinationRootId, newFolderName, properties, true, ct).ConfigureAwait(false);
+        }
+
+        /// <summary>
+        /// Resolves folder with explicit control over creation behavior
+        /// </summary>
+        /// <param name="destinationRootId">Parent folder ID</param>
+        /// <param name="newFolderName">Folder name to resolve</param>
+        /// <param name="properties">Optional properties for folder creation</param>
+        /// <param name="createIfMissing">If true, creates folder if not found. If false, throws exception.</param>
+        /// <param name="ct">Cancellation token</param>
+        /// <returns>Folder ID (existing or newly created)</returns>
+        public async Task<string> ResolveAsync(
+            string destinationRootId,
+            string newFolderName,
+            Dictionary<string, object>? properties,
+            bool createIfMissing,
+            CancellationToken ct)
         {
             // ========================================
             // Step 1: Check cache first (fast path - no locking)
@@ -86,7 +111,7 @@ namespace Migration.Infrastructure.Implementation.Document
                 _logger.LogDebug("Checking if folder '{FolderName}' exists under parent '{ParentId}'...",
                     newFolderName, destinationRootId);
 
-                var folderID = await _read.GetFolderByRelative(destinationRootId, newFolderName, ct).ConfigureAwait(false); 
+                var folderID = await _read.GetFolderByRelative(destinationRootId, newFolderName, ct).ConfigureAwait(false);
 
                 if (!string.IsNullOrEmpty(folderID))
                 {
@@ -99,7 +124,17 @@ namespace Migration.Infrastructure.Implementation.Document
                 }
 
                 // ========================================
-                // Step 5: Create folder (with or without properties)
+                // Step 5: Folder doesn't exist - check if we should create it
+                // ========================================
+                if (!createIfMissing)
+                {
+                    throw new InvalidOperationException(
+                        $"Folder '{newFolderName}' not found under parent '{destinationRootId}' " +
+                        $"and createIfMissing=false. This folder should have been created by FolderPreparationService.");
+                }
+
+                // ========================================
+                // Step 6: Create folder (with or without properties)
                 // ========================================
                 _logger.LogDebug("Creating folder '{FolderName}' under parent '{ParentId}'...",
                     newFolderName, destinationRootId);
@@ -155,7 +190,7 @@ namespace Migration.Infrastructure.Implementation.Document
                 }
 
                 // ========================================
-                // Step 6: Cache the result
+                // Step 7: Cache the result
                 // ========================================
                 _folderCache.TryAdd(cacheKey, folderID);
                 _logger.LogTrace("Cached folder ID {FolderId} for key '{CacheKey}'", folderID, cacheKey);

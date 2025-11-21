@@ -2,6 +2,7 @@ using Alfresco.Contracts.Enums;
 using Alfresco.Contracts.Models;
 using Alfresco.Contracts.Options;
 using Alfresco.Contracts.Oracle.Models;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Migration.Abstraction.Interfaces;
@@ -24,6 +25,7 @@ namespace Migration.Infrastructure.Implementation.Services
         private readonly IDocumentResolver _documentResolver;
         private readonly IPhaseCheckpointRepository _phaseCheckpointRepo;
         private readonly IUnitOfWork _uow;
+        private readonly IServiceScopeFactory _scopeFactory;
         private readonly ILogger<FolderPreparationService> _logger;
         private readonly string _rootDestinationFolderId;
 
@@ -38,6 +40,7 @@ namespace Migration.Infrastructure.Implementation.Services
             IDocumentResolver documentResolver,
             IPhaseCheckpointRepository phaseCheckpointRepo,
             IUnitOfWork uow,
+            IServiceScopeFactory scopeFactory,
             ILogger<FolderPreparationService> logger,
             IOptions<MigrationOptions> migrationOptions)
         {
@@ -45,6 +48,7 @@ namespace Migration.Infrastructure.Implementation.Services
             _documentResolver = documentResolver ?? throw new ArgumentNullException(nameof(documentResolver));
             _phaseCheckpointRepo = phaseCheckpointRepo ?? throw new ArgumentNullException(nameof(phaseCheckpointRepo));
             _uow = uow ?? throw new ArgumentNullException(nameof(uow));
+            _scopeFactory = scopeFactory ?? throw new ArgumentNullException(nameof(scopeFactory));
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
             _rootDestinationFolderId = migrationOptions?.Value?.RootDestinationFolderId ?? throw new ArgumentNullException(nameof(migrationOptions));
         }
@@ -245,6 +249,56 @@ namespace Migration.Infrastructure.Implementation.Services
             _logger.LogDebug(
                 "Created folder hierarchy: {RootDestinationFolderId}/{ParentFolder}/{Path} → {FinalId}",
                 _rootDestinationFolderId, folder.DestinationRootId, folder.FolderPath, currentParentId);
+
+            // STEP 3: Update DocStaging.DestinationFolderId for all documents in this folder
+            await UpdateDocumentDestinationFolderIdAsync(
+                folder.FolderPath,
+                currentParentId,
+                ct).ConfigureAwait(false);
+        }
+
+        private async Task UpdateDocumentDestinationFolderIdAsync(
+            string dossierDestFolderId,
+            string alfrescoFolderId,
+            CancellationToken ct)
+        {
+            try
+            {
+                await using var scope = _scopeFactory.CreateAsyncScope();
+                var uow = scope.ServiceProvider.GetRequiredService<IUnitOfWork>();
+                var docRepo = scope.ServiceProvider.GetRequiredService<IDocStagingRepository>();
+
+                await uow.BeginAsync(ct: ct).ConfigureAwait(false);
+                try
+                {
+                    var rowsUpdated = await docRepo.UpdateDestinationFolderIdAsync(
+                        dossierDestFolderId,
+                        alfrescoFolderId,
+                        ct).ConfigureAwait(false);
+
+                    await uow.CommitAsync(ct: ct).ConfigureAwait(false);
+
+                    if (rowsUpdated > 0)
+                    {
+                        _logger.LogDebug(
+                            "Updated {Count} documents with DestinationFolderId={FolderId} for DossierDestFolderId='{DossierId}'",
+                            rowsUpdated, alfrescoFolderId, dossierDestFolderId);
+                    }
+                }
+                catch
+                {
+                    await uow.RollbackAsync(ct: ct).ConfigureAwait(false);
+                    throw;
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex,
+                    "Failed to update DestinationFolderId for DossierDestFolderId='{DossierId}'. Folder ID: {FolderId}",
+                    dossierDestFolderId, alfrescoFolderId);
+                // Don't throw - this is not critical for folder creation
+                // MoveService will fail gracefully if DestinationFolderId is null
+            }
         }
 
         private async Task<PhaseCheckpoint?> GetCheckpointAsync(CancellationToken ct)

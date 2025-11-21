@@ -23,5 +23,18 @@ namespace SqlServer.Abstraction.Interfaces
         /// <param name="ct">Cancellation token</param>
         /// <returns>List of unique folder information</returns>
         Task<List<UniqueFolderInfo>> GetUniqueDestinationFoldersAsync(CancellationToken ct = default);
+
+        /// <summary>
+        /// Updates DestinationFolderId for all documents belonging to a specific dossier folder.
+        /// Called by FolderPreparationService after creating folder hierarchy.
+        /// </summary>
+        /// <param name="dossierDestFolderId">Dossier folder identifier (e.g., "PI102206", "LE500342")</param>
+        /// <param name="alfrescoFolderId">Actual Alfresco folder UUID</param>
+        /// <param name="ct">Cancellation token</param>
+        /// <returns>Number of documents updated</returns>
+        Task<int> UpdateDestinationFolderIdAsync(
+            string dossierDestFolderId,
+            string alfrescoFolderId,
+            CancellationToken ct = default);
     }
 }
