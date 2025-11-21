@@ -1,4 +1,5 @@
-﻿using Microsoft.Extensions.Logging;     // ← ILogger
+﻿using Alfresco.Contracts.Options;        // ← PollyPolicyOptions
+using Microsoft.Extensions.Logging;     // ← ILogger
 using Polly;                             // ← Policy, AsyncRetryPolicy
 using Polly.CircuitBreaker;              // ← AsyncCircuitBreakerPolicy
 using Polly.Extensions.Http;
@@ -11,6 +12,7 @@ namespace Alfresco.App.Helpers
 {
     public static class PolicyHelpers
     {
+        [Obsolete("Use GetCombinedReadPolicy or GetCombinedWritePolicy with PolicyOperationOptions from appsettings.json instead", error: true)]
         public static IAsyncPolicy<HttpResponseMessage> GetRetryPlicy()
         {
             return HttpPolicyExtensions
@@ -19,6 +21,7 @@ namespace Alfresco.App.Helpers
                 .WaitAndRetryAsync(3, retryAttempt => TimeSpan.FromSeconds(Math.Pow(2, retryAttempt)));
         }
 
+        [Obsolete("Use GetCombinedReadPolicy or GetCombinedWritePolicy with PolicyOperationOptions from appsettings.json instead", error: true)]
         public static IAsyncPolicy<HttpResponseMessage> GetCircuitBreakerPolicy()
         {
             return HttpPolicyExtensions
@@ -26,7 +29,9 @@ namespace Alfresco.App.Helpers
                 .CircuitBreakerAsync(5, TimeSpan.FromSeconds(30));
         }
 
-        public static AsyncRetryPolicy<HttpResponseMessage> GetRetryPolicy(ILogger? logger = null)
+        public static AsyncRetryPolicy<HttpResponseMessage> GetRetryPolicy(
+            int retryCount = 3,
+            ILogger? logger = null)
         {
             return Policy
                 .HandleResult<HttpResponseMessage>(r =>
@@ -35,9 +40,10 @@ namespace Alfresco.App.Helpers
                     r.StatusCode == HttpStatusCode.RequestTimeout ||
                     (int)r.StatusCode >= 500)
                 .Or<HttpRequestException>()
-                .Or<TaskCanceledException>()
+                // REMOVED: .Or<TaskCanceledException>() - Ne retry-uj timeout greške!
+                // Timeout znači da je operacija predugo trajala, retry neće pomoći
                 .WaitAndRetryAsync(
-                    retryCount: 3,
+                    retryCount: retryCount,
                     sleepDurationProvider: retryAttempt =>
                     {
                         // Exponential backoff: 2s, 4s, 8s
@@ -52,20 +58,24 @@ namespace Alfresco.App.Helpers
                     {
                         var statusCode = outcome.Result?.StatusCode.ToString() ?? "Exception";
                         logger?.LogWarning(
-                            "Retry {RetryCount}/3 after {Delay}ms due to {StatusCode}",
-                            retryCount, timespan.TotalMilliseconds, statusCode);
+                            "Retry {RetryCount}/{MaxRetries} after {Delay}ms due to {StatusCode}",
+                            retryCount, retryCount, timespan.TotalMilliseconds, statusCode);
                     });
         }
 
         public static AsyncCircuitBreakerPolicy<HttpResponseMessage> GetCircuitBreakerPolicy(
+            int failuresBeforeBreaking = 5,
+            TimeSpan? durationOfBreak = null,
             ILogger? logger = null)
         {
+            durationOfBreak ??= TimeSpan.FromSeconds(30);
+
             return Policy
                 .HandleResult<HttpResponseMessage>(r => (int)r.StatusCode >= 500)
                 .Or<HttpRequestException>()
                 .CircuitBreakerAsync(
-                    handledEventsAllowedBeforeBreaking: 5,
-                    durationOfBreak: TimeSpan.FromSeconds(30),
+                    handledEventsAllowedBeforeBreaking: failuresBeforeBreaking,
+                    durationOfBreak: durationOfBreak.Value,
                     onBreak: (outcome, duration) =>
                     {
                         logger?.LogError(
@@ -103,8 +113,8 @@ namespace Alfresco.App.Helpers
         }
 
         public static AsyncPolicy<HttpResponseMessage> GetBulkheadPolicy(
-            int maxParallelization = 30,
-            int maxQueuingActions = 50,
+            int maxParallelization = 50,
+            int maxQueuingActions = 100,
             ILogger? logger = null)
         {
             return Policy
@@ -122,25 +132,48 @@ namespace Alfresco.App.Helpers
         }
 
         public static IAsyncPolicy<HttpResponseMessage> GetCombinedReadPolicy(
-            ILogger? logger = null, int bulkheadLimit = 50)
+            PolicyOperationOptions? options = null,
+            ILogger? logger = null)
         {
-            var timeout = GetTimeoutPolicy(TimeSpan.FromSeconds(30), logger);
-            var retry = GetRetryPolicy(logger);
-            var circuitBreaker = GetCircuitBreakerPolicy(logger);
-            var bulkhead = GetBulkheadPolicy(bulkheadLimit, bulkheadLimit*2, logger);
+            // Use defaults if options not provided
+            options ??= new PolicyOperationOptions();
+
+            var timeout = GetTimeoutPolicy(options.GetTimeout(), logger);
+            var retry = GetRetryPolicy(options.RetryCount, logger);
+            var circuitBreaker = GetCircuitBreakerPolicy(
+                options.CircuitBreakerFailuresBeforeBreaking,
+                options.GetCircuitBreakerDuration(),
+                logger);
+            var bulkhead = GetBulkheadPolicy(
+                options.BulkheadMaxParallelization,
+                options.BulkheadMaxQueuingActions,
+                logger);
 
             // Wrap policies - inner to outer execution
             return Policy.WrapAsync(timeout, retry, circuitBreaker, bulkhead);
         }
 
         public static IAsyncPolicy<HttpResponseMessage> GetCombinedWritePolicy(
-           ILogger? logger = null, int bulkheadLimit = 100)
+            PolicyOperationOptions? options = null,
+            ILogger? logger = null)
         {
-            // Increased timeout for write operations (move can be slow)
-            var timeout = GetTimeoutPolicy(TimeSpan.FromSeconds(120), logger);
-            var retry = GetRetryPolicy(logger);
-            var circuitBreaker = GetCircuitBreakerPolicy(logger);
-            var bulkhead = GetBulkheadPolicy(bulkheadLimit, bulkheadLimit * 2, logger);
+            // Use defaults if options not provided
+            options ??= new PolicyOperationOptions
+            {
+                BulkheadMaxParallelization = 100,
+                BulkheadMaxQueuingActions = 200
+            };
+
+            var timeout = GetTimeoutPolicy(options.GetTimeout(), logger);
+            var retry = GetRetryPolicy(options.RetryCount, logger);
+            var circuitBreaker = GetCircuitBreakerPolicy(
+                options.CircuitBreakerFailuresBeforeBreaking,
+                options.GetCircuitBreakerDuration(),
+                logger);
+            var bulkhead = GetBulkheadPolicy(
+                options.BulkheadMaxParallelization,
+                options.BulkheadMaxQueuingActions,
+                logger);
 
             // Write operations with retry for transient failures
             // timeout + retry + circuit breaker + bulkhead for concurrency control

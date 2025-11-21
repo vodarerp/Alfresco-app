@@ -134,9 +134,10 @@ namespace Alfresco.App
                         .AddPolicyHandler((sp, req) =>
                         {
                             var logger = sp.GetRequiredService<ILogger<AlfrescoReadApi>>();
+                            var pollyOptions = sp.GetRequiredService<IOptions<PollyPolicyOptions>>().Value;
 
                             // Combined policy: Timeout → Retry → Circuit Breaker → Bulkhead
-                            return PolicyHelpers.GetCombinedReadPolicy(logger);
+                            return PolicyHelpers.GetCombinedReadPolicy(pollyOptions.ReadOperations, logger);
                         });
                     //.AddPolicyHandler(GetRetryPlicy())
                     //.AddPolicyHandler(GetCircuitBreakerPolicy());
@@ -164,9 +165,10 @@ namespace Alfresco.App
                         .AddPolicyHandler((sp, req) =>
                         {
                             var logger = sp.GetRequiredService<ILogger<AlfrescoReadApi>>();
+                            var pollyOptions = sp.GetRequiredService<IOptions<PollyPolicyOptions>>().Value;
 
                             // Combined policy: Timeout → Retry → Circuit Breaker → Bulkhead
-                            return PolicyHelpers.GetCombinedWritePolicy(logger);
+                            return PolicyHelpers.GetCombinedWritePolicy(pollyOptions.WriteOperations, logger);
                         });
                         //.AddPolicyHandler(GetRetryPlicy())
                         //.AddPolicyHandler(GetCircuitBreakerPolicy());
@@ -175,6 +177,9 @@ namespace Alfresco.App
                     services.Configure<Alfresco.Contracts.SqlServer.SqlServerOptions>(context.Configuration.GetSection("SqlServer"));
                     services.Configure<AlfrescoDbOptions>(context.Configuration.GetSection(AlfrescoDbOptions.SectionName));
                     services.AddSingleton(sp => sp.GetRequiredService<IOptions<Alfresco.Contracts.SqlServer.SqlServerOptions>>().Value);
+
+                    // Configure Polly Policy Options
+                    services.Configure<PollyPolicyOptions>(context.Configuration.GetSection(PollyPolicyOptions.SectionName));
 
                     // =====================================================================================
                     // EXTERNAL API CLIENTS AND MIGRATION SERVICES
@@ -187,8 +192,7 @@ namespace Alfresco.App
                     // ClientAPI HttpClient with Polly policies
                     services.AddHttpClient<IClientApi, Migration.Infrastructure.Implementation.ClientApi>(cli =>
                     {
-                        cli.Timeout = TimeSpan.FromSeconds(
-                            context.Configuration.GetValue<int>("ClientApi:TimeoutSeconds", 30));
+                        cli.Timeout = Timeout.InfiniteTimeSpan; // Timeout handled by Polly
                     })
                         .ConfigureHttpClient((sp, cli) =>
                         {
@@ -210,8 +214,14 @@ namespace Alfresco.App
                             MaxConnectionsPerServer = 50
                         })
                         .SetHandlerLifetime(TimeSpan.FromMinutes(5))
-                        .AddPolicyHandler(GetRetryPlicy())
-                        .AddPolicyHandler(GetCircuitBreakerPolicy());
+                        .AddPolicyHandler((sp, req) =>
+                        {
+                            var logger = sp.GetRequiredService<ILogger<Migration.Infrastructure.Implementation.ClientApi>>();
+                            var pollyOptions = sp.GetRequiredService<IOptions<PollyPolicyOptions>>().Value;
+
+                            // ClientAPI uses Read policy (similar to AlfrescoReadApi)
+                            return PolicyHelpers.GetCombinedReadPolicy(pollyOptions.ReadOperations, logger);
+                        });
 
                     // TODO: Uncomment when DUT API becomes available
                     /*
@@ -222,8 +232,7 @@ namespace Alfresco.App
                     // DUT API HttpClient with Polly policies
                     services.AddHttpClient<IDutApi, DutApi>(cli =>
                     {
-                        cli.Timeout = TimeSpan.FromSeconds(
-                            context.Configuration.GetValue<int>("DutApi:TimeoutSeconds", 30));
+                        cli.Timeout = Timeout.InfiniteTimeSpan; // Timeout handled by Polly
                     })
                         .ConfigureHttpClient((sp, cli) =>
                         {
@@ -245,8 +254,14 @@ namespace Alfresco.App
                             MaxConnectionsPerServer = 50
                         })
                         .SetHandlerLifetime(TimeSpan.FromMinutes(5))
-                        .AddPolicyHandler(GetRetryPlicy())
-                        .AddPolicyHandler(GetCircuitBreakerPolicy());
+                        .AddPolicyHandler((sp, req) =>
+                        {
+                            var logger = sp.GetRequiredService<ILogger<DutApi>>();
+                            var pollyOptions = sp.GetRequiredService<IOptions<PollyPolicyOptions>>().Value;
+
+                            // DUT API uses Read policy
+                            return PolicyHelpers.GetCombinedReadPolicy(pollyOptions.ReadOperations, logger);
+                        });
 
                     // Migration Services (uncomment when DUT API is available)
                     services.AddScoped<IClientEnrichmentService, ClientEnrichmentService>();
