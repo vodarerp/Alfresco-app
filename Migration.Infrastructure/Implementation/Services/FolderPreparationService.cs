@@ -21,10 +21,6 @@ namespace Migration.Infrastructure.Implementation.Services
     /// </summary>
     public class FolderPreparationService : IFolderPreparationService
     {
-        private readonly IDocStagingRepository _docRepo;
-        private readonly IDocumentResolver _documentResolver;
-        private readonly IPhaseCheckpointRepository _phaseCheckpointRepo;
-        private readonly IUnitOfWork _uow;
         private readonly IServiceScopeFactory _scopeFactory;
         private readonly ILogger<FolderPreparationService> _logger;
         private readonly string _rootDestinationFolderId;
@@ -33,21 +29,14 @@ namespace Migration.Infrastructure.Implementation.Services
         private const int CHECKPOINT_INTERVAL = 1000; // Save checkpoint every 1000 folders
 
         private long _foldersCreated = 0;
+        private int _totalFolders = 0; // Cache total folders count to avoid repeated queries
         private readonly ConcurrentBag<string> _errors = new();
 
         public FolderPreparationService(
-            IDocStagingRepository docRepo,
-            IDocumentResolver documentResolver,
-            IPhaseCheckpointRepository phaseCheckpointRepo,
-            IUnitOfWork uow,
             IServiceScopeFactory scopeFactory,
             ILogger<FolderPreparationService> logger,
             IOptions<MigrationOptions> migrationOptions)
         {
-            _docRepo = docRepo ?? throw new ArgumentNullException(nameof(docRepo));
-            _documentResolver = documentResolver ?? throw new ArgumentNullException(nameof(documentResolver));
-            _phaseCheckpointRepo = phaseCheckpointRepo ?? throw new ArgumentNullException(nameof(phaseCheckpointRepo));
-            _uow = uow ?? throw new ArgumentNullException(nameof(uow));
             _scopeFactory = scopeFactory ?? throw new ArgumentNullException(nameof(scopeFactory));
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
             _rootDestinationFolderId = migrationOptions?.Value?.RootDestinationFolderId ?? throw new ArgumentNullException(nameof(migrationOptions));
@@ -64,6 +53,7 @@ namespace Migration.Infrastructure.Implementation.Services
                 // ====================================================================
                 var uniqueFolders = await GetUniqueFoldersAsync(ct).ConfigureAwait(false);
                 var totalFolders = uniqueFolders.Count;
+                _totalFolders = totalFolders; // Cache for GetProgressAsync
 
                 _logger.LogInformation(
                     "Found {TotalFolders} unique destination folders to create",
@@ -172,15 +162,24 @@ namespace Migration.Infrastructure.Implementation.Services
 
         public async Task<int> GetTotalFolderCountAsync(CancellationToken ct = default)
         {
+            // If total is already cached, return it (avoids repeated queries during PrepareAllFoldersAsync)
+            if (_totalFolders > 0)
+            {
+                return _totalFolders;
+            }
+
+            // Otherwise, query database to get total count
             var folders = await GetUniqueFoldersAsync(ct).ConfigureAwait(false);
-            return folders.Count;
+            _totalFolders = folders.Count;
+            return _totalFolders;
         }
 
-        public async Task<(int Created, int Total)> GetProgressAsync(CancellationToken ct = default)
+        public Task<(int Created, int Total)> GetProgressAsync(CancellationToken ct = default)
         {
-            var total = await GetTotalFolderCountAsync(ct).ConfigureAwait(false);
+            // Use cached values - no database query needed
             var created = (int)Interlocked.Read(ref _foldersCreated);
-            return (created, total);
+            var total = _totalFolders;
+            return Task.FromResult((created, total));
         }
 
         // ====================================================================
@@ -191,20 +190,31 @@ namespace Migration.Infrastructure.Implementation.Services
         {
             try
             {
-                await _uow.BeginAsync(ct: ct).ConfigureAwait(false);
+                await using var scope = _scopeFactory.CreateAsyncScope();
+                var uow = scope.ServiceProvider.GetRequiredService<IUnitOfWork>();
+                var docRepo = scope.ServiceProvider.GetRequiredService<IDocStagingRepository>();
 
-                // Query DocStaging for DISTINCT (TargetDossierType, DossierDestFolderId) combinations
-                // This gives us all unique destination folders
-                var uniqueFolders = await _docRepo.GetUniqueDestinationFoldersAsync(ct).ConfigureAwait(false);
+                await uow.BeginAsync(ct: ct).ConfigureAwait(false);
 
-                await _uow.CommitAsync(ct).ConfigureAwait(false);
+                try
+                {
+                    // Query DocStaging for DISTINCT (TargetDossierType, DossierDestFolderId) combinations
+                    // This gives us all unique destination folders
+                    var uniqueFolders = await docRepo.GetUniqueDestinationFoldersAsync(ct).ConfigureAwait(false);
 
-                return uniqueFolders;
+                    await uow.CommitAsync(ct).ConfigureAwait(false);
+
+                    return uniqueFolders;
+                }
+                catch
+                {
+                    await uow.RollbackAsync(ct).ConfigureAwait(false);
+                    throw;
+                }
             }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Error getting unique folders from DocStaging");
-                await _uow.RollbackAsync(ct).ConfigureAwait(false);
                 throw;
             }
         }
@@ -214,10 +224,13 @@ namespace Migration.Infrastructure.Implementation.Services
             // Use DocumentResolver to create folder hierarchy
             // DocumentResolver uses lock striping (Problem #3) so it's safe for concurrent calls
 
+            await using var scope = _scopeFactory.CreateAsyncScope();
+            var documentResolver = scope.ServiceProvider.GetRequiredService<IDocumentResolver>();
+
             // STEP 1: Create parent dossier folder (e.g., DOSSIERS-ACC) under RootDestinationFolderId if it doesn't exist
             // folder.DestinationRootId contains the name like "DOSSIERS-ACC", "DOSSIERS-LE", etc.
             // We need to create this folder under _rootDestinationFolderId first
-            var parentDossierFolderId = await _documentResolver.ResolveAsync(
+            var parentDossierFolderId = await documentResolver.ResolveAsync(
                 _rootDestinationFolderId,
                 folder.DestinationRootId, // e.g., "DOSSIERS-ACC"
                 null, // No special properties for parent folder
@@ -239,7 +252,7 @@ namespace Migration.Infrastructure.Implementation.Services
             foreach (var folderName in pathParts)
             {
                 // DocumentResolver.ResolveAsync is idempotent: checks if folder exists, creates if not, caches result
-                currentParentId = await _documentResolver.ResolveAsync(
+                currentParentId = await documentResolver.ResolveAsync(
                     currentParentId,
                     folderName,
                     folder.Properties, // Pass properties (may be null)
@@ -305,15 +318,26 @@ namespace Migration.Infrastructure.Implementation.Services
         {
             try
             {
-                await _uow.BeginAsync(ct: ct).ConfigureAwait(false);
-                var checkpoint = await _phaseCheckpointRepo.GetCheckpointAsync(MigrationPhase.FolderPreparation, ct).ConfigureAwait(false);
-                await _uow.CommitAsync(ct).ConfigureAwait(false);
-                return checkpoint;
+                await using var scope = _scopeFactory.CreateAsyncScope();
+                var uow = scope.ServiceProvider.GetRequiredService<IUnitOfWork>();
+                var phaseCheckpointRepo = scope.ServiceProvider.GetRequiredService<IPhaseCheckpointRepository>();
+
+                await uow.BeginAsync(ct: ct).ConfigureAwait(false);
+                try
+                {
+                    var checkpoint = await phaseCheckpointRepo.GetCheckpointAsync(MigrationPhase.FolderPreparation, ct).ConfigureAwait(false);
+                    await uow.CommitAsync(ct).ConfigureAwait(false);
+                    return checkpoint;
+                }
+                catch
+                {
+                    await uow.RollbackAsync(ct).ConfigureAwait(false);
+                    throw;
+                }
             }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Error getting checkpoint");
-                await _uow.RollbackAsync(ct).ConfigureAwait(false);
                 return null;
             }
         }
@@ -322,23 +346,34 @@ namespace Migration.Infrastructure.Implementation.Services
         {
             try
             {
-                await _uow.BeginAsync(ct: ct).ConfigureAwait(false);
+                await using var scope = _scopeFactory.CreateAsyncScope();
+                var uow = scope.ServiceProvider.GetRequiredService<IUnitOfWork>();
+                var phaseCheckpointRepo = scope.ServiceProvider.GetRequiredService<IPhaseCheckpointRepository>();
 
-                await _phaseCheckpointRepo.UpdateProgressAsync(
-                    MigrationPhase.FolderPreparation,
-                    lastProcessedIndex: (int)foldersCreated,
-                    lastProcessedId: null,
-                    totalProcessed: foldersCreated,
-                    ct).ConfigureAwait(false);
+                await uow.BeginAsync(ct: ct).ConfigureAwait(false);
 
-                await _uow.CommitAsync(ct).ConfigureAwait(false);
+                try
+                {
+                    await phaseCheckpointRepo.UpdateProgressAsync(
+                        MigrationPhase.FolderPreparation,
+                        lastProcessedIndex: (int)foldersCreated,
+                        lastProcessedId: null,
+                        totalProcessed: foldersCreated,
+                        ct).ConfigureAwait(false);
 
-                _logger.LogDebug("Checkpoint saved: {FoldersCreated} folders", foldersCreated);
+                    await uow.CommitAsync(ct).ConfigureAwait(false);
+
+                    _logger.LogDebug("Checkpoint saved: {FoldersCreated} folders", foldersCreated);
+                }
+                catch
+                {
+                    await uow.RollbackAsync(ct).ConfigureAwait(false);
+                    throw;
+                }
             }
             catch (Exception ex)
             {
                 _logger.LogWarning(ex, "Failed to save checkpoint");
-                await _uow.RollbackAsync(ct).ConfigureAwait(false);
             }
         }
 
@@ -346,23 +381,34 @@ namespace Migration.Infrastructure.Implementation.Services
         {
             try
             {
-                await _uow.BeginAsync(ct: ct).ConfigureAwait(false);
+                await using var scope = _scopeFactory.CreateAsyncScope();
+                var uow = scope.ServiceProvider.GetRequiredService<IUnitOfWork>();
+                var phaseCheckpointRepo = scope.ServiceProvider.GetRequiredService<IPhaseCheckpointRepository>();
 
-                // Update TotalItems field in PhaseCheckpoint for progress calculation
-                var checkpoint = await _phaseCheckpointRepo.GetCheckpointAsync(MigrationPhase.FolderPreparation, ct).ConfigureAwait(false);
+                await uow.BeginAsync(ct: ct).ConfigureAwait(false);
 
-                if (checkpoint != null)
+                try
                 {
-                    checkpoint.TotalItems = totalItems;
-                    await _phaseCheckpointRepo.UpdateAsync(checkpoint, ct).ConfigureAwait(false);
-                }
+                    // Update TotalItems field in PhaseCheckpoint for progress calculation
+                    var checkpoint = await phaseCheckpointRepo.GetCheckpointAsync(MigrationPhase.FolderPreparation, ct).ConfigureAwait(false);
 
-                await _uow.CommitAsync(ct).ConfigureAwait(false);
+                    if (checkpoint != null)
+                    {
+                        checkpoint.TotalItems = totalItems;
+                        await phaseCheckpointRepo.UpdateAsync(checkpoint, ct).ConfigureAwait(false);
+                    }
+
+                    await uow.CommitAsync(ct).ConfigureAwait(false);
+                }
+                catch
+                {
+                    await uow.RollbackAsync(ct).ConfigureAwait(false);
+                    throw;
+                }
             }
             catch (Exception ex)
             {
                 _logger.LogWarning(ex, "Failed to update total items in checkpoint");
-                await _uow.RollbackAsync(ct).ConfigureAwait(false);
             }
         }
     }

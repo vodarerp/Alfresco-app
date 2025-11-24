@@ -1,12 +1,16 @@
 ﻿using Alfresco.Abstraction.Interfaces;
+using Alfresco.Contracts.Mapper;
 using Microsoft.Extensions.Logging;
 using Migration.Abstraction.Interfaces;
+using Migration.Abstraction.Models;
+
 //using Oracle.Abstraction.Interfaces;
 using SqlServer.Abstraction.Interfaces;
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
+using System.Runtime.CompilerServices;
 using System.Text;
 using System.Threading.Tasks;
 
@@ -18,6 +22,7 @@ namespace Migration.Infrastructure.Implementation.Document
         private readonly IAlfrescoReadApi _read;
         private readonly IAlfrescoWriteApi _write;
         private readonly IFolderManager _folderManager;
+        private readonly IClientApi _clientApi;
         private readonly ILogger<DocumentResolver> _logger;
 
         // Thread-safe cache: Key = "parentId_folderName", Value = folder ID
@@ -33,12 +38,14 @@ namespace Migration.Infrastructure.Implementation.Document
             IAlfrescoReadApi read,
             IAlfrescoWriteApi write,
             IFolderManager folderManager,
+            IClientApi clientApi,
             ILogger<DocumentResolver> logger)
         {
             _doc = doc;
             _read = read;
             _write = write;
             _folderManager = folderManager ?? throw new ArgumentNullException(nameof(folderManager));
+            _clientApi = clientApi ?? throw new ArgumentNullException(nameof(clientApi));
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         }
         /// <summary>
@@ -124,15 +131,14 @@ namespace Migration.Infrastructure.Implementation.Document
                 }
 
                 // ========================================
-                // Step 5: Folder doesn't exist - check if we should create it
+                // Step 5: Folder doesn't exist - Call ClientAPI to notify/enrich
                 // ========================================
-                if (!createIfMissing)
-                {
-                    throw new InvalidOperationException(
-                        $"Folder '{newFolderName}' not found under parent '{destinationRootId}' " +
-                        $"and createIfMissing=false. This folder should have been created by FolderPreparationService.");
-                }
+                _logger.LogDebug("Folder '{FolderName}' doesn't exist in Alfresco, calling ClientAPI...",
+                    newFolderName);
 
+                var clientDataProps = await CallClientApiForFolderAsync(newFolderName, ct).ConfigureAwait(false);
+
+               
                 // ========================================
                 // Step 6: Create folder (with or without properties)
                 // ========================================
@@ -147,8 +153,8 @@ namespace Migration.Infrastructure.Implementation.Document
                             "Attempting to create folder '{FolderName}' with {PropertyCount} properties",
                             newFolderName, properties.Count);
 
-                        folderID = await _write.CreateFolderAsync(destinationRootId, newFolderName, properties, ct).ConfigureAwait(false);
-
+                        //folderID = await _write.CreateFolderAsync(destinationRootId, newFolderName, properties, ct).ConfigureAwait(false);
+                        folderID = await _write.CreateFolderAsync(destinationRootId, newFolderName, BuildPropertiesClientData(clientDataProps), ct).ConfigureAwait(false);
                         _logger.LogInformation(
                             "Successfully created folder '{FolderName}' with properties. FolderId: {FolderId}",
                             newFolderName, folderID);
@@ -202,5 +208,71 @@ namespace Migration.Infrastructure.Implementation.Document
                 folderLock.Release();
             }
         }
+
+        /// <summary>
+        /// Calls ClientAPI to retrieve client data for folder enrichment.
+        /// Extracts CoreID from folder name and calls GetClientDataAsync.
+        /// </summary>
+        /// <param name="folderName">Folder name (e.g., "PI-102206", "ACC-13001926")</param>
+        /// <param name="ct">Cancellation token</param>
+        /// 
+
+        private async Task<ClientData> CallClientApiForFolderAsync(string folderName, CancellationToken ct)
+        {
+            ClientData toRet = new();
+            try
+            {
+                // Extract CoreID from folder name (e.g., "PI-102206" → "102206")
+                var coreId = DossierIdFormatter.ExtractCoreId(folderName);
+
+                if (string.IsNullOrWhiteSpace(coreId))
+                {
+                    _logger.LogWarning(
+                        "Could not extract CoreID from folder name '{FolderName}', skipping ClientAPI call",
+                        folderName);
+                    return toRet;
+                }
+
+                _logger.LogDebug("Extracted CoreID '{CoreId}' from folder '{FolderName}', calling ClientAPI...",
+                    coreId, folderName);
+
+                // Call ClientAPI to retrieve client data
+                toRet = await _clientApi.GetClientDataAsync(coreId, ct).ConfigureAwait(false);
+
+                if (toRet != null)
+                {
+                    _logger.LogInformation(
+                        "ClientAPI returned data for CoreID '{CoreId}': ClientName='{ClientName}', ClientType='{ClientType}'",
+                        coreId, toRet.ClientName, toRet.ClientType);
+                }
+                else
+                {
+                    _logger.LogWarning(
+                        "ClientAPI returned null for CoreID '{CoreId}' (folder '{FolderName}')",
+                        coreId, folderName);
+                }
+            }
+            catch (Exception ex)
+            {
+                // Log error but don't throw - ClientAPI failure should not block folder creation
+                _logger.LogError(ex,
+                    "ClientAPI call failed for folder '{FolderName}'. Error: {ErrorType} - {ErrorMessage}. Continuing with folder creation.",
+                    folderName, ex.GetType().Name, ex.Message);
+            }
+
+            return toRet;
+        }
+
+        private Dictionary<string, object> BuildPropertiesClientData(ClientData clientData) 
+        {
+            Dictionary<string,object> properties = new Dictionary<string,object>();
+
+            //TODO Dodaj propertije
+
+
+
+            return properties;
+        }
+
     }
 }

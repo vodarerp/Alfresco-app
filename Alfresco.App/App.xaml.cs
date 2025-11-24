@@ -372,6 +372,12 @@ namespace Alfresco.App
                         services.AddSingleton<IWorkerController, MoveWorker>();
                         services.AddHostedService(sp => (MoveWorker)sp.GetServices<IWorkerController>().First(o => o is MoveWorker));
                     }
+                    if (context.Configuration.GetValue<bool>("EnableFolderPreparationWorker"))
+                    {
+                        //services.AddHostedService<FolderPreparationWorker>();
+                        services.AddSingleton<IWorkerController, FolderPreparationWorker>();
+                        services.AddHostedService(sp => (FolderPreparationWorker)sp.GetServices<IWorkerController>().First(o => o is FolderPreparationWorker));
+                    }
 
 
                     services.AddHealthChecks()

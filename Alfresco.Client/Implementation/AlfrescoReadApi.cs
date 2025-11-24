@@ -24,23 +24,73 @@ namespace Alfresco.Client.Implementation
             _options = options.Value;
         }
 
+       
         public async Task<string> GetFolderByRelative(string inNodeId, string inRelativePath, CancellationToken ct = default)
         {
             var toRet = string.Empty;
-            //http://localhost:8080/alfresco/api/-default-/public/alfresco/versions/1/nodes/caac4e9d-27a3-4e9c-ac4e-9d27a30e9ca0/children?relativePath=v&includeSource=true
-            using var getRespone = await _client.GetAsync($"/alfresco/api/-default-/public/alfresco/versions/1/nodes/{inNodeId}/children?relativePath={Uri.EscapeDataString(inRelativePath)}&includeSource=true", ct).ConfigureAwait(false);
 
-            if ((getRespone != null) && (getRespone.IsSuccessStatusCode))
+            try
             {
-                var body = await getRespone.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
-                var resp = JsonConvert.DeserializeObject<NodeChildrenResponse>(body);
-                if ((resp != null) && (resp.List != null) && (resp.List.Source != null) )
-                    toRet = resp.List.Source.Id;
+                // Escape folder name for AFTS query (handle special characters)
+                var escapedFolderName = inRelativePath.Replace("\"", "\\\"");
+
+                // Build AFTS query:
+                // - TYPE:"cm:folder" = only folders
+                // - PARENT:"{parentId}" = only direct children of parent folder
+                // - =cm:name:"{folderName}" = exact match on folder name
+                var query = $"TYPE:\"cm:folder\" AND PARENT:\"{inNodeId}\" AND =cm:name:\"{escapedFolderName}\"";
+
+                var searchRequest = new PostSearchRequest
+                {
+                    Query = new QueryRequest
+                    {
+                        Language = "afts",
+                        Query = query
+                    },
+                    Paging = new PagingRequest
+                    {
+                        MaxItems = 1, // We only need the first result
+                        SkipCount = 0
+                    },
+                    Include = null // Don't include extra data, just need the ID
+                };
+
+                //var searchRequest = new PostSearchRequest
+                //{
+                //    Query = new QueryRequest
+                //    {
+                //        Language = "cmis",  // ← Promena sa "afts" na "cmis"
+                //        Query = "SELECT * FROM cmis:folder WHERE IN_FOLDER('{parentId}') AND cmis:name = '{folderName}'"
+                //    },
+                //    Paging = new PagingRequest
+                //    {
+                //        MaxItems = 1,
+                //        SkipCount = 0
+                //    },
+                //    Include = null
+                //};
+
+                // Execute search
+                var searchResult = await SearchAsync(searchRequest, ct).ConfigureAwait(false);
+
+                // Extract folder ID from search results
+                if (searchResult?.List?.Entries != null && searchResult.List.Entries.Count > 0)
+                {
+                    var firstEntry = searchResult.List.Entries[0];
+                    if (firstEntry?.Entry?.IsFolder == true)
+                    {
+                        toRet = firstEntry.Entry.Id;
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                // Log error or rethrow based on your error handling strategy
+                // For now, return empty string to maintain backward compatibility
+                Console.WriteLine($"Error in GetFolderByRelative: {ex.Message}");
             }
 
             return toRet;
-
-            //throw new NotImplementedException();
         }
 
         public async Task<NodeChildrenResponse> GetNodeChildrenAsync(string nodeId, CancellationToken ct = default)

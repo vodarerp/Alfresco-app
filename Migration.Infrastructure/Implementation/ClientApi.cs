@@ -81,18 +81,18 @@ namespace Migration.Infrastructure.Implementation
                 var clientData = new ClientData
                 {
                     CoreId = mockClientData.CoreId,
-                    MbrJmbg = mockClientData.IdentityNumber,
-                    ClientName = $"{mockClientData.FirstName} {mockClientData.LastName}",
-                    ClientType = DetermineClientType(mockClientData.ClientType),
-                    ClientSubtype = mockClientData.ClientType ?? string.Empty, // Use mock ClientType as subtype
-                    Residency = DetermineResidency(mockClientData.Nationality),
-                    Segment = DetermineSegment(mockClientData.ClientType),
+                    MbrJmbg = mockClientData.MbrJmbg,
+                    ClientName = mockClientData.ClientName,
+                    ClientType = mockClientData.ClientType,//DetermineClientType(mockClientData.ClientType),
+                    ClientSubtype = mockClientData.ClientSubtype ?? string.Empty, // Use mock ClientType as subtype
+                    Residency = mockClientData.Residency,//DetermineResidency(mockClientData.Residency),
+                    Segment = mockClientData.Segment,
                     // Optional fields - set to null or empty if not available
-                    Staff = null,
-                    OpuUser = null,
-                    OpuRealization = null,
-                    Barclex = null,
-                    Collaborator = null,
+                    Staff = mockClientData.Staff,
+                    OpuUser = mockClientData.OpuUser,
+                    OpuRealization = mockClientData.OpuRealization,
+                    Barclex = mockClientData.Barclex,
+                    Collaborator = mockClientData.Collaborator,
                     BarCLEXName = mockClientData.BarCLEXName,
                     BarCLEXOpu = mockClientData.BarCLEXOpu,
                     BarCLEXGroupName = mockClientData.BarCLEXGroupName,
@@ -368,37 +368,92 @@ namespace Migration.Infrastructure.Implementation
         /// </summary>
         private class ClientDetailExtendedDto
         {
-            public string CoreId { get; set; } = string.Empty;
-            public string IdentityNumber { get; set; } = string.Empty;
-            public string FirstName { get; set; } = string.Empty;
-            public string LastName { get; set; } = string.Empty;
-            public string? MiddleName { get; set; }
-            public string Email { get; set; } = string.Empty;
-            public string PhoneNumber { get; set; } = string.Empty;
-            public string? MobileNumber { get; set; }
-            public DateTime DateOfBirth { get; set; }
-            public string? Gender { get; set; }
-            public string? Nationality { get; set; }
-            public string Address { get; set; } = string.Empty;
-            public string City { get; set; } = string.Empty;
-            public string Country { get; set; } = string.Empty;
-            public string PostalCode { get; set; } = string.Empty;
-            public string? Region { get; set; }
-            public string ClientStatus { get; set; } = string.Empty;
-            public string ClientType { get; set; } = string.Empty;
-            public DateTime RegistrationDate { get; set; }
-            public DateTime LastModifiedDate { get; set; }
-            public string? TaxNumber { get; set; }
-            public string? BankAccount { get; set; }
-            public string? Notes { get; set; }
-            public bool IsActive { get; set; }
-            public decimal CreditLimit { get; set; }
-            public string PreferredLanguage { get; set; } = "sr-RS";
-            public string? BarCLEXName { get; set; }
-            public string? BarCLEXOpu { get; set; }
-            public string? BarCLEXGroupName { get; set; }
-            public string? BarCLEXGroupCode { get; set; }
-            public string? BarCLEXCode { get; set; }
+           
+                /// <summary>
+                /// Client's Core ID (unique identifier in the core banking system)
+                /// </summary>
+                public string CoreId { get; set; } = string.Empty;
+
+                /// <summary>
+                /// MBR (for legal entities) or JMBG (for natural persons)
+                /// </summary>
+                public string MbrJmbg { get; set; } = string.Empty;
+
+                /// <summary>
+                /// Full client name
+                /// </summary>
+                public string ClientName { get; set; } = string.Empty;
+
+                /// <summary>
+                /// Client type: "FL" (Fizičko Lice - Natural Person) or "PL" (Pravno Lice - Legal Entity)
+                /// </summary>
+                public string ClientType { get; set; } = string.Empty;
+
+                /// <summary>
+                /// Client subtype for additional classification
+                /// </summary>
+                public string ClientSubtype { get; set; } = string.Empty;
+
+                /// <summary>
+                /// Residency status (Resident/Non-resident)
+                /// </summary>
+                public string Residency { get; set; } = string.Empty;
+
+                /// <summary>
+                /// Client segment classification
+                /// </summary>
+                public string Segment { get; set; } = string.Empty;
+
+                /// <summary>
+                /// Staff indicator (if client is a bank employee)
+                /// </summary>
+                public string? Staff { get; set; }
+
+                /// <summary>
+                /// OPU (Organizational Unit) of the user
+                /// </summary>
+                public string? OpuUser { get; set; }
+
+                /// <summary>
+                /// OPU/ID of realization
+                /// </summary>
+                public string? OpuRealization { get; set; }
+
+                /// <summary>
+                /// Barclex identifier
+                /// </summary>
+                public string? Barclex { get; set; }
+
+                /// <summary>
+                /// Collaborator/Partner information
+                /// </summary>
+                public string? Collaborator { get; set; }
+
+                /// <summary>
+                /// BarCLEX Name
+                /// </summary>
+                public string? BarCLEXName { get; set; }
+
+                /// <summary>
+                /// BarCLEX OPU
+                /// </summary>
+                public string? BarCLEXOpu { get; set; }
+
+                /// <summary>
+                /// BarCLEX Group Name
+                /// </summary>
+                public string? BarCLEXGroupName { get; set; }
+
+                /// <summary>
+                /// BarCLEX Group Code
+                /// </summary>
+                public string? BarCLEXGroupCode { get; set; }
+
+                /// <summary>
+                /// BarCLEX Code
+                /// </summary>
+                public string? BarCLEXCode { get; set; }
+            
         }
 
         #endregion
