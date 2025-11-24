@@ -20,8 +20,8 @@ public static class Program
             BaseUrl = "http://localhost:8080/",
             Username =  "admin",
             Password = "admin",
-            RootParentId = "63e20344-e662-4d57-a203-44e662dd577a",
-            FolderCount = 10,
+            RootParentId = "81a6e540-250f-4b44-a6e5-40250ffb44ea",
+            FolderCount = 15,
             DocsPerFolder = 3,
             DegreeOfParallelism = 8,
             MaxRetries = 5,
@@ -560,7 +560,7 @@ public static class Program
 
         if (mapping != null)
         {
-            return mapping.Value.SifraDocMigracija;
+            return mapping.Value.SifraDoc;
         }
 
         // Try to find by Serbian name (NazivDoc)
@@ -569,7 +569,7 @@ public static class Program
 
         if (mappingBySerbianName.Naziv != null)
         {
-            return mappingBySerbianName.SifraDocMigracija;
+            return mappingBySerbianName.SifraDoc;
         }
 
         // Document not found in mapper
@@ -600,7 +600,7 @@ public static class Program
         var usedFileNames = new HashSet<string>();
 
         // Helper function to create document using HeimdallDocumentMapper
-        void AddDocument(string documentName, int? versionNumber = null, bool addMigrationSuffix = false)
+        void AddDocument(string documentName, int? versionNumber = null, bool addMigrationSuffix = false, string? customStatus = null, bool? includeAccountNumber = null)
         {
             // Get document type code from HeimdallDocumentMapper
             var docTypeCode = GetDocumentTypeCode(documentName);
@@ -646,10 +646,10 @@ public static class Program
 
             if (mapping != null)
             {
-               
+
                     // Use original name
                opisDokumenta = mapping.Value.Naziv;
-                
+
                 tipDosiea = mapping.Value.TipDosiea;
             }
             else
@@ -659,9 +659,12 @@ public static class Program
                 tipDosiea = clientType == "PI" ? "Dosije klijenta FL" : "Dosije klijenta PL";
             }
 
-            var props = CreateDocumentProps(clientType, coreId, docTypeCode, opisDokumenta, tipDosiea, "validiran", random);
+            // Determine document status (TC 11: support for pre-existing "poništen" documents)
+            string docStatus = customStatus ?? "validiran";
 
-            // Add version label if specified
+            var props = CreateDocumentProps(clientType, coreId, docTypeCode, opisDokumenta, tipDosiea, docStatus, random, includeAccountNumber);
+
+            // Add version label if specified (TC 10: Multiple versions)
             if (versionNumber.HasValue)
             {
                 props["ecm:versionLabel"] = $"{versionNumber.Value}.0";
@@ -675,33 +678,62 @@ public static class Program
             });
         }
 
+        // Helper to add multiple versions of the same document (TC 10)
+        void AddDocumentWithVersions(string documentName, int versionCount, bool addMigrationSuffix = false)
+        {
+            for (int v = 1; v <= versionCount; v++)
+            {
+                AddDocument(documentName, versionNumber: v, addMigrationSuffix: addMigrationSuffix);
+            }
+        }
+
         // Generate documents based on client type
-        // NOTE: ACC (Account Package) documents are NOT generated here
-        // ACC dossiers are created DURING migration process
+        // NOTE: ACC dossiers are NOT generated here, they are created DURING migration process
+        // However, we generate documents with TipDosiea="Dosije paket računa" that will be migrated to ACC
         if (clientType == "PI")
         {
-            // Test Case 4: Dosije fizičkog lica documents
-            AddDocument("Personal Notice");
-            AddDocument("KYC Questionnaire");
+            // Test Case 4: Dosije fizičkog lica documents (single versions)
             AddDocument("KYC Questionnaire MDOC");
-            AddDocument("Communication Consent");
-            AddDocument("Specimen card");
             AddDocument("Specimen Card for Authorized Person");
             AddDocument("Pre-Contract Info");
             AddDocument("Contact Data Change Email");
             AddDocument("Contact Data Change Phone");
 
+            // TC 10: Add documents with multiple versions
+            AddDocumentWithVersions("Personal Notice", versionCount: 3);
+            AddDocumentWithVersions("KYC Questionnaire", versionCount: 2);
+            AddDocumentWithVersions("Communication Consent", versionCount: 3);
+            AddDocumentWithVersions("Specimen card", versionCount: 2);
+
+            // TC 3: Add Account Package documents (will be migrated to DOSSIERS-ACC)
+            // These documents have TipDosiea="Dosije paket računa"
+            AddDocument("Current Accounts Contract");
+            AddDocument("Saving Accounts Contract");
+            AddDocument("Account Package RSD Instruction for Resident");
+            AddDocumentWithVersions("Account Package", versionCount: 2);
+
             // TC 1 & 2: Add documents with "-migracija" suffix (should become "poništen")
             AddDocument("KYC Questionnaire", addMigrationSuffix: true);
             AddDocument("Personal Notice", addMigrationSuffix: true);
+
+            // TC 11: Add pre-existing "poništen" documents
+            AddDocument("Communication Consent", customStatus: "poništen");
+            AddDocument("Specimen card", customStatus: "poništen");
+
+            // TC 12-14: Add KDP documents (old documents that should be marked inactive after migration)
+            AddDocument("KDP za fizička lica");  // 00099 - nova verzija policy
+            AddDocument("KDP za ovlašćena lica"); // 00101 - novi dokument policy
+
+            // TC 15: Add exclusion document (should NOT be migrated)
+            AddDocument("Ovlašćenje licima za donošenje instrumenata PP-a u Banku"); // 00702
+
+            // TC 16: Add KDP 00824 documents - edge cases with/without account number
+            AddDocument("KDP vlasnika za FL", includeAccountNumber: true);  // WITH account number - should be active
+            AddDocument("KDP vlasnika za FL", includeAccountNumber: false); // WITHOUT account number - should NOT be active
         }
         else if (clientType == "LE")
         {
-            // Test Case 5: Dosije pravnog lica documents
-            AddDocument("KYC Questionnaire for LE");
-            AddDocument("Current Accounts Contract");
-            AddDocument("Specimen card for LE");
-            AddDocument("Communication Consent");
+            // Test Case 5: Dosije pravnog lica documents (single versions)
             AddDocument("GDPR Revoke");
             AddDocument("GL Transaction");
             AddDocument("FX Transaction");
@@ -709,13 +741,29 @@ public static class Program
             AddDocument("Contact Data Change Email");
             AddDocument("Contact Data Change Phone");
 
-            // TC 3: Add Account Package document (will be migrated to DOSSIERS-ACC)
-            // Migration should detect "Account Package" and move to ACC folder
-            AddDocument("Account Package");
+            // TC 10: Add documents with multiple versions
+            AddDocumentWithVersions("KYC Questionnaire for LE", versionCount: 2);
+            AddDocumentWithVersions("Specimen card for LE", versionCount: 2);
+            AddDocumentWithVersions("Communication Consent", versionCount: 3);
+
+            // TC 3: Add Account Package documents (will be migrated to DOSSIERS-ACC)
+            // These documents have TipDosiea="Dosije paket računa"
+            AddDocument("Current Accounts Contract");
+            AddDocumentWithVersions("Account Package", versionCount: 2);
+            AddDocument("Prestige Package Tariff for LE");
 
             // TC 1 & 2: Add documents with "-migracija" suffix (should become "poništen")
             AddDocument("Communication Consent", addMigrationSuffix: true);
             AddDocument("KYC Questionnaire for LE", addMigrationSuffix: true);
+
+            // TC 11: Add pre-existing "poništen" documents
+            AddDocument("Specimen card for LE", customStatus: "poništen");
+
+            // TC 12-14: Add KDP documents for LE (old documents that should be marked inactive)
+            AddDocument("KDP za pravna lica iz aplikacije"); // 00100 - nova verzija policy
+
+            // TC 15: Add exclusion document (should NOT be migrated)
+            AddDocument("Ovlašćenje licima za donošenje instrumenata PP-a u Banku"); // 00702
         }
 
         return documents;
@@ -731,8 +779,8 @@ public static class Program
         var random = new Random(coreId);
         var usedFileNames = new HashSet<string>();
 
-        // Helper function to create deposit document
-        void AddDepositDocument(string documentName)
+        // Helper function to create deposit document with version support (TC 22)
+        void AddDepositDocument(string documentName, int? versionNumber = null)
         {
             var docTypeCode = GetDocumentTypeCode(documentName);
 
@@ -745,13 +793,21 @@ public static class Program
             var baseFileName = documentName.Replace(" ", "_").Replace("/", "_");
             var fileName = baseFileName + ".pdf";
 
-            if (usedFileNames.Contains(fileName))
+            // Add version number to filename if specified
+            if (usedFileNames.Contains(fileName) || versionNumber.HasValue)
             {
-                int counter = 1;
-                while (usedFileNames.Contains(fileName))
+                if (versionNumber.HasValue)
                 {
-                    fileName = $"{baseFileName}_{counter}.pdf";
-                    counter++;
+                    fileName = $"{baseFileName}_v{versionNumber.Value}.pdf";
+                }
+                else
+                {
+                    int counter = 1;
+                    while (usedFileNames.Contains(fileName))
+                    {
+                        fileName = $"{baseFileName}_{counter}.pdf";
+                        counter++;
+                    }
                 }
             }
 
@@ -775,7 +831,7 @@ public static class Program
             // Core ID
             props["ecm:coreId"] = coreId.ToString();
 
-            // Document status - all deposit documents are "validiran"
+            // Document status - all deposit documents are "validiran" (TC 25)
             props["ecm:status"] = "validiran";
 
             // Document type
@@ -787,7 +843,7 @@ public static class Program
             // Client type
             props["ecm:docClientType"] = clientType;
 
-            // Source - DUT for deposit documents
+            // Source - DUT for deposit documents (TC 7)
             props["ecm:source"] = "DUT";
 
             // Contract number - CRITICAL for deposit documents
@@ -797,6 +853,13 @@ public static class Program
             var creationDate = DateTime.ParseExact(contractNumber, "yyyyMMdd", null);
             props["ecm:docCreationDate"] = creationDate.ToString("o");
 
+            // TC 22: Add version label if specified
+            if (versionNumber.HasValue)
+            {
+                props["ecm:versionLabel"] = $"{versionNumber.Value}.0";
+                props["ecm:versionType"] = versionNumber.Value == 1 ? "Initial" : "Revision";
+            }
+
             documents.Add(new TestDocument
             {
                 Name = fileName,
@@ -804,17 +867,48 @@ public static class Program
             });
         }
 
+        // Helper to add multiple versions of deposit document (TC 22)
+        void AddDepositDocumentWithVersions(string documentName, int versionCount)
+        {
+            for (int v = 1; v <= versionCount; v++)
+            {
+                AddDepositDocument(documentName, versionNumber: v);
+            }
+        }
+
         // Generate deposit documents based on client type
         if (clientType == "PI")
         {
-            // Deposit documents for Physical Individuals (FL - Depozitni proizvodi)
+            // TC 24: Minimum required deposit documents for PI (00008)
+            // 1. Ugovor o oročenom depozitu
+            AddDepositDocumentWithVersions("PiVazeciUgovorOroceniDepozitDvojezicniRSD", versionCount: 3);
+
+            // 2. Ponuda (REQUIRED - previously missing)
+            AddDepositDocument("PiPonuda");
+
+            // 3. Plan isplate depozita (REQUIRED - previously missing)
             AddDepositDocument("PiAnuitetniPlan");
-            AddDepositDocument("PiObavezniElementiUgovora");
+
+            // 4. Obavezni elementi Ugovora
+            AddDepositDocumentWithVersions("PiObavezniElementiUgovora", versionCount: 2);
+
+            // TC 22: Additional deposit documents with versions
+            AddDepositDocumentWithVersions("ZahtevZaOtvaranjeRacunaOrocenogDepozita", versionCount: 2);
         }
         else if (clientType == "LE")
         {
-            // Deposit documents for Legal Entities (SB - Depozitni proizvodi)
-            AddDepositDocument("SmeUgovorOroceniDepozitPreduzetnici");
+            // TC 24: Minimum required deposit documents for LE (00010)
+            // 1. Ugovor o oročenom depozitu
+            AddDepositDocumentWithVersions("SmeUgovorOroceniDepozitPreduzetnici", versionCount: 3);
+
+            // 2. Ponuda (REQUIRED - previously missing)
+            AddDepositDocument("SmePonuda");
+
+            // 3. Plan isplate depozita (REQUIRED - previously missing)
+            AddDepositDocument("SmeAnuitetniPlan");
+
+            // 4. Obavezni elementi Ugovora (REQUIRED - previously missing)
+            AddDepositDocumentWithVersions("SmeObavezniElementiUgovora", versionCount: 2);
         }
 
         return documents;
@@ -930,7 +1024,8 @@ public static class Program
         string docTypeName,
         string tipDosijea,
         string docStatus,
-        Random random)
+        Random random,
+        bool? includeAccountNumber = null)
     {
         var properties = new Dictionary<string, object>();
 
@@ -955,7 +1050,7 @@ public static class Program
         // This comes from TipDosiea field in HeimdallDocumentMapper
         properties["ecm:docDossierType"] = tipDosijea;
 
-        // Client segment (CRITICAL for migration) 
+        // Client segment (CRITICAL for migration)
         properties["ecm:docClientType"] = clientType;
 
         // Source (will be set by migration, but can add for reference)
@@ -965,6 +1060,30 @@ public static class Program
         // Dates
         var creationDate = DateTime.UtcNow.AddDays(-random.Next(1, 365));
         properties["ecm:docCreationDate"] = creationDate.ToString("o");
+
+        // TC 16: KDP 00824 edge case - account number validation
+        // If includeAccountNumber is explicitly set, respect it; otherwise use default logic
+        if (docTypeCode == "00824")
+        {
+            if (includeAccountNumber == true)
+            {
+                // Include account number - document should be active after migration
+                properties["ecm:contractNumber"] = $"{coreId}{random.Next(100, 999)}";
+            }
+            else if (includeAccountNumber == false)
+            {
+                // Explicitly exclude account number - document should NOT be active
+                // Do not add ecm:contractNumber property
+            }
+            else
+            {
+                // Default behavior: add account number if status is validiran
+                if (docStatus == "validiran")
+                {
+                    properties["ecm:contractNumber"] = $"{coreId}{random.Next(100, 999)}";
+                }
+            }
+        }
 
         return properties;
     }

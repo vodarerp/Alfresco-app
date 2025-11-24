@@ -90,5 +90,15 @@ namespace Alfresco.Contracts.Oracle.Models
         [Column("ExcelFileSheet")]
         [MaxLength(300)]
         public string? ExcelFileSheet { get; set; }
+
+        /// <summary>
+        /// Politika čuvanja dokumenta - utiče na određivanje statusa
+        /// Moguće vrednosti: "Nova verzija", "Novi dokument", null/empty
+        /// - "Nova verzija" / "Novi dokument" → dokument je NEAKTIVAN (ecm:status = 'poništen', ecm:active = false)
+        /// - null/empty → nastavlja se sa daljom proverom statusa
+        /// </summary>
+        [Column("PolitikaCuvanja")]
+        [MaxLength(100)]
+        public string? PolitikaCuvanja { get; set; }
     }
 }

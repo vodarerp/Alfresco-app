@@ -625,6 +625,15 @@ namespace Migration.Infrastructure.Implementation.Services
                     _fileLogger.LogDebug("Will update ecm:naziv to '{Naziv}' (from DocStaging fallback) for document {DocId}", doc.DocDescription, doc.Id);
                 }
 
+                if (!string.IsNullOrWhiteSpace(doc.Status))
+                {
+                    propertiesToUpdate["ecm:status"] = doc.NewAlfrescoStatus;
+                    _fileLogger.LogDebug("Will update ecm:status to '{Status}' for document {DocId}", doc.Status, doc.Id);
+                }
+
+                propertiesToUpdate["ecm:active"] = doc.IsActive;
+                _fileLogger.LogDebug("Will update ecm:active to '{Active}' for document {DocId}", doc.IsActive.ToString(), doc.Id);
+
                 // Only update if we have properties to change
                 if (propertiesToUpdate.Count > 0)
                 {

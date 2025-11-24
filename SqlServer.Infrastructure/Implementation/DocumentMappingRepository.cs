@@ -43,7 +43,8 @@ namespace SqlServer.Infrastructure.Implementation
                             SifraDokumentaMigracija,
                             NazivDokumentaMigracija,
                             ExcelFileName,
-                            ExcelFileSheet
+                            ExcelFileSheet,
+                            PolitikaCuvanja
                         FROM DocumentMappings WITH (NOLOCK)
                         ORDER BY ID";
 
@@ -82,7 +83,8 @@ namespace SqlServer.Infrastructure.Implementation
                             SifraDokumentaMigracija,
                             NazivDokumentaMigracija,
                             ExcelFileName,
-                            ExcelFileSheet
+                            ExcelFileSheet,
+                            PolitikaCuvanja
                         FROM DocumentMappings WITH (NOLOCK)
                         WHERE UPPER(NAZIV) = UPPER(@originalName)";
 
@@ -129,7 +131,8 @@ namespace SqlServer.Infrastructure.Implementation
                             SifraDokumentaMigracija,
                             NazivDokumentaMigracija,
                             ExcelFileName,
-                            ExcelFileSheet
+                            ExcelFileSheet,
+                            PolitikaCuvanja
                         FROM DocumentMappings WITH (NOLOCK)
                         WHERE UPPER(sifraDokumenta) = UPPER(@originalCode)";
 
@@ -176,7 +179,8 @@ namespace SqlServer.Infrastructure.Implementation
                             SifraDokumentaMigracija,
                             NazivDokumentaMigracija,
                             ExcelFileName,
-                            ExcelFileSheet
+                            ExcelFileSheet,
+                            PolitikaCuvanja
                         FROM DocumentMappings WITH (NOLOCK)
                         WHERE UPPER(NazivDokumenta) = UPPER(@serbianName)";
 
@@ -223,7 +227,8 @@ namespace SqlServer.Infrastructure.Implementation
                             SifraDokumentaMigracija,
                             NazivDokumentaMigracija,
                             ExcelFileName,
-                            ExcelFileSheet
+                            ExcelFileSheet,
+                            PolitikaCuvanja
                         FROM DocumentMappings WITH (NOLOCK)
                         WHERE UPPER(NazivDokumentaMigracija) = UPPER(@migratedName)";
 

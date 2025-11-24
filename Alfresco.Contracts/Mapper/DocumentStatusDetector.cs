@@ -1,4 +1,5 @@
-﻿using System;
+﻿using Alfresco.Contracts.Models;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
@@ -251,31 +252,5 @@ namespace Alfresco.Contracts.Mapper
         public bool WillReceiveMigrationSuffix { get; init; }
         public bool CodeWillChange { get; init; }
         public string TipDosiea { get; init; } = string.Empty;
-    }
-
-    /// <summary>
-    /// Contains detailed status information for a document (NEW - Per Analiza_migracije_v2.md)
-    /// </summary>
-    public record DocumentStatusInfo
-    {
-        /// <summary>
-        /// Indicates if the document is active after migration
-        /// </summary>
-        public bool IsActive { get; init; }
-
-        /// <summary>
-        /// Alfresco status string: "validiran" or "poništen"
-        /// </summary>
-        public string Status { get; init; } = string.Empty;
-
-        /// <summary>
-        /// Indicates if the document description contains "-migracija" suffix
-        /// </summary>
-        public bool HasMigrationSuffixInOpis { get; init; }
-
-        /// <summary>
-        /// Indicates if the document was already inactive in the old Alfresco system
-        /// </summary>
-        public bool WasInactiveInOldSystem { get; init; }
     }
 }

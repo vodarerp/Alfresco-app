@@ -52,11 +52,15 @@ namespace Alfresco.Contracts.Mapper
             ("Contract Foreign Exchange Account For Receive Of Funds From The Sale Financial Instruments RSD", "00129", "Ugovor o otvaranju namenskog računa za prodaju finansijskih instrumenata", "Dosije paket racuna", "00129", "Ugovor o otvaranju namenskog računa za prodaju finansijskih instrumenata"),
             ("KYC Questionnaire MDOC", "00130", "KYC upitnik", "Dosije klijenta FL / PL", "00841", "KYC upitnik - migracija"),
             ("Contract Dedicated Account For Purchase Of Financial Instruments RSD", "00128", "Ugovor o otvaranju namenskog računa za kupovinu finansijskih instrumenata", "Dosije paket racuna", "00128", "Ugovor o otvaranju namenskog računa za kupovinu finansijskih instrumenata"),
-
+            ("Prestige Package Tariff for LE","00160","Tarifnik za Prestige paket SB","Dosije paket racuna","00160","Tarifnik za Prestige paket SB"),
+            ("SmePonuda","00765", "Ponuda", "Dosije depozita", "00765", "Ponuda"),
+            ("SmeUgovorORacunu", "00764", "Ugovor o računu", "Dosije depozita", "00764", "Ugovor o računu"),
+            ("SmeObavezniElementiUgovoraORacunu", "00763", "Obavezni elementi ugovora o računu", "Dosije depozita", "00763", "Obavezni elementi ugovora o računu"),
             // Dosije Depozita examples
             ("PiAnuitetniPlan", "00163", "Plan isplate depozita", "Dosije depozita", "00163", "Plan isplate depozita"),
             ("PiObavezniElementiUgovora", "00757", "Obavezni elementi ugovora", "Dosije depozita", "00757", "Obavezni elementi ugovora"),
-            ("SmeUgovorOroceniDepozitPreduzetnici", "00166", "Ugovor o orocenom depozitu", "Dosije depozita", "00166", "Ugovor o orocenom depozitu")
+            ("SmeUgovorOroceniDepozitPreduzetnici", "00166", "Ugovor o orocenom depozitu", "Dosije depozita", "00166", "Ugovor o orocenom depozitu"),
+            ("KYC Questionnaire for LE","00130","KYC upitnik","Dosije klijenta PL","00841","KYC upitnik - migracija")
         };
 
         /// <summary>

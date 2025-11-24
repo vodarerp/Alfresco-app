@@ -483,15 +483,21 @@ namespace Migration.Infrastructure.Implementation.Services
                 // ========================================
                 // Step 2: Map ecm:docDesc → ecm:docType using OpisToTipMapperV2 (database-driven)
                 // ========================================
-                string? mappedDocType = null;
+                string? mappedDocType = null, mappedDocName = null;
+                DocumentMapping? fullMapping = null;
+
                 if (!string.IsNullOrWhiteSpace(docDesc))
                 {
-                    mappedDocType = await _opisToTipMapper.GetTipDokumentaAsync(docDesc, ct).ConfigureAwait(false);
+                    // Get full mapping to access PolitikaCuvanja and other fields
+                    fullMapping = await _opisToTipMapper.GetFullMappingAsync(docDesc, ct).ConfigureAwait(false);
 
-                    if (!string.IsNullOrWhiteSpace(mappedDocType))
+                    if (fullMapping != null)
                     {
-                        _fileLogger.LogTrace("Mapped ecm:docDesc '{Opis}' → ecm:docType '{Tip}'",
-                            docDesc, mappedDocType);
+                        mappedDocType = fullMapping.SifraDokumentaMigracija;
+                        mappedDocName = fullMapping.NazivDokumentaMigracija;
+
+                        _fileLogger.LogTrace("Mapped ecm:docDesc '{Opis}' → ecm:docType '{Tip}' (PolitikaCuvanja: '{Politika}')",
+                            docDesc, mappedDocType, fullMapping.PolitikaCuvanja ?? "null");
                     }
                     else
                     {
@@ -502,20 +508,20 @@ namespace Migration.Infrastructure.Implementation.Services
 
                 // Use mapped value if available, otherwise keep existing
                 doc.DocumentType = mappedDocType ?? existingDocType;
-
+                doc.NewDocumentName = mappedDocName ?? "";
                 // ========================================
-                // Step 3: Determine document status using NEW method (ecm:docDesc)
+                // Step 3: Determine document status using NEW V3 logic (with priorities and PolitikaCuvanja)
                 // ========================================
-                var statusInfo = DocumentStatusDetector.GetStatusInfoByOpis(docDesc, existingStatus);
+                var statusInfo = DocumentStatusDetectorV3.DetermineStatus(fullMapping, existingStatus);
 
                 doc.IsActive = statusInfo.IsActive;
                 doc.NewAlfrescoStatus = statusInfo.Status;
 
                 _fileLogger.LogTrace(
                     "Status determination: ecm:docDesc '{Opis}', Old Status: '{OldStatus}' → " +
-                    "IsActive: {IsActive}, New Status: '{NewStatus}', HasMigrationSuffix: {HasSuffix}",
+                    "IsActive: {IsActive}, New Status: '{NewStatus}', Reason: '{Reason}', Priority: {Priority}",
                     docDesc, existingStatus, statusInfo.IsActive, statusInfo.Status,
-                    statusInfo.HasMigrationSuffixInOpis);
+                    statusInfo.DeterminationReason, statusInfo.Priority);
 
                 // ========================================
                 // Step 5: PER-DOCUMENT destination determination
