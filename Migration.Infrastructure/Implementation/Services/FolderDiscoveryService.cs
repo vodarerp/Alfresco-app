@@ -198,7 +198,7 @@ namespace Migration.Infrastructure.Implementation.Services
                     Skip: currentMultiCursor.CurrentSkipCount,
                     Take: batch,
                     Cursor: null,  // v2 doesn't use cursor
-                    TargetCoreIds: null);  // v2 doesn't support CoreId filtering (yet)
+                    TargetCoreIds: _options.Value.FolderDiscovery.TargetCoreIds);  // v2 doesn't support CoreId filtering (yet)
 
                 page = await _reader.ReadBatchAsync_v2(
                     folderRequest,

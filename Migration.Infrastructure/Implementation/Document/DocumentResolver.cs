@@ -138,7 +138,27 @@ namespace Migration.Infrastructure.Implementation.Document
 
                 var clientDataProps = await CallClientApiForFolderAsync(newFolderName, ct).ConfigureAwait(false);
 
-               
+                var cliProps = BuildPropertiesClientData(clientDataProps);
+
+                foreach (var prop in cliProps)
+                {
+                    // If properties dictionary is null, initialize it
+                    if (properties == null)
+                    {
+                        properties = new Dictionary<string, object>();
+                    }
+                    // Add or update the property
+                    if (properties.ContainsKey(prop.Key))
+                    {
+                        properties[prop.Key] = prop.Value;
+                    }
+                    else 
+                    {
+                        properties.Add(prop.Key, prop.Value);
+                    }
+
+                }
+
                 // ========================================
                 // Step 6: Create folder (with or without properties)
                 // ========================================
@@ -154,7 +174,7 @@ namespace Migration.Infrastructure.Implementation.Document
                             newFolderName, properties.Count);
 
                         //folderID = await _write.CreateFolderAsync(destinationRootId, newFolderName, properties, ct).ConfigureAwait(false);
-                        folderID = await _write.CreateFolderAsync(destinationRootId, newFolderName, BuildPropertiesClientData(clientDataProps), ct).ConfigureAwait(false);
+                        folderID = await _write.CreateFolderAsync(destinationRootId, newFolderName, properties, ct).ConfigureAwait(false);
                         _logger.LogInformation(
                             "Successfully created folder '{FolderName}' with properties. FolderId: {FolderId}",
                             newFolderName, folderID);
@@ -267,7 +287,14 @@ namespace Migration.Infrastructure.Implementation.Document
         {
             Dictionary<string,object> properties = new Dictionary<string,object>();
 
-            //TODO Dodaj propertije
+            properties.Add("ecm:bnkClientType", clientData.Segment ?? string.Empty);
+            properties.Add("ecm:bnkClientSubtype", clientData.ClientSubtype ?? string.Empty);
+            properties.Add("ecm:bnkOfficeId", clientData.BarCLEXOpu ?? string.Empty);            
+            properties.Add("ecm:bnkStaff", clientData.Staff ?? string.Empty);
+            properties.Add("ecm:bnkResidence", clientData.ClientName ?? string.Empty);
+            properties.Add("ecm:bnkBarclex", $"{clientData.BarCLEXGroupCode ?? string.Empty} {clientData.BarCLEXGroupName ?? string.Empty} ");
+            properties.Add("ecm:bnkContributor", $"{clientData.BarCLEXCode ?? string.Empty} {clientData.BarCLEXName ?? string.Empty} ");
+           
 
 
 

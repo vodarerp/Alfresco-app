@@ -185,6 +185,24 @@ namespace Migration.Infrastructure.Implementation.Folder
                 }
             }
 
+            if (inRequest.TargetCoreIds != null && inRequest.TargetCoreIds.Count > 0)
+            {
+                query.Append("AND (");
+                for (int i = 0; i < inRequest.TargetCoreIds.Count; i++)
+                {
+                    if (i > 0)
+                        query.Append(" OR ");
+
+                    // CMIS LIKE syntax: match folder names containing the CoreId
+                    // Format: {Type}-{CoreId}TTT (e.g., PL-10000003TTT)
+                    // Pattern: '%-{CoreId}%'
+                    query.Append($"cmis:name LIKE '{parentDossierType}{inRequest.TargetCoreIds[i]}%'");
+                }
+                query.Append(") ");
+
+                _fileLogger.LogDebug("Applied CoreId filter: {CoreIds}", string.Join(", ", inRequest.TargetCoreIds));
+            }
+
             // Order by creation date and name for consistent pagination
             query.Append("ORDER BY cmis:creationDate ASC, cmis:name ASC");
 
