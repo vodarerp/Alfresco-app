@@ -403,7 +403,7 @@ namespace Migration.Infrastructure.Implementation.Services
                         existingDocType = docTypeObj?.ToString();
 
                     // ecm:status - Document status ("validiran", "poništen")
-                    if (alfrescoEntry.Properties.TryGetValue("ecm:status", out var statusObj))
+                    if (alfrescoEntry.Properties.TryGetValue("ecm:docStatus", out var statusObj))
                         existingStatus = statusObj?.ToString();
 
                     // ecm:coreId - Core ID
@@ -444,15 +444,15 @@ namespace Migration.Infrastructure.Implementation.Services
                     // ========================================
 
                     // ecm:brojUgovora - Contract number
-                    if (alfrescoEntry.Properties.TryGetValue("ecm:brojUgovora", out var contractObj))
+                    if (alfrescoEntry.Properties.TryGetValue("ecm:bnkNumberOfContract", out var contractObj))
                         contractNumber = contractObj?.ToString();
 
                     // ecm:tipProizvoda - Product type
-                    if (alfrescoEntry.Properties.TryGetValue("ecm:tipProizvoda", out var productObj))
+                    if (alfrescoEntry.Properties.TryGetValue("ecm:bnkTypeOfProduct", out var productObj))
                         productType = productObj?.ToString();
 
                     // ecm:docAccountNumbers - Account numbers
-                    if (alfrescoEntry.Properties.TryGetValue("ecm:docAccountNumbers", out var accountsObj))
+                    if (alfrescoEntry.Properties.TryGetValue("ecm:bnkAccountNumber", out var accountsObj))
                         accountNumbers = accountsObj?.ToString();
                 }
 
@@ -516,6 +516,8 @@ namespace Migration.Infrastructure.Implementation.Services
 
                 doc.IsActive = statusInfo.IsActive;
                 doc.NewAlfrescoStatus = statusInfo.Status;
+                doc.NewDocumentCode = statusInfo.MappingCode;
+                if (string.IsNullOrWhiteSpace(doc.OriginalDocumentCode)) doc.OriginalDocumentCode = statusInfo.OriginalCode;
 
                 _fileLogger.LogTrace(
                     "Status determination: ecm:docDesc '{Opis}', Old Status: '{OldStatus}' → " +
@@ -908,61 +910,6 @@ namespace Migration.Infrastructure.Implementation.Services
 
         }
 
-        private async Task InsertDocsAndMarkFolderAsync(List<DocStaging> docsToInsert, long folderId, CancellationToken ct)
-        {
-
-            await using var scope = _scopeFactory.CreateAsyncScope();
-            var uow = scope.ServiceProvider.GetRequiredService<IUnitOfWork>();
-            var docRepo = scope.ServiceProvider.GetRequiredService<IDocStagingRepository>();
-            var folderRepo = scope.ServiceProvider.GetRequiredService<IFolderStagingRepository>();
-
-            await uow.BeginAsync().ConfigureAwait(false);
-
-            try
-            {
-                int inserted = 0;
-                if (docsToInsert.Count > 0)
-                {
-                    _fileLogger.LogDebug("Inserting {Count} documents for folder {FolderId}",
-                        docsToInsert.Count, folderId);
-
-                    inserted = await docRepo.InsertManyAsync(docsToInsert, ct).ConfigureAwait(false);
-
-                    _fileLogger.LogInformation(
-                        "Successfully inserted {Inserted}/{Total} documents for folder {FolderId}",
-                        inserted, docsToInsert.Count, folderId);
-                }
-                else
-                {
-                    _fileLogger.LogWarning(
-                        "docsToInsert is empty for folder {FolderId} - this should have been caught earlier!",
-                        folderId);
-                }
-
-                await folderRepo.SetStatusAsync(folderId, MigrationStatus.Processed.ToDbString(), null, ct).ConfigureAwait(false);
-                _fileLogger.LogDebug("Marked folder {FolderId} as PROCESSED", folderId);
-
-                await uow.CommitAsync().ConfigureAwait(false);
-                _fileLogger.LogDebug("Transaction committed for folder {FolderId}", folderId);
-            }
-            catch (Exception ex)
-            {
-                _dbLogger.LogError(ex,
-                    "Failed to insert documents and mark folder {FolderId} as PROCESSED. " +
-                    "Attempted to insert {Count} documents. Rolling back transaction.",
-                    folderId, docsToInsert.Count);
-
-                await uow.RollbackAsync().ConfigureAwait(false);
-                throw;
-            }
-
-            //throw new NotImplementedException();
-        }
-
-        /// <summary>
-        /// Inserts documents without marking folder as processed.
-        /// Used in pagination loop where folder is marked after all pages are processed.
-        /// </summary>
         private async Task InsertDocsAsync(List<DocStaging> docsToInsert, long folderId, CancellationToken ct)
         {
             if (docsToInsert == null || docsToInsert.Count == 0)
@@ -1003,99 +950,7 @@ namespace Migration.Infrastructure.Implementation.Services
             }
         }
 
-        //private async Task<List<(string NormalizedName, string DestinationId)>?> BuildParentPathFromDossierAsync(FolderStaging folder, CancellationToken ct)
-        //{
-        //    if (string.IsNullOrEmpty(folder.ParentId))
-        //    {
-        //        return null;
-        //    }
-
-        //    try
-        //    {
-        //        var path = new List<(string Name, string ParentId)>();
-        //        var currentNodeId = folder.ParentId;
-        //        var maxDepth = 20;
-        //        var depth = 0;
-
-        //        // Walk up the parent chain until we hit DOSSIER folder
-        //        while (depth < maxDepth)
-        //        {
-        //            var nodeResponse = await _alfrescoReadApi.GetNodeByIdAsync(currentNodeId, ct).ConfigureAwait(false);
-
-        //            if (nodeResponse?.Entry == null)
-        //            {
-        //                _fileLogger.LogDebug("Reached end of parent chain at NodeId {NodeId}", currentNodeId);
-        //                break;
-        //            }
-
-        //            var parentEntry = nodeResponse.Entry;
-        //            path.Add((parentEntry.Name, parentEntry.ParentId));
-
-        //            // Check if this is a DOSSIER folder
-        //            if (!string.IsNullOrEmpty(parentEntry.Name) &&
-        //                parentEntry.Name.StartsWith("DOSSIER-", StringComparison.OrdinalIgnoreCase))
-        //            {
-        //                // Found DOSSIER folder - this is the root of our path
-        //                break;
-        //            }
-
-        //            if (string.IsNullOrEmpty(parentEntry.ParentId))
-        //            {
-        //                break;
-        //            }
-
-        //            currentNodeId = parentEntry.ParentId;
-        //            depth++;
-        //        }
-
-        //        if (path.Count == 0)
-        //        {
-        //            return null;
-        //        }
-
-        //        // The last item in path should be DOSSIER folder
-        //        var dossierFolder = path[^1];
-        //        if (string.IsNullOrEmpty(dossierFolder.Name) ||
-        //            !dossierFolder.Name.StartsWith("DOSSIER-", StringComparison.OrdinalIgnoreCase))
-        //        {
-        //            _fileLogger.LogWarning("Parent chain did not end at DOSSIER folder for {FolderId}", folder.Id);
-        //            return null;
-        //        }
-
-        //        // Get or create DOSSIER folder in destination
-        //        var folderType = dossierFolder.Name.Substring("DOSSIER-".Length);
-        //        var dossierFolderName = $"DOSSIER-{folderType}";
-
-        //        var dossierDestId = await _resolver.ResolveAsync(
-        //            _options.Value.RootDestinationFolderId,
-        //            dossierFolderName,
-        //            ct).ConfigureAwait(false);
-
-        //        // Build result list (reversed - from DOSSIER down to immediate parent)
-        //        var result = new List<(string NormalizedName, string DestinationId)>();
-
-        //        // First item is DOSSIER folder
-        //        result.Add((dossierFolderName, dossierDestId));
-
-        //        // Add remaining folders in reverse order (from DOSSIER down to immediate parent)
-        //        for (int i = path.Count - 2; i >= 0; i--)
-        //        {
-        //            var f = path[i];
-        //            var normalizedName = f.Name?.NormalizeName() ?? throw new InvalidOperationException($"Folder has null name");
-        //            result.Add((normalizedName, string.Empty)); // DestinationId will be resolved during path creation
-        //        }
-
-        //        _fileLogger.LogDebug("Built parent path with {Count} levels for folder {FolderId}", result.Count, folder.Id);
-
-        //        return result;
-        //    }
-        //    catch (Exception ex)
-        //    {
-        //        _fileLogger.LogError(ex, "Error building parent path for folder {FolderId}", folder.Id);
-        //        return null;
-        //    }
-        //}
-
+      
         private async Task MarkFolderAsProcessedAsync(long id, CancellationToken ct)
         {
             await using var scope = _scopeFactory.CreateAsyncScope();

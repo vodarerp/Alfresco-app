@@ -334,7 +334,7 @@ namespace Migration.Infrastructure.Implementation
 
             // ecm:jmbg / ecm:mbrJmbg - Client API "bnkJmbg"
             properties["ecm:jmbg"] = clientData.MbrJmbg ?? GetOldProperty("ecm:jmbg") ?? string.Empty;
-            properties["ecm:mbrJmbg"] = clientData.MbrJmbg ?? GetOldProperty("ecm:mbrJmbg") ?? string.Empty;
+            //properties["ecm:mbrJmbg"] = clientData.MbrJmbg ?? GetOldProperty("ecm:mbrJmbg") ?? string.Empty;
 
             // ecm:clientName - Client API "bnkClientName"
             properties["ecm:clientName"] = clientData.ClientName ?? GetOldProperty("ecm:clientName") ?? string.Empty;
@@ -349,8 +349,8 @@ namespace Migration.Infrastructure.Implementation
             properties["ecm:bnkOfficeId"] = clientData.BarCLEXOpu ?? GetOldProperty("ecm:bnkOfficeId") ?? string.Empty;
 
             // ecm:staff / ecm:docStaff - Client API "staff"
-            properties["ecm:staff"] = clientData.Staff ?? GetOldProperty("ecm:staff") ?? string.Empty;
-            properties["ecm:docStaff"] = clientData.Staff ?? GetOldProperty("ecm:docStaff") ?? string.Empty;
+            properties["ecm:bnkStaff"] = clientData.Staff ?? GetOldProperty("ecm:bnkStaff") ?? string.Empty;
+            //properties["ecm:docStaff"] = clientData.Staff ?? GetOldProperty("ecm:docStaff") ?? string.Empty;
 
             // ecm:bnkTypeOfProduct - from old folder
             properties["ecm:bnkTypeOfProduct"] = folder.ProductType ?? GetOldProperty("ecm:bnkTypeOfProduct") ?? string.Empty;
@@ -388,39 +388,39 @@ namespace Migration.Infrastructure.Implementation
             {
                 contributorValue = clientData.BarCLEXName;
             }
-            properties["ecm:collaborator"] = contributorValue != string.Empty ? contributorValue : GetOldProperty("ecm:collaborator") ?? string.Empty;
+           // properties["ecm:collaborator"] = contributorValue != string.Empty ? contributorValue : GetOldProperty("ecm:collaborator") ?? string.Empty;
 
             // ecm:bnkSourceId / ecm:source - from old folder
             properties["ecm:bnkSourceId"] = folder.Source ?? GetOldProperty("ecm:bnkSourceId") ?? string.Empty;
-            properties["ecm:source"] = folder.Source ?? GetOldProperty("ecm:source") ?? string.Empty;
+            properties["ecm:bnkSource"] = folder.Source ?? GetOldProperty("ecm:bnkSource") ?? string.Empty;
 
             // ecm:opuRealization - from old folder or ClientAPI
-            properties["ecm:opuRealization"] = clientData.OpuRealization ?? GetOldProperty("ecm:opuRealization") ?? string.Empty;
+            //properties["ecm:opuRealization"] = clientData.OpuRealization ?? GetOldProperty("ecm:opuRealization") ?? string.Empty;
 
             // ecm:contractNumber / ecm:bnkNumberOfContract - from folder
-            properties["ecm:contractNumber"] = folder.ContractNumber ?? GetOldProperty("ecm:contractNumber") ?? string.Empty;
+            //properties["ecm:bnkContractNumber"] = folder.ContractNumber ?? GetOldProperty("ecm:bnkContractNumber") ?? string.Empty;
             properties["ecm:bnkNumberOfContract"] = folder.ContractNumber ?? GetOldProperty("ecm:bnkNumberOfContract") ?? string.Empty;
 
             // ecm:residency / ecm:bnkResidence - Client API
-            properties["ecm:residency"] = clientData.Residency ?? GetOldProperty("ecm:residency") ?? string.Empty;
+            //properties["ecm:residency"] = clientData.Residency ?? GetOldProperty("ecm:residency") ?? string.Empty;
             properties["ecm:bnkResidence"] = clientData.Residency ?? GetOldProperty("ecm:bnkResidence") ?? string.Empty;
 
             // ecm:bnkSource - from folder
             properties["ecm:bnkSource"] = folder.Source ?? GetOldProperty("ecm:bnkSource") ?? string.Empty;
 
             // ecm:status / ecm:bnkStatus - from old folder
-            properties["ecm:status"] = GetOldProperty("ecm:status") ?? string.Empty;
+            properties["ecm:docStatus"] = GetOldProperty("ecm:docStatus") ?? string.Empty;
             properties["ecm:bnkStatus"] = GetOldProperty("ecm:bnkStatus") ?? string.Empty;
 
             // ecm:bnkDossierType - from folder
             properties["ecm:bnkDossierType"] = folder.TipDosijea ?? GetOldProperty("ecm:bnkDossierType") ?? string.Empty;
 
             // Additional important properties from old folder
-            properties["ecm:uniqueFolderId"] = folder.UniqueIdentifier ?? GetOldProperty("ecm:uniqueFolderId") ?? string.Empty;
-            properties["ecm:clientType"] = clientData.ClientType ?? GetOldProperty("ecm:clientType") ?? string.Empty;
-            properties["ecm:segment"] = clientData.Segment ?? GetOldProperty("ecm:segment") ?? string.Empty;
-            properties["ecm:productType"] = folder.ProductType ?? GetOldProperty("ecm:productType") ?? string.Empty;
-            properties["ecm:batch"] = folder.Batch ?? GetOldProperty("ecm:batch") ?? string.Empty;
+            //properties["ecm:uniqueFolderId"] = folder.UniqueIdentifier ?? GetOldProperty("ecm:uniqueFolderId") ?? string.Empty;
+            properties["ecm:docClientType"] = clientData.ClientType ?? GetOldProperty("ecm:docClientType") ?? string.Empty;
+            properties["ecm:bnkSegment"] = clientData.Segment ?? GetOldProperty("ecm:bnkSegment") ?? string.Empty;
+            properties["ecm:bnkTypeOfProduct"] = folder.ProductType ?? GetOldProperty("ecm:bnkTypeOfProduct") ?? string.Empty;
+            //properties["ecm:batch"] = folder.Batch ?? GetOldProperty("ecm:batch") ?? string.Empty;
 
             // Copy other properties that might be important
             var additionalPropertiesToCopy = new[]

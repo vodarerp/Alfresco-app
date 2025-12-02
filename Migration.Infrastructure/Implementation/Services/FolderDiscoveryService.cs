@@ -725,7 +725,6 @@ namespace Migration.Infrastructure.Implementation.Services
             foreach (var listEntry in folders)
             {
                 var entry = listEntry.Entry;
-
                 // First, try to parse properties from Alfresco if they exist
                 entry.PopulateClientProperties();
 
@@ -736,8 +735,12 @@ namespace Migration.Infrastructure.Implementation.Services
                     continue;
                 }
 
+                string coreId = entry?.ClientProperties?.CoreId ?? "";
+
+               // var xx = entry.TryExtractCoreIdFromName_v2();
                 // Try to extract CoreId from folder name
-                var coreId = entry.TryExtractCoreIdFromName();
+                if (string.IsNullOrWhiteSpace(coreId)) coreId = entry.TryExtractCoreIdFromName_v2();
+
                 if (string.IsNullOrWhiteSpace(coreId))
                 {
                     _fileLogger.LogWarning("Could not extract CoreId from folder name: {Name}", entry.Name);

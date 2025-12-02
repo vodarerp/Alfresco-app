@@ -22,7 +22,9 @@ namespace Migration.Infrastructure.Implementation.Services
     public class FolderPreparationService : IFolderPreparationService
     {
         private readonly IServiceScopeFactory _scopeFactory;
-        private readonly ILogger<FolderPreparationService> _logger;
+        private readonly ILogger _fileLogger;
+        private readonly ILogger _dbLogger;
+        
         private readonly string _rootDestinationFolderId;
 
         private const int MAX_PARALLELISM = 50; // 30-50 concurrent folder creations
@@ -34,11 +36,12 @@ namespace Migration.Infrastructure.Implementation.Services
 
         public FolderPreparationService(
             IServiceScopeFactory scopeFactory,
-            ILogger<FolderPreparationService> logger,
+            ILoggerFactory logger,
             IOptions<MigrationOptions> migrationOptions)
         {
             _scopeFactory = scopeFactory ?? throw new ArgumentNullException(nameof(scopeFactory));
-            _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+            _fileLogger = logger.CreateLogger("FileLogger");
+            _dbLogger = logger.CreateLogger("DbLogger");
             _rootDestinationFolderId = migrationOptions?.Value?.RootDestinationFolderId ?? throw new ArgumentNullException(nameof(migrationOptions));
         }
 
@@ -46,7 +49,7 @@ namespace Migration.Infrastructure.Implementation.Services
         {
             try
             {
-                _logger.LogInformation("🏗️  Starting parallel folder preparation with {MaxParallelism} concurrent tasks", MAX_PARALLELISM);
+                _fileLogger.LogInformation("🏗️  Starting parallel folder preparation with {MaxParallelism} concurrent tasks", MAX_PARALLELISM);
 
                 // ====================================================================
                 // STEP 1: Get all unique destination folders from DocStaging
@@ -55,13 +58,13 @@ namespace Migration.Infrastructure.Implementation.Services
                 var totalFolders = uniqueFolders.Count;
                 _totalFolders = totalFolders; // Cache for GetProgressAsync
 
-                _logger.LogInformation(
+                _fileLogger.LogInformation(
                     "Found {TotalFolders} unique destination folders to create",
                     totalFolders);
 
                 if (totalFolders == 0)
                 {
-                    _logger.LogWarning("No folders to create - DocStaging might be empty");
+                    _fileLogger.LogWarning("No folders to create - DocStaging might be empty");
                     return;
                 }
 
@@ -76,7 +79,7 @@ namespace Migration.Infrastructure.Implementation.Services
 
                 if (startIndex > 0)
                 {
-                    _logger.LogInformation(
+                    _fileLogger.LogInformation(
                         "Resuming from checkpoint: {StartIndex}/{TotalFolders} folders already created",
                         startIndex, totalFolders);
                     _foldersCreated = startIndex;
@@ -88,7 +91,7 @@ namespace Migration.Infrastructure.Implementation.Services
                 var semaphore = new SemaphoreSlim(MAX_PARALLELISM, MAX_PARALLELISM);
                 var foldersToProcess = uniqueFolders.Skip(startIndex).ToList();
 
-                _logger.LogInformation(
+                _fileLogger.LogInformation(
                     "Starting parallel folder creation: {Remaining} folders remaining",
                     foldersToProcess.Count);
 
@@ -105,14 +108,14 @@ namespace Migration.Infrastructure.Implementation.Services
                         if (current % CHECKPOINT_INTERVAL == 0)
                         {
                             await SaveCheckpointAsync(current, ct).ConfigureAwait(false);
-                            _logger.LogInformation(
+                            _fileLogger.LogInformation(
                                 "Progress: {Created}/{Total} folders created ({Percentage:F1}%)",
                                 current, totalFolders, (current / (double)totalFolders) * 100);
                         }
                     }
                     catch (Exception ex)
                     {
-                        _logger.LogError(ex,
+                        _fileLogger.LogError(ex,
                             "Failed to create folder: {RootId}/{Path}",
                             folder.DestinationRootId, folder.FolderPath);
                         _errors.Add($"{folder.DestinationRootId}/{folder.FolderPath}: {ex.Message}");
@@ -132,30 +135,30 @@ namespace Migration.Infrastructure.Implementation.Services
 
                 if (_errors.Count > 0)
                 {
-                    _logger.LogWarning(
+                    _fileLogger.LogWarning(
                         "⚠️  Folder preparation completed with {Errors} errors out of {Total} folders",
                         _errors.Count, totalFolders);
 
                     foreach (var error in _errors.Take(10))
                     {
-                        _logger.LogError("Error: {Error}", error);
+                        _fileLogger.LogError("Error: {Error}", error);
                     }
 
                     if (_errors.Count > 10)
                     {
-                        _logger.LogError("... and {More} more errors", _errors.Count - 10);
+                        _fileLogger.LogError("... and {More} more errors", _errors.Count - 10);
                     }
                 }
                 else
                 {
-                    _logger.LogInformation(
+                    _fileLogger.LogInformation(
                         "✅ Folder preparation completed successfully: {Total} folders created",
                         totalFolders);
                 }
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "❌ Fatal error in folder preparation");
+                _fileLogger.LogError(ex, "❌ Fatal error in folder preparation");
                 throw;
             }
         }
@@ -214,7 +217,7 @@ namespace Migration.Infrastructure.Implementation.Services
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Error getting unique folders from DocStaging");
+                _fileLogger.LogError(ex, "Error getting unique folders from DocStaging");
                 throw;
             }
         }
@@ -242,7 +245,7 @@ namespace Migration.Infrastructure.Implementation.Services
 
             if (pathParts.Length == 0)
             {
-                _logger.LogWarning("Empty folder path for {RootId}", folder.DestinationRootId);
+                _fileLogger.LogWarning("Empty folder path for {RootId}", folder.DestinationRootId);
                 return;
             }
 
@@ -259,7 +262,7 @@ namespace Migration.Infrastructure.Implementation.Services
                     ct).ConfigureAwait(false);
             }
 
-            _logger.LogDebug(
+            _fileLogger.LogDebug(
                 "Created folder hierarchy: {RootDestinationFolderId}/{ParentFolder}/{Path} → {FinalId}",
                 _rootDestinationFolderId, folder.DestinationRootId, folder.FolderPath, currentParentId);
 
@@ -293,7 +296,7 @@ namespace Migration.Infrastructure.Implementation.Services
 
                     if (rowsUpdated > 0)
                     {
-                        _logger.LogDebug(
+                        _fileLogger.LogDebug(
                             "Updated {Count} documents with DestinationFolderId={FolderId} for DossierDestFolderId='{DossierId}'",
                             rowsUpdated, alfrescoFolderId, dossierDestFolderId);
                     }
@@ -306,7 +309,7 @@ namespace Migration.Infrastructure.Implementation.Services
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex,
+                _fileLogger.LogError(ex,
                     "Failed to update DestinationFolderId for DossierDestFolderId='{DossierId}'. Folder ID: {FolderId}",
                     dossierDestFolderId, alfrescoFolderId);
                 // Don't throw - this is not critical for folder creation
@@ -337,7 +340,7 @@ namespace Migration.Infrastructure.Implementation.Services
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Error getting checkpoint");
+                _fileLogger.LogError(ex, "Error getting checkpoint");
                 return null;
             }
         }
@@ -363,7 +366,7 @@ namespace Migration.Infrastructure.Implementation.Services
 
                     await uow.CommitAsync(ct).ConfigureAwait(false);
 
-                    _logger.LogDebug("Checkpoint saved: {FoldersCreated} folders", foldersCreated);
+                    _fileLogger.LogDebug("Checkpoint saved: {FoldersCreated} folders", foldersCreated);
                 }
                 catch
                 {
@@ -373,7 +376,7 @@ namespace Migration.Infrastructure.Implementation.Services
             }
             catch (Exception ex)
             {
-                _logger.LogWarning(ex, "Failed to save checkpoint");
+                _fileLogger.LogWarning(ex, "Failed to save checkpoint");
             }
         }
 
@@ -408,7 +411,7 @@ namespace Migration.Infrastructure.Implementation.Services
             }
             catch (Exception ex)
             {
-                _logger.LogWarning(ex, "Failed to update total items in checkpoint");
+                _fileLogger.LogWarning(ex, "Failed to update total items in checkpoint");
             }
         }
     }

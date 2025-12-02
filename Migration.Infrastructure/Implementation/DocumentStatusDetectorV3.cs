@@ -52,7 +52,8 @@ namespace Migration.Infrastructure.Implementation
                     DeterminationReason = "Prioritet 1: SifraDokumentaMigracija = '00824'",
                     Priority = 1,
                     MappingCode = mapping.SifraDokumentaMigracija,
-                    MappingName = mapping.NazivDokumentaMigracija
+                    MappingName = mapping.NazivDokumentaMigracija,
+                    OriginalCode = mapping.SifraDokumenta
                 };
             }
 
@@ -72,7 +73,8 @@ namespace Migration.Infrastructure.Implementation
                         Priority = 2,
                         MappingCode = mapping.SifraDokumentaMigracija,
                         MappingName = mapping.NazivDokumentaMigracija,
-                        PolitikaCuvanja = politikaTrimmed
+                        PolitikaCuvanja = politikaTrimmed,
+                        OriginalCode = mapping.SifraDokumenta
                     };
                 }
             }
@@ -94,7 +96,8 @@ namespace Migration.Infrastructure.Implementation
                         Priority = 3,
                         MappingCode = mapping.SifraDokumentaMigracija,
                         MappingName = mapping.NazivDokumentaMigracija,
-                        HasMigrationSuffix = true
+                        HasMigrationSuffix = true,
+                        OriginalCode = mapping.SifraDokumenta
                     };
                 }
                 else
@@ -107,7 +110,8 @@ namespace Migration.Infrastructure.Implementation
                         Priority = 3,
                         MappingCode = mapping.SifraDokumentaMigracija,
                         MappingName = mapping.NazivDokumentaMigracija,
-                        HasMigrationSuffix = false
+                        HasMigrationSuffix = false,
+                        OriginalCode = mapping.SifraDokumenta
                     };
                 }
             }
@@ -121,7 +125,8 @@ namespace Migration.Infrastructure.Implementation
                 DeterminationReason = "Default: Aktivan (ne postoji NazivDokumentaMigracija)",
                 Priority = 4,
                 MappingCode = mapping.SifraDokumentaMigracija,
-                MappingName = mapping.NazivDokumentaMigracija
+                MappingName = mapping.NazivDokumentaMigracija,
+                OriginalCode = mapping.SifraDokumenta
             };
         }
 

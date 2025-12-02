@@ -8,6 +8,9 @@ namespace Alfresco.Contracts.Models
     /// </summary>
     public record DocumentStatusInfo
     {
+
+        public string OriginalCode { get; set; } = string.Empty;
+
         /// <summary>
         /// Da li je dokument aktivan nakon migracije
         /// </summary>

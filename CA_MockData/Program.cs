@@ -20,7 +20,7 @@ public static class Program
             BaseUrl = "http://localhost:8080/",
             Username =  "admin",
             Password = "admin",
-            RootParentId = "c9ddcc45-1863-4344-9dcc-45186353446d",
+            RootParentId = "b7d7a348-6ab4-4458-97a3-486ab4945815",
             FolderCount = 15,
             DocsPerFolder = 3,
             DegreeOfParallelism = 8,
@@ -832,7 +832,7 @@ public static class Program
             props["ecm:coreId"] = coreId.ToString();
 
             // Document status - all deposit documents are "validiran" (TC 25)
-            props["ecm:status"] = "validiran";
+            props["ecm:docStatus"] = "validiran";
 
             // Document type
             props["ecm:docType"] = docTypeCode;
@@ -952,7 +952,7 @@ public static class Program
         properties["ecm:bnkSourceId"] = "DUT";
 
         // Status
-        properties["ecm:status"] = "ACTIVE";
+        properties["ecm:docStatus"] = "ACTIVE";
         properties["ecm:bnkStatus"] = "ACTIVE";
         properties["ecm:active"] = true;
 
@@ -1041,7 +1041,7 @@ public static class Program
         properties["ecm:coreId"] = coreId.ToString();
 
         // Document status (Test Cases 1-2)
-        properties["ecm:status"] = docStatus;
+        properties["ecm:docStatus"] = docStatus;
 
         // Document type (ecm:tipDokumenta)
         properties["ecm:docType"] = docTypeCode;
@@ -1200,8 +1200,8 @@ public static class Program
         // 16. ecm:bnkSource
         properties["ecm:bnkSource"] = source;
 
-        // 17. ecm:status / ecm:bnkStatus
-        properties["ecm:status"] = "ACTIVE";
+        // 17. ecm:docStatus / ecm:bnkStatus
+        properties["ecm:docStatus"] = "ACTIVE";
         properties["ecm:bnkStatus"] = "ACTIVE";
 
         // 18. ecm:bnkDossierType
@@ -1254,7 +1254,7 @@ public static class Program
         string docStatus = "validiran";
 
         properties["ecm:docStatus"] = docStatus;
-        properties["ecm:status"] = "ACTIVE";
+        properties["ecm:docStatus"] = "ACTIVE";
 
         // Tip dokumenta (Document Type)
         var docTypes = new[] { "00001", "00002", "00003", "00099", "00100", "00101", "00824" };
@@ -1341,7 +1341,7 @@ public static class Program
 
         // Status odobravanja (Approval Status)
         var approvalStatuses = new[] { "1", "2", "3" }; // 1=pending, 2=approved, 3=rejected
-        properties["ecm:statusOdobravanjaId"] = approvalStatuses[random.Next(approvalStatuses.Length)];
+        properties["ecm:docStatusOdobravanjaId"] = approvalStatuses[random.Next(approvalStatuses.Length)];
 
         // Stepen zavođenja (Registration level)
         properties["ecm:stepenZavodjenjaId"] = random.Next(1, 4).ToString();
@@ -1446,7 +1446,7 @@ public static class Program
         properties["ecm:bnkSource"] = "DUT";
 
         // Test Case 25: Status should be ACTIVE for migrated deposit documents
-        properties["ecm:status"] = "ACTIVE";
+        properties["ecm:docStatus"] = "ACTIVE";
         properties["ecm:active"] = true;
 
         // Client type (determined by product type)
@@ -1510,7 +1510,7 @@ public static class Program
         properties["ecm:docDossierType"] = "700";
 
         // Test Case 25: All deposit documents should be ACTIVE
-        properties["ecm:status"] = "ACTIVE";
+        properties["ecm:docStatus"] = "ACTIVE";
         properties["ecm:docStatus"] = "validiran";
         properties["ecm:active"] = true;
 
