@@ -39,11 +39,23 @@ namespace Alfresco.Contracts.Options
         /// </summary>
         public string? RootDocumentPath { get; set; }
 
+        /// <summary>
+        /// If true, uses MigrationByDocument mode (DocumentSearchService)
+        /// which searches documents directly by ecm:docType.
+        /// If false (default), uses MigrationByFolder mode (FolderDiscovery + DocumentDiscovery)
+        /// </summary>
+        public bool MigrationByDocument { get; set; } = false;
+
         public ServiceOptions MoveService { get; set; } = new();
 
         public ServiceOptions FolderDiscovery { get; set; } = new();
 
         public ServiceOptions DocumentDiscovery { get; set; } = new();
+
+        /// <summary>
+        /// Configuration for DocumentSearchService (used when MigrationByDocument = true)
+        /// </summary>
+        public DocumentSearchOptions DocumentTypeDiscovery { get; set; } = new();
 
     }
 

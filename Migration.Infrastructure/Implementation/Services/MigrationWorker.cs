@@ -1,4 +1,5 @@
 using Alfresco.Contracts.Enums;
+using Alfresco.Contracts.Options;
 using Alfresco.Contracts.Oracle.Models;
 using Dapper;
 using Microsoft.Data.SqlClient;
@@ -16,17 +17,23 @@ namespace Migration.Infrastructure.Implementation.Services
     /// Orchestrator for the entire migration pipeline.
     /// Executes all 4 phases sequentially with checkpointing and error handling.
     /// Pattern: Sequential Workers + Parallel Tasks
+    ///
+    /// Supports two migration modes:
+    /// - MigrationByFolder (default): FolderDiscovery → DocumentDiscovery → FolderPreparation → Move
+    /// - MigrationByDocument: DocumentSearch → FolderPreparation → Move
     /// </summary>
     public class MigrationWorker : IMigrationWorker
     {
         private readonly IFolderDiscoveryService _folderDiscovery;
         private readonly IDocumentDiscoveryService _documentDiscovery;
+        private readonly IDocumentSearchService? _documentSearch;
         private readonly IFolderPreparationService _folderPreparation;
         private readonly IMoveService _moveService;
         private readonly IPhaseCheckpointRepository _phaseCheckpointRepo;
         private readonly ILogger<MigrationWorker> _logger;
         private readonly IUnitOfWork _uow;
         private readonly string _connectionString;
+        private readonly MigrationOptions _migrationOptions;
 
         public MigrationWorker(
             IFolderDiscoveryService folderDiscovery,
@@ -36,65 +43,99 @@ namespace Migration.Infrastructure.Implementation.Services
             IPhaseCheckpointRepository phaseCheckpointRepo,
             ILogger<MigrationWorker> logger,
             IUnitOfWork uow,
-            IOptions<global::Alfresco.Contracts.SqlServer.SqlServerOptions> sqlOptions)
+            IOptions<global::Alfresco.Contracts.SqlServer.SqlServerOptions> sqlOptions,
+            IOptions<MigrationOptions> migrationOptions,
+            IDocumentSearchService? documentSearch = null)
         {
             _folderDiscovery = folderDiscovery ?? throw new ArgumentNullException(nameof(folderDiscovery));
             _documentDiscovery = documentDiscovery ?? throw new ArgumentNullException(nameof(documentDiscovery));
+            _documentSearch = documentSearch; // Optional - only used in MigrationByDocument mode
             _folderPreparation = folderPreparation ?? throw new ArgumentNullException(nameof(folderPreparation));
             _moveService = moveService ?? throw new ArgumentNullException(nameof(moveService));
             _phaseCheckpointRepo = phaseCheckpointRepo ?? throw new ArgumentNullException(nameof(phaseCheckpointRepo));
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
             _uow = uow ?? throw new ArgumentNullException(nameof(uow));
             _connectionString = sqlOptions?.Value?.ConnectionString ?? throw new ArgumentNullException(nameof(sqlOptions));
+            _migrationOptions = migrationOptions?.Value ?? throw new ArgumentNullException(nameof(migrationOptions));
         }
 
         public async Task RunAsync(CancellationToken ct = default)
         {
             try
             {
-                _logger.LogInformation("🚀 Migration pipeline started");
+                _logger.LogInformation("Migration pipeline started");
+
+                // Determine migration mode
+                if (_migrationOptions.MigrationByDocument)
+                {
+                    _logger.LogInformation("Migration mode: MigrationByDocument (DocumentSearch -> FolderPreparation -> Move)");
+
+                    // Validate that DocumentSearchService is available
+                    if (_documentSearch == null)
+                    {
+                        throw new InvalidOperationException(
+                            "MigrationByDocument is enabled but IDocumentSearchService is not registered. " +
+                            "Please register DocumentSearchService in DI container.");
+                    }
+
+                    // ====================================================================
+                    // FAZA 1: DocumentSearch (searches by ecm:docType, populates both tables)
+                    // ====================================================================
+                    await ExecutePhaseAsync(
+                        MigrationPhase.FolderDiscovery,  // Reuse phase enum - this replaces FolderDiscovery+DocumentDiscovery
+                        "FAZA 1: DocumentSearch (by ecm:docType)",
+                        async (token) => await _documentSearch.RunLoopAsync(token),
+                        ct);
+
+                    // Skip DocumentDiscovery phase - it's already done by DocumentSearch
+                    _logger.LogInformation("Skipping DocumentDiscovery phase (handled by DocumentSearch)");
+                }
+                else
+                {
+                    _logger.LogInformation("Migration mode: MigrationByFolder (FolderDiscovery -> DocumentDiscovery -> FolderPreparation -> Move)");
+
+                    // ====================================================================
+                    // FAZA 1: FolderDiscovery
+                    // ====================================================================
+                    await ExecutePhaseAsync(
+                        MigrationPhase.FolderDiscovery,
+                        "FAZA 1: FolderDiscovery",
+                        async (token) => await _folderDiscovery.RunLoopAsync(token),
+                        ct);
+
+                    // ====================================================================
+                    // FAZA 2: DocumentDiscovery
+                    // ====================================================================
+                    await ExecutePhaseAsync(
+                        MigrationPhase.DocumentDiscovery,
+                        "FAZA 2: DocumentDiscovery",
+                        async (token) => await _documentDiscovery.RunLoopAsync(token),
+                        ct);
+                }
 
                 // ====================================================================
-                // FAZA 1: FolderDiscovery
-                // ====================================================================
-                await ExecutePhaseAsync(
-                    MigrationPhase.FolderDiscovery,
-                    "📂 FAZA 1: FolderDiscovery",
-                    async (token) => await _folderDiscovery.RunLoopAsync(token),
-                    ct);
-
-                // ====================================================================
-                // FAZA 2: DocumentDiscovery
-                // ====================================================================
-                await ExecutePhaseAsync(
-                    MigrationPhase.DocumentDiscovery,
-                    "📄 FAZA 2: DocumentDiscovery",
-                    async (token) => await _documentDiscovery.RunLoopAsync(token),
-                    ct);
-
-                // ====================================================================
-                // FAZA 3: FolderPreparation (NOVA FAZA!)
+                // FAZA 3: FolderPreparation (common for both modes)
                 // ====================================================================
                 await ExecutePhaseAsync(
                     MigrationPhase.FolderPreparation,
-                    "🏗️  FAZA 3: FolderPreparation (parallel folder creation)",
+                    "FAZA 3: FolderPreparation (parallel folder creation)",
                     async (token) => await _folderPreparation.PrepareAllFoldersAsync(token),
                     ct);
 
                 // ====================================================================
-                // FAZA 4: Move
+                // FAZA 4: Move (common for both modes)
                 // ====================================================================
                 await ExecutePhaseAsync(
                     MigrationPhase.Move,
-                    "🚚 FAZA 4: Move (parallel document moves)",
+                    "FAZA 4: Move (parallel document moves)",
                     async (token) => await _moveService.RunLoopAsync(token),
                     ct);
 
-                _logger.LogInformation("🎉 Migration pipeline completed successfully!");
+                _logger.LogInformation("Migration pipeline completed successfully!");
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "❌ Migration pipeline failed");
+                _logger.LogError(ex, "Migration pipeline failed");
                 throw;
             }
         }

@@ -89,5 +89,95 @@ namespace SqlServer.Infrastructure.Implementation
 
             return count;
         }
+
+        /// <summary>
+        /// Inserts multiple folders, ignoring duplicates based on NodeId.
+        /// Uses MERGE statement to handle duplicates efficiently.
+        /// </summary>
+        public async Task<int> InsertManyIgnoreDuplicatesAsync(IEnumerable<FolderStaging> folders, CancellationToken ct)
+        {
+            var listFolders = folders.ToList();
+            if (listFolders.Count == 0) return 0;
+
+            int totalInserted = 0;
+
+            // Process in batches to avoid parameter limits
+            const int batchSize = 100;
+
+            for (int offset = 0; offset < listFolders.Count; offset += batchSize)
+            {
+                ct.ThrowIfCancellationRequested();
+
+                var batch = listFolders.Skip(offset).Take(batchSize).ToList();
+
+                foreach (var folder in batch)
+                {
+                    // Use MERGE to insert only if NodeId doesn't exist
+                    var sql = @"
+                        MERGE INTO FolderStaging AS target
+                        USING (SELECT @NodeId AS NodeId) AS source
+                        ON target.NodeId = source.NodeId
+                        WHEN NOT MATCHED THEN
+                            INSERT (NodeId, ParentId, Name, Status, DestFolderId, DossierDestFolderId,
+                                    CreatedAt, UpdatedAt, ClientType, CoreId, ClientName, MbrJmbg,
+                                    ProductType, ContractNumber, Batch, Source, UniqueIdentifier,
+                                    ProcessDate, Residency, Segment, ClientSubtype, Staff, OpuUser,
+                                    OpuRealization, Barclex, Collaborator, BarCLEXName, BarCLEXOpu,
+                                    BarCLEXGroupName, BarCLEXGroupCode, BarCLEXCode, Creator, ArchivedAt,
+                                    TipDosijea, TargetDossierType, ClientSegment)
+                            VALUES (@NodeId, @ParentId, @Name, @Status, @DestFolderId, @DossierDestFolderId,
+                                    @CreatedAt, @UpdatedAt, @ClientType, @CoreId, @ClientName, @MbrJmbg,
+                                    @ProductType, @ContractNumber, @Batch, @Source, @UniqueIdentifier,
+                                    @ProcessDate, @Residency, @Segment, @ClientSubtype, @Staff, @OpuUser,
+                                    @OpuRealization, @Barclex, @Collaborator, @BarCLEXName, @BarCLEXOpu,
+                                    @BarCLEXGroupName, @BarCLEXGroupCode, @BarCLEXCode, @Creator, @ArchivedAt,
+                                    @TipDosijea, @TargetDossierType, @ClientSegment);";
+
+                    var dp = new DynamicParameters();
+                    dp.Add("@NodeId", folder.NodeId);
+                    dp.Add("@ParentId", folder.ParentId);
+                    dp.Add("@Name", folder.Name);
+                    dp.Add("@Status", folder.Status);
+                    dp.Add("@DestFolderId", folder.DestFolderId);
+                    dp.Add("@DossierDestFolderId", folder.DossierDestFolderId);
+                    dp.Add("@CreatedAt", folder.CreatedAt);
+                    dp.Add("@UpdatedAt", folder.UpdatedAt);
+                    dp.Add("@ClientType", folder.ClientType);
+                    dp.Add("@CoreId", folder.CoreId);
+                    dp.Add("@ClientName", folder.ClientName);
+                    dp.Add("@MbrJmbg", folder.MbrJmbg);
+                    dp.Add("@ProductType", folder.ProductType);
+                    dp.Add("@ContractNumber", folder.ContractNumber);
+                    dp.Add("@Batch", folder.Batch);
+                    dp.Add("@Source", folder.Source);
+                    dp.Add("@UniqueIdentifier", folder.UniqueIdentifier);
+                    dp.Add("@ProcessDate", folder.ProcessDate);
+                    dp.Add("@Residency", folder.Residency);
+                    dp.Add("@Segment", folder.Segment);
+                    dp.Add("@ClientSubtype", folder.ClientSubtype);
+                    dp.Add("@Staff", folder.Staff);
+                    dp.Add("@OpuUser", folder.OpuUser);
+                    dp.Add("@OpuRealization", folder.OpuRealization);
+                    dp.Add("@Barclex", folder.Barclex);
+                    dp.Add("@Collaborator", folder.Collaborator);
+                    dp.Add("@BarCLEXName", folder.BarCLEXName);
+                    dp.Add("@BarCLEXOpu", folder.BarCLEXOpu);
+                    dp.Add("@BarCLEXGroupName", folder.BarCLEXGroupName);
+                    dp.Add("@BarCLEXGroupCode", folder.BarCLEXGroupCode);
+                    dp.Add("@BarCLEXCode", folder.BarCLEXCode);
+                    dp.Add("@Creator", folder.Creator);
+                    dp.Add("@ArchivedAt", folder.ArchivedAt);
+                    dp.Add("@TipDosijea", folder.TipDosijea);
+                    dp.Add("@TargetDossierType", folder.TargetDossierType);
+                    dp.Add("@ClientSegment", folder.ClientSegment);
+
+                    var cmd = new CommandDefinition(sql, dp, Tx, cancellationToken: ct);
+                    var rowsAffected = await Conn.ExecuteAsync(cmd).ConfigureAwait(false);
+                    totalInserted += rowsAffected;
+                }
+            }
+
+            return totalInserted;
+        }
     }
 }

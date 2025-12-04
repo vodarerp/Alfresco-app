@@ -272,8 +272,9 @@ namespace Alfresco.App
                     services.AddTransient<IDocumentIngestor, DocumentIngestor>();
                     services.AddSingleton<IDocumentDiscoveryService, DocumentDiscoveryService>();
 
-                    
-                    
+                    // NEW: DocumentSearchService (MigrationByDocument mode - searches by ecm:docType)
+                    services.AddSingleton<IDocumentSearchService, DocumentSearchService>();
+
                     services.AddTransient<IMoveReader, MoveReader>();
                     services.AddTransient<IMoveExecutor, MoveExecutor>();
                     services.AddSingleton<IMoveService, MoveService>();
