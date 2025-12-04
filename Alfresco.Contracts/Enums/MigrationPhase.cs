@@ -7,6 +7,12 @@ namespace Alfresco.Contracts.Enums
     public enum MigrationPhase
     {
         /// <summary>
+        /// FAZA 1 (MigrationByDocument mode): Search documents by ecm:docType and store in DocStaging + FolderStaging
+        /// Alternative to FolderDiscovery + DocumentDiscovery phases
+        /// </summary>
+        DocumentSearch = 0,
+
+        /// <summary>
         /// FAZA 1: Discover all folders from Alfresco and store in FolderStaging
         /// </summary>
         FolderDiscovery = 1,
