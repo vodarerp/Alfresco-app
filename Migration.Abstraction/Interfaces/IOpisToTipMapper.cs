@@ -33,7 +33,7 @@ namespace Migration.Abstraction.Interfaces
         /// <param name="opisDokumenta">Document description from Alfresco</param>
         /// <param name="ct">Cancellation token</param>
         /// <returns>Full mapping or null if not found</returns>
-        Task<DocumentMapping?> GetFullMappingAsync(string opisDokumenta, CancellationToken ct = default);
+        Task<DocumentMapping?> GetFullMappingAsync(string opisDokumenta, string docCode, CancellationToken ct = default);
 
         /// <summary>
         /// Gets all registered mappings (for debugging/testing purposes).

@@ -5,16 +5,9 @@ using System.Text.RegularExpressions;
 
 namespace Alfresco.Contracts.Extensions
 {
-    /// <summary>
-    /// Extension methods for working with ClientProperties
-    /// </summary>
+   
     public static class ClientPropertiesExtensions
     {
-        /// <summary>
-        /// Parses Alfresco custom properties (ecm:* prefix) into ClientProperties model
-        /// </summary>
-        /// <param name="alfrescoProperties">Raw properties dictionary from Alfresco API</param>
-        /// <returns>ClientProperties populated from Alfresco properties, or null if no client properties found</returns>
         public static ClientProperties? ParseFromAlfrescoProperties(this Dictionary<string, object>? alfrescoProperties)
         {
             if (alfrescoProperties == null || alfrescoProperties.Count == 0)
@@ -42,11 +35,7 @@ namespace Alfresco.Contracts.Extensions
 
             return clientProps;
         }
-
-        /// <summary>
-        /// Populates ClientProperties on an Entry from its Alfresco properties
-        /// </summary>
-        /// <param name="entry">Entry to populate</param>
+      
         public static void PopulateClientProperties(this Entry entry)
         {
             if (entry.Properties != null && entry.Properties.Count > 0)
@@ -54,13 +43,34 @@ namespace Alfresco.Contracts.Extensions
                 entry.ClientProperties = entry.Properties.ParseFromAlfrescoProperties();
             }
         }
-
-        /// <summary>
-        /// Checks if Entry has client properties populated (either from Alfresco or ClientAPI)
-        /// </summary>
+       
         public static bool HasClientProperties(this Entry entry)
         {
             return entry.ClientProperties?.HasClientData == true;
+        }
+
+
+        public static string? TryExtractCoreIdFromName(string? folderName)
+        {
+            if (string.IsNullOrWhiteSpace(folderName))
+                return null;
+
+            string normalizedName = folderName.ToUpper();
+
+            // Pattern 1: {Prefix}{CoreId} ili {Prefix}-{CoreId} sa opcionalnim sufiksom
+            // Prefix: 2-3 slova, CoreId: sve cifre do prvog ne-cifra znaka
+            // Examples: PL10000123, PI123321-211, PI123321-111-222, DE10101-0009_123321, PI-102206
+            var match1 = Regex.Match(normalizedName, @"^[A-Z]{2,3}-?(\d+)");
+            if (match1.Success)
+                return match1.Groups[1].Value;
+
+            // Pattern 2: FALLBACK - Samo digits na poèetku
+            // Example: 102206, 123456-789
+            var match2 = Regex.Match(normalizedName, @"^(\d+)");
+            if (match2.Success)
+                return match2.Groups[1].Value;
+
+            return null;
         }
 
         public static string? TryExtractCoreIdFromName_v2(this Entry entry)
@@ -104,79 +114,9 @@ namespace Alfresco.Contracts.Extensions
             return null;
         }
 
-        /// <summary>
-        /// Tries to extract CoreId from Entry name (e.g., "PL-10000123" -> "10000123")
-        /// </summary>
-        public static string? TryExtractCoreIdFromName(this Entry entry)
-        {
-            if (string.IsNullOrWhiteSpace(entry.Name))
-                return null;
+       
 
-            // Expected format: {ClientType}-{CoreId}TTT
-            // Examples: PL-10000123TTT, FL-10000456TTT, ACC-10000789TTT
-            var parts = entry.Name.Split('-');
-            if (parts.Length >= 2)
-            {
-                // Remove "TTT" suffix if present
-                var coreIdPart = parts[1].Replace("TTT", "");
-
-                // Verify it's numeric
-                if (long.TryParse(coreIdPart, out _))
-                {
-                    return coreIdPart;
-                }
-            }
-
-            return null;
-        }
-
-        /// <summary>
-        /// Converts ClientProperties to Alfresco custom properties format (ecm: prefix)
-        /// </summary>
-        /// <param name="clientProperties">ClientProperties to convert</param>
-        /// <returns>Dictionary with ecm: prefixed keys for Alfresco API</returns>
-        public static Dictionary<string, object>? ToAlfrescoProperties(this ClientProperties? clientProperties)
-        {
-            if (clientProperties == null || !clientProperties.HasClientData)
-                return null;
-
-            var alfrescoProperties = new Dictionary<string, object>();
-            //alfrescoProperties["ecm:TestError123"] = "Test123321";
-            // Only add non-null values
-            if (!string.IsNullOrWhiteSpace(clientProperties.CoreId))
-                alfrescoProperties["ecm:coreId"] = clientProperties.CoreId;
-
-            if (!string.IsNullOrWhiteSpace(clientProperties.MbrJmbg))
-                alfrescoProperties["ecm:jmbg"] = clientProperties.MbrJmbg;
-
-            if (!string.IsNullOrWhiteSpace(clientProperties.ClientName))
-                alfrescoProperties["ecm:clientName"] = clientProperties.ClientName;
-
-            if (!string.IsNullOrWhiteSpace(clientProperties.ClientType))
-                alfrescoProperties["ecm:DocClientType"] = clientProperties.ClientType;
-
-            if (!string.IsNullOrWhiteSpace(clientProperties.ClientSubtype))
-                alfrescoProperties["ecm:DocClientSubtype"] = clientProperties.ClientSubtype;         
-
-           
-
-            if (!string.IsNullOrWhiteSpace(clientProperties.Staff))
-                alfrescoProperties["ecm:bnkStaff"] = clientProperties.Staff;
-
-            //if (!string.IsNullOrWhiteSpace(clientProperties.OpuUser))
-            //    alfrescoProperties["ecm:opuUser"] = clientProperties.OpuUser;
-
-            //if (!string.IsNullOrWhiteSpace(clientProperties.OpuRealization))
-            //    alfrescoProperties["ecm:opuRealization"] = clientProperties.OpuRealization;
-
-            //if (!string.IsNullOrWhiteSpace(clientProperties.Barclex))
-            //    alfrescoProperties["ecm:barclex"] = clientProperties.Barclex;
-
-            //if (!string.IsNullOrWhiteSpace(clientProperties.Collaborator))
-            //    alfrescoProperties["ecm:collaborator"] = clientProperties.Collaborator;
-
-            return alfrescoProperties.Count > 0 ? alfrescoProperties : null;
-        }
+       
 
         #region Helper Methods
 

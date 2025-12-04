@@ -19,6 +19,7 @@ using Microsoft.Extensions.Options;
 using Migration.Abstraction.Interfaces;
 using Migration.Abstraction.Interfaces.Services;
 using Migration.Abstraction.Interfaces.Wrappers;
+using Migration.Infrastructure.Implementation;
 using Migration.Infrastructure.Implementation.Alfresco;
 // TODO: Uncomment when external APIs are available
 // using Migration.Abstraction.Models;
@@ -29,14 +30,14 @@ using Migration.Infrastructure.Implementation.Move;
 using Migration.Infrastructure.Implementation.Services;
 using Migration.Workers;
 using Migration.Workers.Interfaces;
+using Polly;
+using Polly.Extensions.Http;
 //using Oracle.Abstraction.Interfaces;
 //using Oracle.Infrastructure.Helpers;
 //using Oracle.Infrastructure.Implementation;
 //using Oracle.ManagedDataAccess.Client;
 using SqlServer.Abstraction.Interfaces;
 using SqlServer.Infrastructure.Implementation;
-using Polly;
-using Polly.Extensions.Http;
 using System.Configuration;
 using System.Windows;
 using System.Xml.Linq;
@@ -223,71 +224,7 @@ namespace Alfresco.App
                             return PolicyHelpers.GetCombinedReadPolicy(pollyOptions.ReadOperations, logger);
                         });
 
-                    // TODO: Uncomment when DUT API becomes available
-                    /*
-                    // Configure DUT API Options
-                    services.Configure<DutApiOptions>(
-                        context.Configuration.GetSection(DutApiOptions.SectionName));
-
-                    // DUT API HttpClient with Polly policies
-                    services.AddHttpClient<IDutApi, DutApi>(cli =>
-                    {
-                        cli.Timeout = Timeout.InfiniteTimeSpan; // Timeout handled by Polly
-                    })
-                        .ConfigureHttpClient((sp, cli) =>
-                        {
-                            var options = sp.GetRequiredService<IOptions<DutApiOptions>>().Value;
-                            cli.BaseAddress = new Uri(options.BaseUrl);
-                            cli.DefaultRequestHeaders.Accept.Add(
-                                new System.Net.Http.Headers.MediaTypeWithQualityHeaderValue("application/json"));
-
-                            // Add API key header if configured
-                            if (!string.IsNullOrEmpty(options.ApiKey))
-                            {
-                                cli.DefaultRequestHeaders.Add("X-API-Key", options.ApiKey);
-                            }
-                        })
-                        .ConfigurePrimaryHttpMessageHandler(() => new System.Net.Http.SocketsHttpHandler
-                        {
-                            PooledConnectionLifetime = TimeSpan.FromMinutes(5),
-                            PooledConnectionIdleTimeout = TimeSpan.FromMinutes(2),
-                            MaxConnectionsPerServer = 50
-                        })
-                        .SetHandlerLifetime(TimeSpan.FromMinutes(5))
-                        .AddPolicyHandler((sp, req) =>
-                        {
-                            var logger = sp.GetRequiredService<ILogger<DutApi>>();
-                            var pollyOptions = sp.GetRequiredService<IOptions<PollyPolicyOptions>>().Value;
-
-                            // DUT API uses Read policy
-                            return PolicyHelpers.GetCombinedReadPolicy(pollyOptions.ReadOperations, logger);
-                        });
-
-                    // Migration Services (uncomment when DUT API is available)
-                    services.AddScoped<IClientEnrichmentService, ClientEnrichmentService>();
-                    services.AddScoped<IDocumentTypeTransformationService, DocumentTypeTransformationService>();
-                    services.AddScoped<IUniqueFolderIdentifierService, UniqueFolderIdentifierService>();
-                    */
-
-                    // Health checks for external APIs (optional)
-                    // services.AddHealthChecks()
-                    //     .AddUrlGroup(
-                    //         uri: new Uri(context.Configuration["ClientApi:BaseUrl"]!),
-                    //         name: "clientapi",
-                    //         failureStatus: HealthStatus.Degraded,
-                    //         tags: new[] {"api", "external"})
-                    //     .AddUrlGroup(
-                    //         uri: new Uri(context.Configuration["DutApi:BaseUrl"]!),
-                    //         name: "dutapi",
-                    //         failureStatus: HealthStatus.Degraded,
-                    //         tags: new[] {"api", "external"});
-
-                    // =====================================================================================
-                    // END OF EXTERNAL API CONFIGURATION
-                    // =====================================================================================
-
-                    // OracleConnection and OracleTransaction lifecycle is managed by OracleUnitOfWork (Scoped)
-                    // No need to register them separately in DI - they are created lazily on BeginAsync()
+                    
 
                     services.AddTransient<SqlServer.Abstraction.Interfaces.IDocStagingRepository, SqlServer.Infrastructure.Implementation.DocStagingRepository>();
                     services.AddTransient<SqlServer.Abstraction.Interfaces.IFolderStagingRepository, SqlServer.Infrastructure.Implementation.FolderStagingRepository>();
@@ -305,7 +242,8 @@ namespace Alfresco.App
 
                     // Mappers that use DocumentMappingService
                     // Using OptimizedOpisToTipMapper with in-memory caching (30× faster than OpisToTipMapperV2)
-                    services.AddScoped<Migration.Abstraction.Interfaces.IOpisToTipMapper, Migration.Infrastructure.Implementation.Mappers.OptimizedOpisToTipMapper>();
+                    // services.AddScoped<Migration.Abstraction.Interfaces.IOpisToTipMapper, Migration.Infrastructure.Implementation.Mappers.OptimizedOpisToTipMapper>();
+                    services.AddScoped<Migration.Abstraction.Interfaces.IOpisToTipMapper, OpisToTipMapperV2>();
                     services.AddScoped<Migration.Infrastructure.Implementation.DocumentStatusDetectorV2>();
 
                     #region oracle DI (commented)

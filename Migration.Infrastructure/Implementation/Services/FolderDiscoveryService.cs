@@ -739,7 +739,8 @@ namespace Migration.Infrastructure.Implementation.Services
 
                // var xx = entry.TryExtractCoreIdFromName_v2();
                 // Try to extract CoreId from folder name
-                if (string.IsNullOrWhiteSpace(coreId)) coreId = entry.TryExtractCoreIdFromName_v2();
+                //if (string.IsNullOrWhiteSpace(coreId)) coreId = entry.TryExtractCoreIdFromName_v2();
+                if (string.IsNullOrWhiteSpace(coreId)) coreId = ClientPropertiesExtensions.TryExtractCoreIdFromName(entry.Name);
 
                 if (string.IsNullOrWhiteSpace(coreId))
                 {

@@ -155,11 +155,12 @@ namespace Migration.Infrastructure.Implementation
         /// <param name="opisDokumenta">Document description from Alfresco</param>
         /// <param name="ct">Cancellation token</param>
         /// <returns>Full mapping or null if not found</returns>
-        public async Task<DocumentMapping?> GetFullMappingAsync(string opisDokumenta, CancellationToken ct = default)
+        public async Task<DocumentMapping?> GetFullMappingAsync(string opisDokumenta,string docCode, CancellationToken ct = default)
         {
             if (string.IsNullOrWhiteSpace(opisDokumenta))
                 return null;
 
+            DocumentMapping? mapping = null;
             await using var scope = _scopeFactory.CreateAsyncScope();
             var uow = scope.ServiceProvider.GetRequiredService<IUnitOfWork>();
             var mappingService = scope.ServiceProvider.GetRequiredService<IDocumentMappingService>();
@@ -167,18 +168,27 @@ namespace Migration.Infrastructure.Implementation
             await uow.BeginAsync(ct: ct).ConfigureAwait(false);
             try
             {
+                if (!string.IsNullOrWhiteSpace(opisDokumenta))
+                {
+                    mapping = await mappingService.FindByOriginalNameAsync(opisDokumenta, ct).ConfigureAwait(false);
+
+                }
+                else if (!string.IsNullOrWhiteSpace(docCode) && docCode != "UNKNOWN")
+                {
+                    mapping = await mappingService.FindByOriginalCodeAsync(docCode, ct).ConfigureAwait(false);                    
+                }
                 // Try all search methods
-                var mapping = await mappingService.FindByOriginalNameAsync(opisDokumenta, ct).ConfigureAwait(false);
+               // var mapping = await mappingService.FindByOriginalNameAsync(opisDokumenta, ct).ConfigureAwait(false);
 
-                if (mapping == null)
-                {
-                    mapping = await mappingService.FindBySerbianNameAsync(opisDokumenta, ct).ConfigureAwait(false);
-                }
+                //if (mapping == null)
+                //{
+                //    mapping = await mappingService.FindBySerbianNameAsync(opisDokumenta, ct).ConfigureAwait(false);
+                //}
 
-                if (mapping == null)
-                {
-                    mapping = await mappingService.FindByMigratedNameAsync(opisDokumenta, ct).ConfigureAwait(false);
-                }
+                //if (mapping == null)
+                //{
+                //    mapping = await mappingService.FindByMigratedNameAsync(opisDokumenta, ct).ConfigureAwait(false);
+                //}
 
                 await uow.CommitAsync(ct: ct).ConfigureAwait(false);
                 return mapping;

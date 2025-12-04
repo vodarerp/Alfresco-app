@@ -149,12 +149,17 @@ namespace Migration.Infrastructure.Implementation.Folder
             bool useDateFilter,
             CancellationToken ct)
         {
+
+
+
             _fileLogger.LogDebug("Reading folders using CMIS from root {RootId} with filter '{NameFilter}', Skip: {Skip}, Take: {Take}, UseDateFilter: {UseDateFilter}",
                 inRequest.RootId, inRequest.NameFilter, inRequest.Skip, inRequest.Take, useDateFilter);
 
             // Extract parent dossier type from name filter (e.g., "PI", "LE", "D", "PL", "FL")
             // The name filter should be the dossier type prefix
             var parentDossierType = string.IsNullOrWhiteSpace(inRequest.NameFilter) ? "" : inRequest.NameFilter.Trim();
+
+            if (parentDossierType == "D") parentDossierType = "DE";
 
             // Build CMIS query
             var query = new StringBuilder();

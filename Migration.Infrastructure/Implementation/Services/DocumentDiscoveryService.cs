@@ -472,7 +472,7 @@ namespace Migration.Infrastructure.Implementation.Services
                 doc.CategoryName = null;
 
                 // Use folder's TipDosijea if document doesn't have it, otherwise use document's value
-                doc.TipDosijea = docDossierType ?? folder.TipDosijea;
+                //doc.TipDosijea = docDossierType ?? folder.TipDosijea;
 
                 // Use coreId from document if available, otherwise use folder's CoreId
                 doc.CoreId = coreIdFromDoc ?? folder.CoreId;
@@ -489,7 +489,7 @@ namespace Migration.Infrastructure.Implementation.Services
                 if (!string.IsNullOrWhiteSpace(docDesc))
                 {
                     // Get full mapping to access PolitikaCuvanja and other fields
-                    fullMapping = await _opisToTipMapper.GetFullMappingAsync(docDesc, ct).ConfigureAwait(false);
+                    fullMapping = await _opisToTipMapper.GetFullMappingAsync(docDesc, existingDocType, ct).ConfigureAwait(false);
 
                     if (fullMapping != null)
                     {
@@ -505,7 +505,7 @@ namespace Migration.Infrastructure.Implementation.Services
                             docDesc);
                     }
                 }
-
+                doc.TipDosijea = fullMapping?.TipDosijea ?? docDossierType ?? folder.TipDosijea ?? "";
                 // Use mapped value if available, otherwise keep existing
                 doc.DocumentType = mappedDocType ?? existingDocType;
                 doc.NewDocumentName = mappedDocName ?? "";
@@ -582,7 +582,10 @@ namespace Migration.Infrastructure.Implementation.Services
                     // Use new method that changes prefix based on target dossier type
                     doc.DossierDestFolderId = DossierIdFormatter.ConvertForTargetType(
                         folder.Name,
-                        doc.TargetDossierType ?? (int)DossierType.Unknown);
+                        doc.TargetDossierType ?? (int)DossierType.Unknown,
+                        folder.ContractNumber,
+                        folder.ProductType,
+                        folder.CoreId);
 
                     _fileLogger.LogTrace(
                         "Converted dossier ID: '{OldId}' (Type: {OldType}) → '{NewId}' (TargetType: {TargetType})",
