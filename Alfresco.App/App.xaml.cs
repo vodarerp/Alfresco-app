@@ -290,26 +290,29 @@ namespace Alfresco.App
                     //
 
 
+                    var useMigByDoc = context.Configuration.GetValue<bool>("Migration:MigrationByDocument");
 
+                    var options = context.Configuration.GetSection("Migration").Get<MigrationOptions>();
 
-                    if (context.Configuration.GetValue<bool>("EnableFolderWorker"))
+                    if (context.Configuration.GetValue<bool>("EnableDocumentSearchWorker") && useMigByDoc)
+                    {
+                        //services.AddHostedService<FolderPreparationWorker>();
+                        services.AddSingleton<IWorkerController, DocumentSearchWorker>();
+                        services.AddHostedService(sp => (DocumentSearchWorker)sp.GetServices<IWorkerController>().First(o => o is DocumentSearchWorker));
+                    }
+
+                    if (context.Configuration.GetValue<bool>("EnableFolderWorker") && !useMigByDoc)
                     {
                         //services.AddHostedService<FolderDiscoveryWorker>();
                         services.AddSingleton<IWorkerController, FolderDiscoveryWorker>();
                         services.AddHostedService(sp => (FolderDiscoveryWorker)sp.GetServices<IWorkerController>().First(o => o is FolderDiscoveryWorker));
 
                     }
-                    if (context.Configuration.GetValue<bool>("EnableDocumentWorker"))
+                    if (context.Configuration.GetValue<bool>("EnableDocumentWorker") && !useMigByDoc)
                     {
                         //services.AddHostedService<DocumentDiscoveryWorker>();
                         services.AddSingleton<IWorkerController, DocumentDiscoveryWorker>();
                         services.AddHostedService(sp => (DocumentDiscoveryWorker)sp.GetServices<IWorkerController>().First(o => o is DocumentDiscoveryWorker));
-                    }
-                    if (context.Configuration.GetValue<bool>("EnableMoveWorker"))
-                    {
-                        //services.AddHostedService<MoveWorker>();
-                        services.AddSingleton<IWorkerController, MoveWorker>();
-                        services.AddHostedService(sp => (MoveWorker)sp.GetServices<IWorkerController>().First(o => o is MoveWorker));
                     }
                     if (context.Configuration.GetValue<bool>("EnableFolderPreparationWorker"))
                     {
@@ -317,6 +320,14 @@ namespace Alfresco.App
                         services.AddSingleton<IWorkerController, FolderPreparationWorker>();
                         services.AddHostedService(sp => (FolderPreparationWorker)sp.GetServices<IWorkerController>().First(o => o is FolderPreparationWorker));
                     }
+                    if (context.Configuration.GetValue<bool>("EnableMoveWorker"))
+                    {
+                        //services.AddHostedService<MoveWorker>();
+                        services.AddSingleton<IWorkerController, MoveWorker>();
+                        services.AddHostedService(sp => (MoveWorker)sp.GetServices<IWorkerController>().First(o => o is MoveWorker));
+                    }
+                    
+                    
 
 
                     services.AddHealthChecks()
