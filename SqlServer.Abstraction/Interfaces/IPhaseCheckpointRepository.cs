@@ -73,5 +73,13 @@ namespace SqlServer.Abstraction.Interfaces
         /// <param name="phase">The migration phase to reset</param>
         /// <param name="ct">Cancellation token</param>
         Task ResetPhaseAsync(MigrationPhase phase, CancellationToken ct = default);
+
+        /// <summary>
+        /// Sets the DocTypes for a specific phase (used in MigrationByDocument mode)
+        /// </summary>
+        /// <param name="phase">The migration phase</param>
+        /// <param name="docTypes">Comma-separated document types</param>
+        /// <param name="ct">Cancellation token</param>
+        Task SetDocTypesAsync(MigrationPhase phase, string docTypes, CancellationToken ct = default);
     }
 }

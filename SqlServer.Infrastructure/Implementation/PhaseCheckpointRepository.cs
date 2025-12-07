@@ -80,6 +80,22 @@ namespace SqlServer.Infrastructure.Implementation
             }
         }
 
+        public async Task SetDocTypesAsync(MigrationPhase phase, string docTypes, CancellationToken ct = default)
+        {
+            var sql = @"UPDATE PhaseCheckpoints
+                        SET DocTypes = @docTypes,
+                            UpdatedAt = @updatedAt
+                        WHERE Phase = @phase";
+
+            var dp = new DynamicParameters();
+            dp.Add("@phase", (int)phase);
+            dp.Add("@docTypes", docTypes);
+            dp.Add("@updatedAt", DateTime.UtcNow);
+
+            var cmd = new CommandDefinition(sql, dp, Tx, cancellationToken: ct);
+            await Conn.ExecuteAsync(cmd).ConfigureAwait(false);
+        }
+
         public async Task MarkPhaseCompletedAsync(MigrationPhase phase, CancellationToken ct = default)
         {
             var sql = @"UPDATE PhaseCheckpoints

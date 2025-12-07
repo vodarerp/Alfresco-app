@@ -1,7 +1,10 @@
 using Alfresco.Contracts.Enums;
+using Alfresco.Contracts.Options;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Options;
 using Migration.Abstraction.Interfaces.Wrappers;
 using System;
+using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Linq;
@@ -17,6 +20,8 @@ namespace Alfresco.App.UserControls
     public partial class MigrationPhaseMonitor : UserControl, INotifyPropertyChanged
     {
         private readonly IMigrationWorker _migrationWorker;
+        private readonly IDocumentSearchService? _documentSearchService;
+        private readonly MigrationOptions _migrationOptions;
         private readonly DispatcherTimer _updateTimer;
         private CancellationTokenSource? _migrationCts;
 
@@ -57,7 +62,32 @@ namespace Alfresco.App.UserControls
             set { _phases = value; NotifyPropertyChanged(); }
         }
 
+        private string _docTypes = "";
+        public string DocTypes
+        {
+            get => _docTypes;
+            set { _docTypes = value; NotifyPropertyChanged(); }
+        }
+
+        #region -IsMigrationByDocument- property
+        private bool _IsMigrationByDocument;
+        public bool IsMigrationByDocument
+        {
+            get { return _IsMigrationByDocument; }
+            set
+            {
+                if (_IsMigrationByDocument != value)
+                {
+                    _IsMigrationByDocument = value;
+                    NotifyPropertyChanged();
+                }
+            }
+        }
         #endregion
+
+        //public bool IsMigrationByDocument => _migrationOptions.MigrationByDocument;
+
+#endregion
 
         public MigrationPhaseMonitor()
         {
@@ -65,8 +95,22 @@ namespace Alfresco.App.UserControls
             InitializeComponent();
 
             _migrationWorker = App.AppHost.Services.GetRequiredService<IMigrationWorker>();
+            _migrationOptions = App.AppHost.Services.GetRequiredService<IOptions<MigrationOptions>>().Value;
+            IsMigrationByDocument = false;
+            // Get DocumentSearchService if in MigrationByDocument mode
+            if (_migrationOptions.MigrationByDocument)
+            {
+                IsMigrationByDocument = true;
+                _documentSearchService = App.AppHost.Services.GetService<IDocumentSearchService>();
 
-            // Initialize phases
+                // Initialize DocTypes from appsettings
+                if (_migrationOptions.DocumentTypeDiscovery.DocTypes.Any())
+                {
+                    DocTypes = string.Join(", ", _migrationOptions.DocumentTypeDiscovery.DocTypes);
+                }
+            }
+
+            // Initialize phases based on migration mode
             InitializePhases();
 
             // Setup update timer (refresh every 2 seconds)
@@ -79,13 +123,30 @@ namespace Alfresco.App.UserControls
 
         private void InitializePhases()
         {
-            Phases = new ObservableCollection<PhaseViewModel>
+            if (_migrationOptions.MigrationByDocument)
             {
-                new PhaseViewModel { PhaseNumber = "1", PhaseName = "Folder Discovery", Phase = MigrationPhase.FolderDiscovery },
-                new PhaseViewModel { PhaseNumber = "2", PhaseName = "Document Discovery", Phase = MigrationPhase.DocumentDiscovery },
-                new PhaseViewModel { PhaseNumber = "3", PhaseName = "Folder Preparation", Phase = MigrationPhase.FolderPreparation },
-                new PhaseViewModel { PhaseNumber = "4", PhaseName = "Document Move", Phase = MigrationPhase.Move }
-            };
+                // MigrationByDocument mode: 3 phases
+                // Phase 1: DocumentSearch (uses FolderDiscovery enum internally)
+                // Phase 2: FolderPreparation
+                // Phase 3: Move
+                Phases = new ObservableCollection<PhaseViewModel>
+                {
+                    new PhaseViewModel { PhaseNumber = "1", PhaseName = "Document Search", Phase = MigrationPhase.FolderDiscovery },
+                    new PhaseViewModel { PhaseNumber = "2", PhaseName = "Folder Preparation", Phase = MigrationPhase.FolderPreparation },
+                    new PhaseViewModel { PhaseNumber = "3", PhaseName = "Document Move", Phase = MigrationPhase.Move }
+                };
+            }
+            else
+            {
+                // MigrationByFolder mode: 4 phases (default)
+                Phases = new ObservableCollection<PhaseViewModel>
+                {
+                    new PhaseViewModel { PhaseNumber = "1", PhaseName = "Folder Discovery", Phase = MigrationPhase.FolderDiscovery },
+                    new PhaseViewModel { PhaseNumber = "2", PhaseName = "Document Discovery", Phase = MigrationPhase.DocumentDiscovery },
+                    new PhaseViewModel { PhaseNumber = "3", PhaseName = "Folder Preparation", Phase = MigrationPhase.FolderPreparation },
+                    new PhaseViewModel { PhaseNumber = "4", PhaseName = "Document Move", Phase = MigrationPhase.Move }
+                };
+            }
         }
 
         private void UserControl_Loaded(object sender, RoutedEventArgs e)
@@ -117,10 +178,12 @@ namespace Alfresco.App.UserControls
                     ? $"Elapsed: {status.ElapsedTime.Value:hh\\:mm\\:ss}"
                     : "";
 
-                // Calculate overall progress (25% per phase)
+                // Calculate overall progress based on total number of phases
+                var totalPhases = Phases.Count;
+                var progressPerPhase = 100 / totalPhases; // 33% for 3 phases, 25% for 4 phases
                 var completedPhases = Phases.Count(p => p.Status == PhaseStatus.Completed);
-                var currentPhaseProgress = status.CurrentPhaseProgress / 4; // Divide by 4 phases
-                OverallProgress = (completedPhases * 25) + currentPhaseProgress;
+                var currentPhaseProgress = status.CurrentPhaseProgress / totalPhases;
+                OverallProgress = (completedPhases * progressPerPhase) + currentPhaseProgress;
                 OverallProgressText = $"{OverallProgress}%";
 
                 // Update each phase
@@ -159,6 +222,35 @@ namespace Alfresco.App.UserControls
         {
             try
             {
+                // If MigrationByDocument mode, validate and apply DocTypes from UI
+                if (_migrationOptions.MigrationByDocument && _documentSearchService != null)
+                {
+                    if (string.IsNullOrWhiteSpace(DocTypes))
+                    {
+                        MessageBox.Show("Please enter at least one document type (ecm:docType) to search for.",
+                            "Validation Error", MessageBoxButton.OK, MessageBoxImage.Warning);
+                        return;
+                    }
+
+                    // Parse DocTypes from UI (comma-separated)
+                    var docTypesList = DocTypes
+                        .Split(new[] { ',', ';' }, StringSplitOptions.RemoveEmptyEntries)
+                        .Select(dt => dt.Trim())
+                        .Where(dt => !string.IsNullOrWhiteSpace(dt))
+                        .ToList();
+
+                    if (!docTypesList.Any())
+                    {
+                        MessageBox.Show("Please enter valid document types separated by comma.",
+                            "Validation Error", MessageBoxButton.OK, MessageBoxImage.Warning);
+                        return;
+                    }
+
+                    // Apply DocTypes override to DocumentSearchService
+                    _documentSearchService.SetDocTypes(docTypesList);
+                    StatusMessage = $"DocTypes set: {string.Join(", ", docTypesList)}";
+                }
+
                 btnStart.IsEnabled = false;
                 btnStop.IsEnabled = true;
 

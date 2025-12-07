@@ -37,14 +37,14 @@ public static class Program
             BaseUrl = "http://localhost:8080/",
             Username =  "admin",
             Password = "admin",
-            RootParentId = "d5e33e41-1b08-47e0-a33e-411b08d7e0d6",
-            FolderCount = 15,
+            RootParentId = "418adb20-36bc-4c42-8adb-2036bccc42b9",
+            FolderCount = 200,
             DocsPerFolder = 3,
             DegreeOfParallelism = 8,
             MaxRetries = 5,
             RetryBaseDelayMs = 100,
             UseNewFolderStructure = true,           // Enable new folder structure
-            ClientTypes = new[] { "PI", "LE" },  // NOTE: ACC dossiers are created DURING migration, not as old dossiers
+            ClientTypes = new[] { "PI", "LE","D" },  // NOTE: ACC dossiers are created DURING migration, not as old dossiers
             StartingCoreId = 102206,                // Start from realistic CoreId
             AddFolderProperties = true,             // Set to true after deploying bankContentModel.xml
             DocumentMappingService = documentMappingService  // Inject document mapping service
@@ -195,14 +195,50 @@ public static class Program
                                 var contractDate = DateTime.UtcNow.AddDays(-new Random(coreId).Next(1, 365));
                                 var contractNumber = contractDate.ToString("yyyyMMdd");
 
-                                // Create DE folder: DE{CoreId}{ContractNumber}
-                                var depositFolderName = $"D{coreId}{contractNumber}";
-                                var depositParentId = dosieFolders["D"]; // DOSSIERS-DE folder
+                                // Determine typeOfProduct (5-digit format: 00008 for PI, 00010 for LE)
+                                var typeOfProduct = clientType == "PI" ? "00008" : "00010";
+
+                                // Create D folder with different naming patterns:
+                                // - Variant 0: D{coreId}-{typeOfProduct}-{contractNumber} (full format)
+                                // - Variant 1: D{coreId}-{typeOfProduct} (with ecm:bnkNumberOfContract)
+                                // - Variant 2: D{coreId}-{contractNumber} (with ecm:bnkNumberOfContract)
+                                // - Variant 3: D{coreId} (without ecm:bnkNumberOfContract)
+                                var folderVariant = (i / 5) % 4; // Use i/5 to get deposit folder index, then % 4 for variant
+                                string depositFolderName;
+                                bool includeContractInProperty;
+
+                                if (folderVariant == 0)
+                                {
+                                    // Full format: D{coreId}-{typeOfProduct}-{contractNumber}
+                                    depositFolderName = $"D{coreId}-{typeOfProduct}-{contractNumber}";
+                                    includeContractInProperty = true;
+                                }
+                                else if (folderVariant == 1)
+                                {
+                                    // D{coreId}-{typeOfProduct} with contract in property only
+                                    depositFolderName = $"D{coreId}-{typeOfProduct}";
+                                    includeContractInProperty = true;
+                                }
+                                else if (folderVariant == 2)
+                                {
+                                    // D{coreId}-{contractNumber} with contract in property
+                                    // Use contractNumber in name to avoid duplicates with variant 3
+                                    depositFolderName = $"D{coreId}-{contractNumber}";
+                                    includeContractInProperty = true;
+                                }
+                                else
+                                {
+                                    // Minimal: D{coreId} without contract property
+                                    depositFolderName = $"D{coreId}";
+                                    includeContractInProperty = false;
+                                }
+
+                                var depositParentId = dosieFolders["D"]; // DOSSIERS-D folder
 
                                 try
                                 {
                                     // Generate deposit-specific properties
-                                    var depositProps = GenerateDepositFolderProperties(coreId, contractNumber, clientType);
+                                    var depositProps = GenerateDepositFolderProperties(coreId, contractNumber, clientType, typeOfProduct, includeContractInProperty);
 
                                     string depositFolderId;
                                     try
@@ -716,6 +752,7 @@ public static class Program
             await AddDocumentAsync("KYC Questionnaire MDOC");
             await AddDocumentAsync("Specimen Card for Authorized Person");
             await AddDocumentAsync("Pre-Contract Info");
+            await AddDocumentAsync("KYC Questionnaire for LE");
             await AddDocumentAsync("Contact Data Change Email");
             await AddDocumentAsync("Contact Data Change Phone");
 
@@ -761,6 +798,9 @@ public static class Program
             await AddDocumentAsync("Pre-Contract Info");
             await AddDocumentAsync("Contact Data Change Email");
             await AddDocumentAsync("Contact Data Change Phone");
+            await AddDocumentAsync("PiPonuda");  // WITH account number - should be active
+
+            await AddDocumentAsync("Travel Insurance");  // WITH account number - should be active
 
             // TC 10: Add documents with multiple versions
             await AddDocumentWithVersionsAsync("KYC Questionnaire for LE", versionCount: 2);
@@ -772,6 +812,7 @@ public static class Program
             await AddDocumentAsync("Current Accounts Contract");
             await AddDocumentWithVersionsAsync("Account Package", versionCount: 2);
             await AddDocumentAsync("Prestige Package Tariff for LE");
+            await AddDocumentAsync("Specimen card");
 
             // TC 1 & 2: Add documents with "-migracija" suffix (should become "poništen")
             await AddDocumentAsync("Communication Consent", addMigrationSuffix: true);
@@ -937,35 +978,43 @@ public static class Program
 
     /// <summary>
     /// Generates properties for Deposit Dossier folders (Dosije depozita).
-    /// Format: DE-{CoreId}-{ContractNumber}
+    /// Format: D{CoreId}-{typeOfProduct}-{contractNumber} (with optional parts)
     /// </summary>
-    private static Dictionary<string, object> GenerateDepositFolderProperties(int coreId, string contractNumber, string clientType)
+    private static Dictionary<string, object> GenerateDepositFolderProperties(int coreId, string contractNumber, string clientType, string typeOfProduct, bool includeContractInProperty)
     {
         var properties = new Dictionary<string, object>();
         var random = new Random(coreId);
 
         // Standard Content Model properties
-        properties["cm:title"] = $"Deposit Dossier {coreId} - {contractNumber}";
-        properties["cm:description"] = $"Deposit dossier for CoreId {coreId}, Contract {contractNumber}";
+        string title = includeContractInProperty
+            ? $"Deposit Dossier {coreId} - {contractNumber}"
+            : $"Deposit Dossier {coreId}";
+        properties["cm:title"] = title;
+        properties["cm:description"] = $"Deposit dossier for CoreId {coreId}";
 
-        // Unique folder identifier: DE{CoreId}{ContractNumber}
-        var uniqueFolderId = $"D{coreId}{contractNumber}";
+        // Unique folder identifier: Always use simplified format D{coreId}
+        // (The actual folder name is set separately and may include typeOfProduct and contractNumber)
+        var uniqueFolderId = $"D{coreId}";
         properties["ecm:uniqueFolderId"] = uniqueFolderId;
         properties["ecm:folderId"] = uniqueFolderId;
 
         // Dossier type - Dosije depozita
         properties["ecm:bnkDossierType"] = "Dosije depozita";
 
-        // Core ID
+        // Core ID (REQUIRED)
         properties["ecm:coreId"] = coreId.ToString();
 
-        // Product type (00008 for FL, 00010 for SB)
-        var productType = clientType == "PI" ? "00008" : "00010";
-        properties["ecm:productType"] = productType;
-        properties["ecm:bnkTypeOfProduct"] = productType;
+        // Product type (REQUIRED)
+        // ecm:bnkTypeOfProduct stores short version: "8" or "10"
+        var shortProductType = typeOfProduct.TrimStart('0'); // "00008" -> "8", "00010" -> "10"
+        properties["ecm:productType"] = typeOfProduct; // Full format: "00008" or "00010"
+        properties["ecm:bnkTypeOfProduct"] = shortProductType; // Short format: "8" or "10"
 
-        // Contract number - stored only in bnkNumberOfContract
-        properties["ecm:bnkNumberOfContract"] = contractNumber;
+        // Contract number - OPTIONAL (only if includeContractInProperty is true)
+        if (includeContractInProperty)
+        {
+            properties["ecm:bnkNumberOfContract"] = contractNumber;
+        }
 
         // Source - DUT for deposit dossiers
         properties["ecm:source"] = "DUT";
@@ -977,9 +1026,9 @@ public static class Program
         properties["ecm:bnkStatus"] = "ACTIVE";
         properties["ecm:active"] = true;
 
-        // Client type
+        // Client type (REQUIRED) - PI for fizička lica, LE for pravna lica
         properties["ecm:clientType"] = clientType;
-        properties["ecm:bnkClientType"] = clientType;
+        properties["ecm:bnkClientType"] = clientType; // "PI" or "LE"
 
         // Client name
         if (clientType == "PI")

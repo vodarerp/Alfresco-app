@@ -7,6 +7,9 @@
              d:DesignHeight="450" d:DesignWidth="800"
              Loaded="UserControl_Loaded"
              Unloaded="UserControl_Unloaded">
+    <UserControl.Resources>
+        <BooleanToVisibilityConverter x:Key="BoolToVisibilityConverter"/>
+    </UserControl.Resources>
     <Grid Margin="10">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>
@@ -46,17 +49,41 @@
         <!-- Overall Status -->
         <Border Grid.Row="1" Background="#ECF0F1" Padding="10" Margin="0,0,0,10">
             <StackPanel>
+                <!-- Document Type Search Input (MigrationByDocument mode only) -->
+                <Border Background="#3498DB" Padding="10" Margin="0,0,0,10"
+                        Visibility="{Binding IsMigrationByDocument, Converter={StaticResource BoolToVisibilityConverter}}">
+                    <StackPanel>
+                        <TextBlock Text="Document Type Search (ecm:docType)"
+                                   Foreground="White" FontSize="12" FontWeight="SemiBold" Margin="0,0,0,5"/>
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto"/>
+                                <ColumnDefinition Width="*"/>
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Grid.Column="0" Text="Doc Types:"
+                                       Foreground="White" FontSize="11" VerticalAlignment="Center" Margin="0,0,10,0"/>
+                            <TextBox Grid.Column="1"
+                                     Text="{Binding DocTypes, UpdateSourceTrigger=PropertyChanged}"
+                                     FontSize="11" Padding="5"
+                                     ToolTip="Enter document types separated by comma (e.g., 00756, 00824, 00125)"/>
+                        </Grid>
+                        <TextBlock Text="Enter document types separated by comma (e.g., 00756, 00824)"
+                                   Foreground="#ECF0F1" FontSize="10" FontStyle="Italic" Margin="0,5,0,0"/>
+                    </StackPanel>
+                </Border>
+
                 <TextBlock Text="{Binding StatusMessage}" FontSize="14" FontWeight="SemiBold" Margin="0,0,0,5"/>
                 <Grid>
                     <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="73*"/>
+                        <ColumnDefinition Width="687*"/>
                         <ColumnDefinition Width="Auto"/>
                     </Grid.ColumnDefinitions>
                     <ProgressBar Grid.Column="0" Height="20"
                                  Value="{Binding OverallProgress}"
                                  Maximum="100"
-                                 Margin="0,0,10,0"/>
-                    <TextBlock Grid.Column="1"
+                                 Margin="0,0,10,0" Grid.ColumnSpan="2"/>
+                    <TextBlock Grid.Column="2"
                                Text="{Binding OverallProgressText}"
                                FontSize="12" VerticalAlignment="Center"/>
                 </Grid>

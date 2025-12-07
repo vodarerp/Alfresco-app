@@ -69,5 +69,12 @@ namespace Alfresco.Contracts.Oracle.Models
         /// Last update timestamp
         /// </summary>
         public DateTime UpdatedAt { get; set; }
+
+        /// <summary>
+        /// Document types used for DocumentSearch (MigrationByDocument mode)
+        /// Stored as comma-separated string (e.g., "00756,00824,00125")
+        /// Used to detect configuration changes and reset checkpoint if needed
+        /// </summary>
+        public string? DocTypes { get; set; }
     }
 }

@@ -45,6 +45,9 @@ namespace Migration.Infrastructure.Implementation.Services
         // Cache for processed folders (to avoid duplicate API calls within session)
         private readonly ConcurrentDictionary<string, FolderStaging> _folderCache = new();
 
+        // Runtime override for DocTypes (takes precedence over appsettings)
+        private List<string>? _docTypesOverride = null;
+
         private const string ServiceName = "DocumentSearch";
 
         public DocumentSearchService(
@@ -66,6 +69,17 @@ namespace Migration.Infrastructure.Implementation.Services
             _uiLogger = logger.CreateLogger("UiLogger");
         }
 
+        public void SetDocTypes(List<string> docTypes)
+        {
+            _docTypesOverride = docTypes;
+            _fileLogger.LogInformation("DocTypes override set: {DocTypes}", string.Join(", ", docTypes));
+        }
+
+        public List<string> GetCurrentDocTypes()
+        {
+            return _docTypesOverride ?? _options.Value.DocumentTypeDiscovery.DocTypes;
+        }
+
         public async Task<DocumentSearchBatchResult> RunBatchAsync(CancellationToken ct)
         {
             var sw = Stopwatch.StartNew();
@@ -78,7 +92,7 @@ namespace Migration.Infrastructure.Implementation.Services
             });
 
             var batchSize = _options.Value.DocumentTypeDiscovery.BatchSize;
-            var docTypes = _options.Value.DocumentTypeDiscovery.DocTypes;
+            var docTypes = _docTypesOverride ?? _options.Value.DocumentTypeDiscovery.DocTypes;
 
             _fileLogger.LogInformation("DocumentSearch batch started - BatchSize: {BatchSize}, DocTypes: {DocTypes}",
                 batchSize, string.Join(", ", docTypes));
@@ -115,6 +129,7 @@ namespace Migration.Infrastructure.Implementation.Services
             var searchResult = await SearchDocumentsByTypeAsync(currentFolderId, docTypes, _currentSkipCount, batchSize, ct)
                 .ConfigureAwait(false);
 
+            if (currentType == "D") currentType = "DE";
             var regex = new Regex($"^{Regex.Escape(currentType)}[0-9]", RegexOptions.IgnoreCase);
             var finalDocuments = searchResult.Documents.Where(o =>
                                                         {

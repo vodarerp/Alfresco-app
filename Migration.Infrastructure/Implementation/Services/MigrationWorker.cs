@@ -78,6 +78,9 @@ namespace Migration.Infrastructure.Implementation.Services
                             "Please register DocumentSearchService in DI container.");
                     }
 
+                    // Check if DocTypes have changed and reset checkpoint if needed
+                    await ValidateAndResetDocTypesCheckpointAsync(ct);
+
                     // ====================================================================
                     // FAZA 1: DocumentSearch (searches by ecm:docType, populates both tables)
                     // ====================================================================
@@ -154,22 +157,31 @@ namespace Migration.Infrastructure.Implementation.Services
                 }, ct);
 
                 // Find current phase (first non-completed phase)
+                // In MigrationByDocument mode, skip DocumentDiscovery phase (it's handled by DocumentSearch in Phase 1)
                 var currentPhaseCheckpoint = checkpoints
                     .OrderBy(c => c.Phase)
-                    .FirstOrDefault(c => c.Status != PhaseStatus.Completed);
+                    .Where(c => c.Status != PhaseStatus.Completed)
+                    .Where(c => !_migrationOptions.MigrationByDocument || c.Phase != MigrationPhase.DocumentDiscovery)
+                    .FirstOrDefault();
+
+                // Filter out DocumentDiscovery in MigrationByDocument mode (for TotalProcessed calculation)
+                var relevantCheckpoints = _migrationOptions.MigrationByDocument
+                    ? checkpoints.Where(c => c.Phase != MigrationPhase.DocumentDiscovery).ToList()
+                    : checkpoints;
 
                 if (currentPhaseCheckpoint == null)
                 {
                     // All phases completed
                     var lastPhase = checkpoints.OrderByDescending(c => c.Phase).First();
+
                     return new MigrationPipelineStatus
                     {
                         CurrentPhase = lastPhase.Phase,
                         CurrentPhaseStatus = PhaseStatus.Completed,
                         CurrentPhaseProgress = 100,
-                        StartedAt = checkpoints.Min(c => c.StartedAt),
-                        ElapsedTime = lastPhase.CompletedAt - checkpoints.Min(c => c.StartedAt),
-                        TotalProcessed = checkpoints.Sum(c => c.TotalProcessed),
+                        StartedAt = relevantCheckpoints.Min(c => c.StartedAt),
+                        ElapsedTime = lastPhase.CompletedAt - relevantCheckpoints.Min(c => c.StartedAt),
+                        TotalProcessed = relevantCheckpoints.Sum(c => c.TotalProcessed),
                         StatusMessage = "Migration completed successfully"
                     };
                 }
@@ -186,7 +198,7 @@ namespace Migration.Infrastructure.Implementation.Services
                     ElapsedTime = currentPhaseCheckpoint.StartedAt.HasValue
                         ? DateTime.UtcNow - currentPhaseCheckpoint.StartedAt.Value
                         : null,
-                    TotalProcessed = checkpoints.Sum(c => c.TotalProcessed),
+                    TotalProcessed = relevantCheckpoints.Sum(c => c.TotalProcessed),
                     ErrorMessage = currentPhaseCheckpoint.ErrorMessage,
                     StatusMessage = GetPhaseStatusMessage(currentPhaseCheckpoint.Phase, currentPhaseCheckpoint.Status)
                 };
@@ -434,11 +446,136 @@ namespace Migration.Infrastructure.Implementation.Services
             };
         }
 
+        /// <summary>
+        /// Validates DocTypes for MigrationByDocument mode and resets checkpoint if they changed
+        /// </summary>
+        private async Task ValidateAndResetDocTypesCheckpointAsync(CancellationToken ct)
+        {
+            try
+            {
+                // Get current DocTypes from DocumentSearchService (includes UI overrides)
+                var currentDocTypes = _documentSearch?.GetCurrentDocTypes();
+                if (currentDocTypes == null || !currentDocTypes.Any())
+                {
+                    _logger.LogWarning("No DocTypes configured for MigrationByDocument mode");
+                    return;
+                }
+
+                var currentDocTypesStr = string.Join(",", currentDocTypes.OrderBy(dt => dt));
+
+                // Get checkpoint for FolderDiscovery phase (reused for DocumentSearch)
+                var checkpoint = await ExecuteCheckpointOperationAsync(async (conn, tran) =>
+                {
+                    var sql = "SELECT * FROM PhaseCheckpoints WHERE Phase = @phase";
+                    var cmd = new CommandDefinition(sql, new { phase = (int)MigrationPhase.FolderDiscovery }, transaction: tran, cancellationToken: ct);
+                    return await conn.QueryFirstOrDefaultAsync<PhaseCheckpoint>(cmd);
+                }, ct);
+
+                if (checkpoint == null)
+                {
+                    _logger.LogInformation("No checkpoint found for DocumentSearch phase, will create on first run");
+                    return;
+                }
+
+                // Compare DocTypes
+                if (string.IsNullOrEmpty(checkpoint.DocTypes))
+                {
+                    // First run with DocTypes - save them
+                    _logger.LogInformation("Saving DocTypes to checkpoint: {DocTypes}", currentDocTypesStr);
+                    await ExecuteCheckpointOperationAsync(async (conn, tran) =>
+                    {
+                        var sql = @"UPDATE PhaseCheckpoints
+                                    SET DocTypes = @docTypes, UpdatedAt = @updatedAt
+                                    WHERE Phase = @phase";
+                        var cmd = new CommandDefinition(sql, new
+                        {
+                            phase = (int)MigrationPhase.FolderDiscovery,
+                            docTypes = currentDocTypesStr,
+                            updatedAt = DateTime.UtcNow
+                        }, transaction: tran, cancellationToken: ct);
+                        await conn.ExecuteAsync(cmd);
+                    }, ct);
+                }
+                else
+                {
+                    // Normalize both strings for comparison (sort and compare)
+                    var storedDocTypesNormalized = string.Join(",", checkpoint.DocTypes.Split(',').Select(dt => dt.Trim()).OrderBy(dt => dt));
+
+                    if (storedDocTypesNormalized != currentDocTypesStr)
+                    {
+                        _logger.LogWarning(
+                            "DocTypes changed! Old: [{OldDocTypes}], New: [{NewDocTypes}]. Resetting checkpoint...",
+                            checkpoint.DocTypes, currentDocTypesStr);
+
+                        // Reset the checkpoint and update DocTypes
+                        await ExecuteCheckpointOperationAsync(async (conn, tran) =>
+                        {
+                            var sql = @"UPDATE PhaseCheckpoints
+                                        SET Status = @status,
+                                            StartedAt = NULL,
+                                            CompletedAt = NULL,
+                                            ErrorMessage = NULL,
+                                            LastProcessedIndex = NULL,
+                                            LastProcessedId = NULL,
+                                            TotalProcessed = 0,
+                                            DocTypes = @docTypes,
+                                            UpdatedAt = @updatedAt
+                                        WHERE Phase = @phase";
+                            var cmd = new CommandDefinition(sql, new
+                            {
+                                phase = (int)MigrationPhase.FolderDiscovery,
+                                status = (int)PhaseStatus.NotStarted,
+                                docTypes = currentDocTypesStr,
+                                updatedAt = DateTime.UtcNow
+                            }, transaction: tran, cancellationToken: ct);
+                            await conn.ExecuteAsync(cmd);
+                        }, ct);
+
+                        // Also reset subsequent phases (FolderPreparation, Move)
+                        _logger.LogInformation("Resetting subsequent phases (FolderPreparation, Move)...");
+                        await ExecuteCheckpointOperationAsync(async (conn, tran) =>
+                        {
+                            var sql = @"UPDATE PhaseCheckpoints
+                                        SET Status = @status,
+                                            StartedAt = NULL,
+                                            CompletedAt = NULL,
+                                            ErrorMessage = NULL,
+                                            LastProcessedIndex = NULL,
+                                            LastProcessedId = NULL,
+                                            TotalProcessed = 0,
+                                            UpdatedAt = @updatedAt
+                                        WHERE Phase IN (@folderPrep, @move)";
+                            var cmd = new CommandDefinition(sql, new
+                            {
+                                folderPrep = (int)MigrationPhase.FolderPreparation,
+                                move = (int)MigrationPhase.Move,
+                                status = (int)PhaseStatus.NotStarted,
+                                updatedAt = DateTime.UtcNow
+                            }, transaction: tran, cancellationToken: ct);
+                            await conn.ExecuteAsync(cmd);
+                        }, ct);
+
+                        _logger.LogInformation("✅ Checkpoint reset due to DocTypes change");
+                    }
+                    else
+                    {
+                        _logger.LogInformation("DocTypes unchanged, continuing from checkpoint: {DocTypes}", currentDocTypesStr);
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error validating DocTypes checkpoint");
+                throw;
+            }
+        }
+
         private string GetPhaseStatusMessage(MigrationPhase phase, PhaseStatus status)
         {
             var phaseName = phase switch
             {
-                MigrationPhase.FolderDiscovery => "Folder Discovery",
+                // In MigrationByDocument mode, FolderDiscovery phase is actually DocumentSearch
+                MigrationPhase.FolderDiscovery => _migrationOptions.MigrationByDocument ? "Document Search" : "Folder Discovery",
                 MigrationPhase.DocumentDiscovery => "Document Discovery",
                 MigrationPhase.FolderPreparation => "Folder Preparation",
                 MigrationPhase.Move => "Document Move",

@@ -18,6 +18,18 @@ namespace Migration.Abstraction.Interfaces.Wrappers
     public interface IDocumentSearchService
     {
         /// <summary>
+        /// Sets the document types to search for (overrides appsettings configuration)
+        /// </summary>
+        /// <param name="docTypes">List of document type codes (ecm:docType values)</param>
+        void SetDocTypes(List<string> docTypes);
+
+        /// <summary>
+        /// Gets the current document types (either from override or appsettings)
+        /// </summary>
+        /// <returns>List of document type codes</returns>
+        List<string> GetCurrentDocTypes();
+
+        /// <summary>
         /// Runs a single batch of document search and processing
         /// </summary>
         /// <param name="ct">Cancellation token</param>
