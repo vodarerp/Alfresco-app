@@ -2,6 +2,7 @@ using Alfresco.Contracts.Enums;
 using Alfresco.Contracts.Models;
 using Alfresco.Contracts.Options;
 using Alfresco.Contracts.Oracle.Models;
+using Dapper;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -35,6 +36,9 @@ namespace Migration.Infrastructure.Implementation.Services
         private int _totalFolders = 0; // Cache total folders count to avoid repeated queries
         private readonly ConcurrentBag<string> _errors = new();
 
+        // Track created folder IDs for FolderStaging updates
+        private readonly ConcurrentBag<(string FolderPath, string AlfrescoFolderId, bool Success, string? Error)> _folderResults = new();
+
         public FolderPreparationService(
             IServiceScopeFactory scopeFactory,
             ILoggerFactory logger,
@@ -53,10 +57,11 @@ namespace Migration.Infrastructure.Implementation.Services
                 _fileLogger.LogInformation("🏗️  Starting parallel folder preparation with {MaxParallelism} concurrent tasks", MAX_PARALLELISM);
 
                 // ====================================================================
-                // STEP 0: Reset stuck documents from previous crashed run
+                // STEP 0: Reset stuck items from previous crashed run
                 // ====================================================================
-                _fileLogger.LogInformation("Resetting stuck documents...");
+                _fileLogger.LogInformation("Resetting stuck items...");
                 await ResetStuckItemsAsync(ct).ConfigureAwait(false);
+                await ResetStuckFoldersAsync(ct).ConfigureAwait(false);
 
                 // ====================================================================
                 // STEP 1: Get all unique destination folders from DocStaging
@@ -77,6 +82,12 @@ namespace Migration.Infrastructure.Implementation.Services
 
                 // Update phase checkpoint with total items
                 await UpdateTotalItemsAsync(totalFolders, ct).ConfigureAwait(false);
+
+                // ====================================================================
+                // STEP 1.5: Insert all folders into FolderStaging with Status='Pending'
+                // ====================================================================
+                _fileLogger.LogInformation("Inserting {Count} folders into FolderStaging...", totalFolders);
+                await InsertFoldersToStagingAsync(uniqueFolders, ct).ConfigureAwait(false);
 
                 // ====================================================================
                 // STEP 2: Resume from checkpoint if exists
@@ -107,9 +118,18 @@ namespace Migration.Infrastructure.Implementation.Services
                     await semaphore.WaitAsync(ct).ConfigureAwait(false);
                     try
                     {
-                        await CreateFolderAsync(folder, ct).ConfigureAwait(false);
+                        var (folderId, success, error) = await CreateFolderAsync(folder, ct).ConfigureAwait(false);
+
+                        // Track result for batch update
+                        _folderResults.Add((folder.FolderPath, folderId ?? "", success, error));
 
                         var current = Interlocked.Increment(ref _foldersCreated);
+
+                        // Batch update FolderStaging every 500 folders
+                        if (current % 500 == 0)
+                        {
+                            await BatchUpdateFolderStagingAsync(ct).ConfigureAwait(false);
+                        }
 
                         // Checkpoint every 1000 folders
                         if (current % CHECKPOINT_INTERVAL == 0)
@@ -126,6 +146,9 @@ namespace Migration.Infrastructure.Implementation.Services
                             "Failed to create folder: {RootId}/{Path}",
                             folder.DestinationRootId, folder.FolderPath);
                         _errors.Add($"{folder.DestinationRootId}/{folder.FolderPath}: {ex.Message}");
+
+                        // Track failed result
+                        _folderResults.Add((folder.FolderPath, "", false, ex.Message));
                     }
                     finally
                     {
@@ -136,7 +159,12 @@ namespace Migration.Infrastructure.Implementation.Services
                 await Task.WhenAll(tasks).ConfigureAwait(false);
 
                 // ====================================================================
-                // STEP 4: Final checkpoint save
+                // STEP 4: Final batch update for remaining folders
+                // ====================================================================
+                await BatchUpdateFolderStagingAsync(ct).ConfigureAwait(false);
+
+                // ====================================================================
+                // STEP 5: Final checkpoint save
                 // ====================================================================
                 await SaveCheckpointAsync(_foldersCreated, ct).ConfigureAwait(false);
 
@@ -229,55 +257,65 @@ namespace Migration.Infrastructure.Implementation.Services
             }
         }
 
-        private async Task CreateFolderAsync(UniqueFolderInfo folder, CancellationToken ct)
+        private async Task<(string? FolderId, bool Success, string? Error)> CreateFolderAsync(UniqueFolderInfo folder, CancellationToken ct)
         {
-            // Use DocumentResolver to create folder hierarchy
-            // DocumentResolver uses lock striping (Problem #3) so it's safe for concurrent calls
-
-            await using var scope = _scopeFactory.CreateAsyncScope();
-            var documentResolver = scope.ServiceProvider.GetRequiredService<IDocumentResolver>();
-
-            // STEP 1: Create parent dossier folder (e.g., DOSSIERS-ACC) under RootDestinationFolderId if it doesn't exist
-            // folder.DestinationRootId contains the name like "DOSSIERS-ACC", "DOSSIERS-LE", etc.
-            // We need to create this folder under _rootDestinationFolderId first
-            var parentDossierFolderId = await documentResolver.ResolveAsync(
-                _rootDestinationFolderId,
-                folder.DestinationRootId, // e.g., "DOSSIERS-ACC"
-                null, // No special properties for parent folder
-                ct).ConfigureAwait(false);
-
-            // STEP 2: Create the actual dossier hierarchy under the parent folder
-            // Split folder path into parts: "ACC-12345/2024/01" → ["ACC-12345", "2024", "01"]
-            var pathParts = folder.FolderPath.Split('/', StringSplitOptions.RemoveEmptyEntries);
-
-            if (pathParts.Length == 0)
+            try
             {
-                _fileLogger.LogWarning("Empty folder path for {RootId}", folder.DestinationRootId);
-                return;
-            }
+                // Use DocumentResolver to create folder hierarchy
+                // DocumentResolver uses lock striping (Problem #3) so it's safe for concurrent calls
 
-            // Create each level in hierarchy starting from the parent dossier folder
-            var currentParentId = parentDossierFolderId;
+                await using var scope = _scopeFactory.CreateAsyncScope();
+                var documentResolver = scope.ServiceProvider.GetRequiredService<IDocumentResolver>();
 
-            foreach (var folderName in pathParts)
-            {
-                // DocumentResolver.ResolveAsync is idempotent: checks if folder exists, creates if not, caches result
-                currentParentId = await documentResolver.ResolveAsync(
-                    currentParentId,
-                    folderName,
-                    folder.Properties, // Pass properties (may be null)
+                // STEP 1: Create parent dossier folder (e.g., DOSSIERS-ACC) under RootDestinationFolderId if it doesn't exist
+                // folder.DestinationRootId contains the name like "DOSSIERS-ACC", "DOSSIERS-LE", etc.
+                // We need to create this folder under _rootDestinationFolderId first
+                var parentDossierFolderId = await documentResolver.ResolveAsync(
+                    _rootDestinationFolderId,
+                    folder.DestinationRootId, // e.g., "DOSSIERS-ACC"
+                    null, // No special properties for parent folder
                     ct).ConfigureAwait(false);
+
+                // STEP 2: Create the actual dossier hierarchy under the parent folder
+                // Split folder path into parts: "ACC-12345/2024/01" → ["ACC-12345", "2024", "01"]
+                var pathParts = folder.FolderPath.Split('/', StringSplitOptions.RemoveEmptyEntries);
+
+                if (pathParts.Length == 0)
+                {
+                    _fileLogger.LogWarning("Empty folder path for {RootId}", folder.DestinationRootId);
+                    return (null, false, "Empty folder path");
+                }
+
+                // Create each level in hierarchy starting from the parent dossier folder
+                var currentParentId = parentDossierFolderId;
+
+                foreach (var folderName in pathParts)
+                {
+                    // DocumentResolver.ResolveAsync is idempotent: checks if folder exists, creates if not, caches result
+                    currentParentId = await documentResolver.ResolveAsync(
+                        currentParentId,
+                        folderName,
+                        folder.Properties, // Pass properties (may be null)
+                        ct).ConfigureAwait(false);
+                }
+
+                _fileLogger.LogDebug(
+                    "Created folder hierarchy: {RootDestinationFolderId}/{ParentFolder}/{Path} → {FinalId}",
+                    _rootDestinationFolderId, folder.DestinationRootId, folder.FolderPath, currentParentId);
+
+                // STEP 3: Update DocStaging.DestinationFolderId for all documents in this folder
+                await UpdateDocumentDestinationFolderIdAsync(
+                    folder.FolderPath,
+                    currentParentId,
+                    ct).ConfigureAwait(false);
+
+                return (currentParentId, true, null);
             }
-
-            _fileLogger.LogDebug(
-                "Created folder hierarchy: {RootDestinationFolderId}/{ParentFolder}/{Path} → {FinalId}",
-                _rootDestinationFolderId, folder.DestinationRootId, folder.FolderPath, currentParentId);
-
-            // STEP 3: Update DocStaging.DestinationFolderId for all documents in this folder
-            await UpdateDocumentDestinationFolderIdAsync(
-                folder.FolderPath,
-                currentParentId,
-                ct).ConfigureAwait(false);
+            catch (Exception ex)
+            {
+                _fileLogger.LogError(ex, "Error creating folder: {Path}", folder.FolderPath);
+                return (null, false, ex.Message);
+            }
         }
 
         private async Task UpdateDocumentDestinationFolderIdAsync(
@@ -468,6 +506,170 @@ namespace Migration.Infrastructure.Implementation.Services
             {
                 _fileLogger.LogWarning(ex, "Failed to reset stuck documents: {Error}", ex.Message);
                 _dbLogger.LogError(ex, "Failed to reset stuck documents");
+            }
+        }
+
+        private async Task ResetStuckFoldersAsync(CancellationToken ct)
+        {
+            try
+            {
+                var timeout = TimeSpan.FromMinutes(30); // Default 30 minutes timeout for stuck folders
+                _fileLogger.LogDebug("Checking for stuck folders with timeout: 30 minutes");
+
+                await using var scope = _scopeFactory.CreateAsyncScope();
+                var uow = scope.ServiceProvider.GetRequiredService<IUnitOfWork>();
+                var folderRepo = scope.ServiceProvider.GetRequiredService<IFolderStagingRepository>();
+
+                await uow.BeginAsync(ct: ct).ConfigureAwait(false);
+                try
+                {
+                    var resetCount = await folderRepo.ResetStuckFolderAsync(
+                        uow.Connection,
+                        uow.Transaction,
+                        timeout,
+                        ct).ConfigureAwait(false);
+
+                    await uow.CommitAsync(ct: ct).ConfigureAwait(false);
+
+                    if (resetCount > 0)
+                    {
+                        _fileLogger.LogWarning(
+                            "Reset {Count} stuck folders that were IN PROGRESS for more than 30 minutes",
+                            resetCount);
+                        _dbLogger.LogWarning(
+                            "Reset {Count} stuck folders (timeout: 30 minutes)",
+                            resetCount);
+                    }
+                    else
+                    {
+                        _fileLogger.LogInformation("No stuck folders found");
+                    }
+                }
+                catch
+                {
+                    await uow.RollbackAsync(ct: ct).ConfigureAwait(false);
+                    throw;
+                }
+            }
+            catch (Exception ex)
+            {
+                _fileLogger.LogWarning(ex, "Failed to reset stuck folders: {Error}", ex.Message);
+                _dbLogger.LogError(ex, "Failed to reset stuck folders");
+            }
+        }
+
+        private async Task InsertFoldersToStagingAsync(List<UniqueFolderInfo> uniqueFolders, CancellationToken ct)
+        {
+            try
+            {
+                await using var scope = _scopeFactory.CreateAsyncScope();
+                var uow = scope.ServiceProvider.GetRequiredService<IUnitOfWork>();
+                var folderRepo = scope.ServiceProvider.GetRequiredService<IFolderStagingRepository>();
+
+                await uow.BeginAsync(ct: ct).ConfigureAwait(false);
+                try
+                {
+                    var foldersToInsert = uniqueFolders.Select(f => new FolderStaging
+                    {
+                        Name = f.FolderPath.Split('/').LastOrDefault() ?? f.FolderPath,
+                        DestFolderId = f.FolderPath,
+                        DossierDestFolderId = f.DestinationRootId,
+                        Status = "Pending",
+                        CreatedAt = DateTime.UtcNow,
+                        UpdatedAt = DateTime.UtcNow
+                    }).ToList();
+
+                    var insertedCount = await folderRepo.InsertManyAsync(foldersToInsert, ct).ConfigureAwait(false);
+                    await uow.CommitAsync(ct: ct).ConfigureAwait(false);
+
+                    _fileLogger.LogInformation("Inserted {Count} folders into FolderStaging with Status='Pending'", insertedCount);
+                }
+                catch
+                {
+                    await uow.RollbackAsync(ct: ct).ConfigureAwait(false);
+                    throw;
+                }
+            }
+            catch (Exception ex)
+            {
+                _fileLogger.LogError(ex, "Failed to insert folders into FolderStaging");
+                _dbLogger.LogError(ex, "Failed to insert folders into FolderStaging");
+                // Don't throw - this is not critical, we can continue without FolderStaging tracking
+            }
+        }
+
+        private async Task BatchUpdateFolderStagingAsync(CancellationToken ct)
+        {
+            try
+            {
+                // Get all pending results and clear the bag
+                var results = _folderResults.ToList();
+                if (results.Count == 0)
+                {
+                    return;
+                }
+
+                // Clear processed results
+                while (_folderResults.TryTake(out _)) { }
+
+                await using var scope = _scopeFactory.CreateAsyncScope();
+                var uow = scope.ServiceProvider.GetRequiredService<IUnitOfWork>();
+                var folderRepo = scope.ServiceProvider.GetRequiredService<IFolderStagingRepository>();
+
+                await uow.BeginAsync(ct: ct).ConfigureAwait(false);
+                try
+                {
+                    // Use raw SQL to update folders by DestFolderId
+                    // This is more efficient than loading each folder individually
+                    var updateSql = @"
+                        UPDATE FolderStaging
+                        SET Status = @Status,
+                            NodeId = @NodeId,
+                            UpdatedAt = @UpdatedAt
+                        WHERE DestFolderId = @DestFolderId";
+
+                    foreach (var (folderPath, alfrescoFolderId, success, error) in results)
+                    {
+                        var status = success ? "Completed" : "Failed";
+
+                        await uow.Connection.ExecuteAsync(
+                            updateSql,
+                            new
+                            {
+                                Status = status,
+                                NodeId = alfrescoFolderId,
+                                UpdatedAt = DateTime.UtcNow,
+                                DestFolderId = folderPath
+                            },
+                            uow.Transaction).ConfigureAwait(false);
+
+                        // Log errors
+                        if (!success && !string.IsNullOrEmpty(error))
+                        {
+                            _fileLogger.LogWarning("Folder {Path} failed: {Error}", folderPath, error);
+                        }
+                    }
+
+                    await uow.CommitAsync(ct: ct).ConfigureAwait(false);
+
+                    var successCount = results.Count(r => r.Success);
+                    var failedCount = results.Count - successCount;
+
+                    _fileLogger.LogInformation(
+                        "Batch updated {Total} folders in FolderStaging: {Success} succeeded, {Failed} failed",
+                        results.Count, successCount, failedCount);
+                }
+                catch
+                {
+                    await uow.RollbackAsync(ct: ct).ConfigureAwait(false);
+                    throw;
+                }
+            }
+            catch (Exception ex)
+            {
+                _fileLogger.LogWarning(ex, "Failed to batch update FolderStaging");
+                _dbLogger.LogError(ex, "Failed to batch update FolderStaging");
+                // Don't throw - this is not critical
             }
         }
     }
