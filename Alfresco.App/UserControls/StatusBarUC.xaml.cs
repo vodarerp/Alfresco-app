@@ -116,6 +116,22 @@ namespace Alfresco.App.UserControls
         }
         #endregion
 
+        #region -IsResetVisible- property
+        private bool _IsResetVisible;
+        public bool IsResetVisible
+        {
+            get { return _IsResetVisible; }
+            set
+            {
+                if (_IsResetVisible != value)
+                {
+                    _IsResetVisible = value;
+                    NotifyPropertyChanged();
+                }
+            }
+        }
+#endregion
+
 
         public StatusBarUC()
         {
@@ -128,8 +144,6 @@ namespace Alfresco.App.UserControls
             _options = App.AppHost.Services.GetRequiredService<IOptions<Alfresco.Contracts.SqlServer.SqlServerOptions>>();
 
             this.Loaded += StatusBarUC_Loaded;
-
-
 
         }
 
@@ -168,31 +182,19 @@ namespace Alfresco.App.UserControls
             {
                 Connected = false;                
             }
+            ResetButtonVisibilitiCheck();
+        }
+
+        private void ResetButtonVisibilitiCheck()
+        {
+            IsResetVisible = !(DbConnected && Connected && ClientApiConnected);
         }
 
         private async void StatusBarUC_Loaded(object sender, RoutedEventArgs e)
         {
             TestConnection();
             
-            //var healt = App.AppHost.Services.GetRequiredService<HealthCheckService>();
-            //var report = await healt.CheckHealthAsync();
-
-            //foreach(var entri in report.Entries)
-            //{
-            //    var val = entri.Value;
-            //    HealthItems.Add(new HealthItem
-            //    {
-            //        Name = entri.Key,
-            //        DurationInMs = (int)val.Duration.TotalMilliseconds,
-            //        Description = val.Description,
-            //        Error = val.Exception?.Message,
-            //        Tags = string.Join(", ", val.Tags)
-            //    });
-            //}
-
-
-            //var l = report.Entries.Values.ToList();
-            //HealtChecks = new ObservableCollection<HealthReportEntry>(report.Entries.Values.ToList());
+            
         }
 
         #region INotifyPropertyChange implementation
@@ -204,13 +206,9 @@ namespace Alfresco.App.UserControls
         }
         #endregion
 
-        private async void TextBlock_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
+        private void SettingsButton_Click(object sender, RoutedEventArgs e)
         {
-            var x = await _mappingService.FindByOriginalNameAsync("Personal Notice");
-            var xx = await _mappingService.GetAllMappingsAsync();
+            TestConnection();
         }
-
-       
-      
     }
 }

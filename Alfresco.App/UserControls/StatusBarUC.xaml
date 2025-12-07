@@ -13,46 +13,29 @@
                     <ColumnDefinition Width="*"></ColumnDefinition>
                     <ColumnDefinition Width="*"></ColumnDefinition>
                 </Grid.ColumnDefinitions>
-                <Grid  Grid.Column="0" Grid.IsSharedSizeScope="True">
-
-                    <ItemsControl ItemsSource="{Binding HealthItems}">
-                        <ItemsControl.ItemContainerStyle>
-                            <Style TargetType="ContentPresenter">
-                                <Setter Property="Margin" Value="0,0,0,6"/>
-                            </Style>
-                        </ItemsControl.ItemContainerStyle>
-
-                        <ItemsControl.ItemTemplate>
-                            <DataTemplate>
-                                <Grid>
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition SharedSizeGroup="colName" Width="Auto"/>
-                                        <ColumnDefinition Width="20"/>
-                                        <ColumnDefinition Width="Auto"/>
-                                    </Grid.ColumnDefinitions>
-                                    <TextBlock Grid.Column ="0" Text="{Binding Name}" FontWeight="Bold"/>
-                                    <TextBlock Grid.Column="2" Text="{Binding Status}" />
-                                </Grid>
-                            </DataTemplate>
-                        </ItemsControl.ItemTemplate>
-                    </ItemsControl>
+                <Grid >
                 </Grid>
                 <!--<StackPanel Grid.Column="0" Orientation="Horizontal" VerticalAlignment="Center" HorizontalAlignment="Left" Margin="10,0,0,0">
                 <TextBlock Text="Total: " FontWeight="Bold" VerticalAlignment="Center"/>
                 <TextBlock Text="Ready" VerticalAlignment="Center"/>
             </StackPanel>-->
-                <StackPanel Grid.Column="1" Orientation="Vertical" VerticalAlignment="Center" HorizontalAlignment="Right" Margin="0,0,10,0">
+                <Grid Grid.Column="1">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="auto"/>
+                    </Grid.ColumnDefinitions>
+                    <StackPanel Grid.Column="0" Orientation="Vertical" VerticalAlignment="Center" HorizontalAlignment="Right" Margin="0,0,10,0">
                     <Grid Name="AlfGrid">
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="Auto"/>
                             <ColumnDefinition Width="Auto"/>
                         </Grid.ColumnDefinitions>
-                        <TextBlock Grid.Column="0" Text="Alfresco Connection: " FontWeight="Bold" VerticalAlignment="Center" MouseLeftButtonDown="TextBlock_MouseLeftButtonDown"/>
-                        <TextBlock VerticalAlignment="Center" Grid.Column="1">
+                        <TextBlock Grid.Column="0" Text="Alfresco Connection: " FontWeight="Bold" VerticalAlignment="Center"  />
+                        <TextBlock VerticalAlignment="Center" Grid.Column="1" >
                             <TextBlock.Style>
                                 <Style TargetType="TextBlock">
-                                    <Setter Property="Text" Value="Disconnected"/>
-                                    <Setter Property="Foreground" Value="Red"/>
+                                    <Setter Property="Text" Value="Disconnected"/>                                        
+                                        <Setter Property="Foreground" Value="Red"/>
                                     <Style.Triggers>
                                         <DataTrigger Binding="{Binding Connected}" Value="True">
                                             <Setter Property="Text" Value="Connected"/>
@@ -68,7 +51,7 @@
                             <ColumnDefinition Width="Auto"/>
                             <ColumnDefinition Width="Auto"/>
                         </Grid.ColumnDefinitions>
-                        <TextBlock Grid.Column="0" Text="SqlServer Connection: " FontWeight="Bold" VerticalAlignment="Center" MouseLeftButtonDown="TextBlock_MouseLeftButtonDown"/>
+                        <TextBlock Grid.Column="0" Text="SqlServer Connection: " FontWeight="Bold" VerticalAlignment="Center"  />
                         <TextBlock VerticalAlignment="Center" Grid.Column="1">
                             <TextBlock.Style>
                                 <Style TargetType="TextBlock">
@@ -89,7 +72,7 @@
                             <ColumnDefinition Width="Auto"/>
                             <ColumnDefinition Width="Auto"/>
                         </Grid.ColumnDefinitions>
-                        <TextBlock Grid.Column="0" Text="Client API Connection: " FontWeight="Bold" VerticalAlignment="Center" MouseLeftButtonDown="TextBlock_MouseLeftButtonDown"/>
+                        <TextBlock Grid.Column="0" Text="Client API Connection: " FontWeight="Bold" VerticalAlignment="Center"  />
                         <TextBlock VerticalAlignment="Center" Grid.Column="1">
                             <TextBlock.Style>
                                 <Style TargetType="TextBlock">
@@ -106,6 +89,8 @@
                         </TextBlock>
                     </Grid>
                 </StackPanel>
+                    <Button Visibility="{Binding ResetButtonVisibilitiCheck}" Grid.Column="1" Content="Reset" Width="75" Height="25" VerticalAlignment="Center" HorizontalAlignment="Right" Margin="0,0,10,0" Click="SettingsButton_Click"/>
+                </Grid>
             </Grid>
         </Border>
 
