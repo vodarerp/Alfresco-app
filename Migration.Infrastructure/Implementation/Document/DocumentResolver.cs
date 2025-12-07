@@ -183,10 +183,24 @@ namespace Migration.Infrastructure.Implementation.Document
                     {
                         _logger.LogWarning(ex,
                             "Failed to create folder '{FolderName}' with properties. " +
-                            "Error: {ErrorType} - {ErrorMessage}. Attempting without properties.",
+                            "Error: {ErrorType} - {ErrorMessage}. Checking if folder was created by another thread...",
                             newFolderName, ex.GetType().Name, ex.Message);
 
-                        // Fallback: Try without properties
+                        // Check if folder exists (might have been created by another thread during race condition)
+                        folderID = await _read.GetFolderByRelative(destinationRootId, newFolderName, ct).ConfigureAwait(false);
+
+                        if (!string.IsNullOrEmpty(folderID))
+                        {
+                            _logger.LogInformation(
+                                "Folder '{FolderName}' was created by another thread during race condition. FolderId: {FolderId}",
+                                newFolderName, folderID);
+
+                            // Cache the folder ID and return
+                            _folderCache.TryAdd(cacheKey, folderID);
+                            return folderID;
+                        }
+
+                        // Fallback: Try without properties (folder truly doesn't exist, properties were the issue)
                         try
                         {
                             folderID = await _write.CreateFolderAsync(destinationRootId, newFolderName, null, ct).ConfigureAwait(false);

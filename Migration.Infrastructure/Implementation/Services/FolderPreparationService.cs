@@ -8,6 +8,7 @@ using Microsoft.Extensions.Options;
 using Migration.Abstraction.Interfaces;
 using Migration.Abstraction.Interfaces.Wrappers;
 using Migration.Abstraction.Models;
+using Migration.Extensions.SqlServer;
 using SqlServer.Abstraction.Interfaces;
 using System.Collections.Concurrent;
 
@@ -50,6 +51,12 @@ namespace Migration.Infrastructure.Implementation.Services
             try
             {
                 _fileLogger.LogInformation("🏗️  Starting parallel folder preparation with {MaxParallelism} concurrent tasks", MAX_PARALLELISM);
+
+                // ====================================================================
+                // STEP 0: Reset stuck documents from previous crashed run
+                // ====================================================================
+                _fileLogger.LogInformation("Resetting stuck documents...");
+                await ResetStuckItemsAsync(ct).ConfigureAwait(false);
 
                 // ====================================================================
                 // STEP 1: Get all unique destination folders from DocStaging
@@ -412,6 +419,55 @@ namespace Migration.Infrastructure.Implementation.Services
             catch (Exception ex)
             {
                 _fileLogger.LogWarning(ex, "Failed to update total items in checkpoint");
+            }
+        }
+
+        private async Task ResetStuckItemsAsync(CancellationToken ct)
+        {
+            try
+            {
+                var timeout = TimeSpan.FromMinutes(30); // Default 30 minutes timeout for stuck items
+                _fileLogger.LogDebug("Checking for stuck documents with timeout: 30 minutes");
+
+                await using var scope = _scopeFactory.CreateAsyncScope();
+                var uow = scope.ServiceProvider.GetRequiredService<IUnitOfWork>();
+                var docRepo = scope.ServiceProvider.GetRequiredService<IDocStagingRepository>();
+
+                await uow.BeginAsync(ct: ct).ConfigureAwait(false);
+                try
+                {
+                    var resetCount = await docRepo.ResetStuckDocumentsAsync(
+                        uow.Connection,
+                        uow.Transaction,
+                        timeout,
+                        ct).ConfigureAwait(false);
+
+                    await uow.CommitAsync(ct: ct).ConfigureAwait(false);
+
+                    if (resetCount > 0)
+                    {
+                        _fileLogger.LogWarning(
+                            "Reset {Count} stuck documents that were IN PROGRESS for more than 30 minutes",
+                            resetCount);
+                        _dbLogger.LogWarning(
+                            "Reset {Count} stuck documents (timeout: 30 minutes)",
+                            resetCount);
+                    }
+                    else
+                    {
+                        _fileLogger.LogInformation("No stuck documents found");
+                    }
+                }
+                catch
+                {
+                    await uow.RollbackAsync(ct: ct).ConfigureAwait(false);
+                    throw;
+                }
+            }
+            catch (Exception ex)
+            {
+                _fileLogger.LogWarning(ex, "Failed to reset stuck documents: {Error}", ex.Message);
+                _dbLogger.LogError(ex, "Failed to reset stuck documents");
             }
         }
     }
