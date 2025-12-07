@@ -10,13 +10,7 @@ using System.Threading.Tasks;
 
 namespace Migration.Infrastructure.Implementation
 {
-    /// <summary>
-    /// Service for enriching folder and document metadata with client data from ClientAPI.
-    ///
-    /// IMPORTANT: This service is ready but integration with ClientAPI should be enabled
-    /// by uncommenting the constructor injection and method calls in existing services
-    /// when ClientAPI becomes available.
-    /// </summary>
+   
     public class ClientEnrichmentService : IClientEnrichmentService
     {
         private readonly IClientApi _clientApi;

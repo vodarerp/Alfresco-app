@@ -7,6 +7,11 @@ using System.Net.Http.Json;
 using System.Text;
 using System.Text.Json;
 using System.Threading.Channels;
+using Migration.Infrastructure.Implementation;
+using SqlServer.Infrastructure.Implementation;
+using SqlServer.Abstraction.Interfaces;
+using Microsoft.Extensions.Caching.Memory;
+using Microsoft.Data.SqlClient;
 
 public static class Program
 {
@@ -15,12 +20,24 @@ public static class Program
         //var cfg = new ConfigureAwaitOptions {}
         Console.WriteLine("Cao svete");
 
+        // Initialize DocumentMappingService with dependencies
+        var connectionString = "Server=localhost;Database=AlfrescoMigration;Trusted_Connection=True;TrustServerCertificate=True;MultipleActiveResultSets=True;";
+        var cache = new MemoryCache(new MemoryCacheOptions());
+
+        // Create unit of work and open connection
+        var uow = new SqlServerUnitOfWork(connectionString);
+        await uow.BeginAsync(); // IMPORTANT: Open connection before using repository
+
+        // Create repository and service
+        var repository = new DocumentMappingRepository(uow, cache);
+        var documentMappingService = new DocumentMappingService(repository);
+
         var cfg = new Config()
         {
             BaseUrl = "http://localhost:8080/",
             Username =  "admin",
             Password = "admin",
-            RootParentId = "d8b9d199-a390-4d19-b9d1-99a3902d19b6",
+            RootParentId = "d5e33e41-1b08-47e0-a33e-411b08d7e0d6",
             FolderCount = 15,
             DocsPerFolder = 3,
             DegreeOfParallelism = 8,
@@ -29,7 +46,8 @@ public static class Program
             UseNewFolderStructure = true,           // Enable new folder structure
             ClientTypes = new[] { "PI", "LE" },  // NOTE: ACC dossiers are created DURING migration, not as old dossiers
             StartingCoreId = 102206,                // Start from realistic CoreId
-            AddFolderProperties = true             // Set to true after deploying bankContentModel.xml
+            AddFolderProperties = true,             // Set to true after deploying bankContentModel.xml
+            DocumentMappingService = documentMappingService  // Inject document mapping service
         };
 
 
@@ -107,7 +125,8 @@ public static class Program
                             var clientType = cfg.ClientTypes[i % cfg.ClientTypes.Length];
                             var coreId = cfg.StartingCoreId + i;
                             // Format: Create without "-" separator
-                            folderName = $"{clientType}{coreId}"; // e.g., PI102206, LE500342, ACC13001926
+                            if (i % 4 == 0) folderName = $"LN{coreId}";
+                            else folderName = $"{clientType}{coreId}"; // e.g., PI102206, LE500342, ACC13001926
                             parentId = dosieFolders[clientType]; // DOSSIERS-PI, DOSSIERS-LE, etc.
                         }
                         else
@@ -146,7 +165,7 @@ public static class Program
                             var coreId = cfg.StartingCoreId + i;
 
                             // Generate test case documents based on requirements
-                            var testDocs = GenerateTestCaseDocuments(clientType, coreId, i);
+                            var testDocs = await GenerateTestCaseDocumentsAsync(cfg, clientType, coreId, i, cts.Token);
 
                             for (var x = 0; x < testDocs.Count; x++)
                             {
@@ -199,7 +218,7 @@ public static class Program
                                     Console.WriteLine($"[INFO] Created Deposit Dossier: {depositFolderName}");
 
                                     // Generate deposit documents
-                                    var depositDocs = GenerateDepositDocuments(clientType, coreId, contractNumber, i);
+                                    var depositDocs = await GenerateDepositDocumentsAsync(cfg, clientType, coreId, contractNumber, i, cts.Token);
 
                                     for (var x = 0; x < depositDocs.Count; x++)
                                     {
@@ -252,7 +271,9 @@ public static class Program
         var totalElapsed = DateTime.UtcNow - start;
         Console.WriteLine($"DONE | Folders {createdFolders}/{cfg.FolderCount} | Docs {createdDocument}/{totalDocs} | Failed {failed} | Time {totalElapsed:hh\\:mm\\:ss}");
 
-
+        // Cleanup resources
+        await uow.DisposeAsync();
+        cache.Dispose();
 
     }
 
@@ -550,48 +571,38 @@ public static class Program
     }
 
     /// <summary>
-    /// Gets document type code (SifraDocMigracija) from HeimdallDocumentMapper
-    /// Uses the centralized mapping list instead of hardcoded dictionary
+    /// Gets document type code (SifraDocMigracija) from IDocumentMappingService
+    /// Uses the centralized mapping service instead of static mapper
     /// </summary>
-    private static string? GetDocumentTypeCode(string documentName)
+    private static async Task<string?> GetDocumentTypeCodeAsync(Config cfg, string documentName, CancellationToken ct)
     {
         // Try to find by original name (Naziv)
-        var mapping = HeimdallDocumentMapper.FindByOriginalName(documentName);
+        var mapping = await cfg.DocumentMappingService.FindByOriginalNameAsync(documentName, ct);
 
         if (mapping != null)
         {
-            return mapping.Value.SifraDoc;
+            return mapping.SifraDokumenta;
         }
 
-        // Try to find by Serbian name (NazivDoc)
-        var mappingBySerbianName = HeimdallDocumentMapper.DocumentMappings
-            .FirstOrDefault(m => m.NazivDoc.Equals(documentName?.Trim(), StringComparison.OrdinalIgnoreCase));
+        // Try to find by Serbian name (NazivDokumenta)
+        var mappingBySerbianName = await cfg.DocumentMappingService.FindBySerbianNameAsync(documentName, ct);
 
-        if (mappingBySerbianName.Naziv != null)
+        if (mappingBySerbianName != null)
         {
-            return mappingBySerbianName.SifraDoc;
+            return mappingBySerbianName.SifraDokumenta;
         }
 
         // Document not found in mapper
         return null;
     }
 
-    /// <summary>
-    /// Gets all available document names from HeimdallDocumentMapper for testing
-    /// </summary>
-    private static List<string> GetAvailableDocumentNames()
-    {
-        return HeimdallDocumentMapper.DocumentMappings
-            .Select(m => m.Naziv)
-            .ToList();
-    }
 
     /// <summary>
     /// Generates test case documents based on TestCase-migracija.txt requirements.
     /// Creates a variety of documents to cover all test scenarios.
-    /// Uses DocumentTypeMapping dictionary for accurate names and codes.
+    /// Uses IDocumentMappingService for accurate names and codes.
     /// </summary>
-    private static List<TestDocument> GenerateTestCaseDocuments(string clientType, int coreId, int folderIndex)
+    private static async Task<List<TestDocument>> GenerateTestCaseDocumentsAsync(Config cfg, string clientType, int coreId, int folderIndex, CancellationToken ct)
     {
         var documents = new List<TestDocument>();
         var random = new Random(coreId);
@@ -599,15 +610,15 @@ public static class Program
         // Track document names to avoid duplicates
         var usedFileNames = new HashSet<string>();
 
-        // Helper function to create document using HeimdallDocumentMapper
-        void AddDocument(string documentName, int? versionNumber = null, bool addMigrationSuffix = false, string? customStatus = null, bool? includeAccountNumber = null)
+        // Helper function to create document using IDocumentMappingService
+        async Task AddDocumentAsync(string documentName, int? versionNumber = null, bool addMigrationSuffix = false, string? customStatus = null, bool? includeAccountNumber = null)
         {
-            // Get document type code from HeimdallDocumentMapper
-            var docTypeCode = GetDocumentTypeCode(documentName);
+            // Get document type code from IDocumentMappingService
+            var docTypeCode = await GetDocumentTypeCodeAsync(cfg, documentName, ct);
 
             if (string.IsNullOrEmpty(docTypeCode))
             {
-                Console.WriteLine($"[WARNING] Document '{documentName}' not found in HeimdallDocumentMapper");
+                Console.WriteLine($"[WARNING] Document '{documentName}' not found in IDocumentMappingService");
                 return;
             }
 
@@ -636,21 +647,20 @@ public static class Program
 
             usedFileNames.Add(fileName);
 
-            // Get full mapping info from HeimdallDocumentMapper
-            var mapping = HeimdallDocumentMapper.FindByOriginalName(documentName);
+            // Get full mapping info from IDocumentMappingService
+            var mapping = await cfg.DocumentMappingService.FindByOriginalNameAsync(documentName, ct);
 
             // TC 1 & 2: Determine if document should have "-migracija" suffix
-            // If addMigrationSuffix is true, use NazivDocMigracija, otherwise use original documentName
+            // If addMigrationSuffix is true, use NazivDokumentaMigracija, otherwise use original documentName
             string opisDokumenta;
             string tipDosiea;
 
             if (mapping != null)
             {
+                // Use original name
+                opisDokumenta = mapping.Naziv;
 
-                    // Use original name
-               opisDokumenta = mapping.Value.Naziv;
-
-                tipDosiea = mapping.Value.TipDosiea;
+                tipDosiea = mapping.TipDosijea;
             }
             else
             {
@@ -663,6 +673,16 @@ public static class Program
             string docStatus = customStatus ?? "validiran";
 
             var props = CreateDocumentProps(clientType, coreId, docTypeCode, opisDokumenta, tipDosiea, docStatus, random, includeAccountNumber);
+
+            if (tipDosiea == "Dosije depozita")
+            {
+                var productType = clientType == "PI" ? "00008" : "00010";
+                props["ecm:productType"] = productType;
+                var contractDate = DateTime.UtcNow.AddDays(-new Random(coreId).Next(1, 365));
+                var contractNumber = contractDate.ToString("yyyyMMdd");
+                props["ecm:bnkNumberOfContract"] = contractNumber;
+                //props["ecm:versionType"] = versionNumber.Value == 1 ? "Initial" : "Revision";
+            }
 
             // Add version label if specified (TC 10: Multiple versions)
             if (versionNumber.HasValue)
@@ -679,11 +699,11 @@ public static class Program
         }
 
         // Helper to add multiple versions of the same document (TC 10)
-        void AddDocumentWithVersions(string documentName, int versionCount, bool addMigrationSuffix = false)
+        async Task AddDocumentWithVersionsAsync(string documentName, int versionCount, bool addMigrationSuffix = false)
         {
             for (int v = 1; v <= versionCount; v++)
             {
-                AddDocument(documentName, versionNumber: v, addMigrationSuffix: addMigrationSuffix);
+                await AddDocumentAsync(documentName, versionNumber: v, addMigrationSuffix: addMigrationSuffix);
             }
         }
 
@@ -693,77 +713,78 @@ public static class Program
         if (clientType == "PI")
         {
             // Test Case 4: Dosije fizičkog lica documents (single versions)
-            AddDocument("KYC Questionnaire MDOC");
-            AddDocument("Specimen Card for Authorized Person");
-            AddDocument("Pre-Contract Info");
-            AddDocument("Contact Data Change Email");
-            AddDocument("Contact Data Change Phone");
+            await AddDocumentAsync("KYC Questionnaire MDOC");
+            await AddDocumentAsync("Specimen Card for Authorized Person");
+            await AddDocumentAsync("Pre-Contract Info");
+            await AddDocumentAsync("Contact Data Change Email");
+            await AddDocumentAsync("Contact Data Change Phone");
 
             // TC 10: Add documents with multiple versions
-            AddDocumentWithVersions("Personal Notice", versionCount: 3);
-            AddDocumentWithVersions("KYC Questionnaire", versionCount: 2);
-            AddDocumentWithVersions("Communication Consent", versionCount: 3);
-            AddDocumentWithVersions("Specimen card", versionCount: 2);
+            await AddDocumentWithVersionsAsync("Personal Notice", versionCount: 3);
+            await AddDocumentWithVersionsAsync("KYC Questionnaire", versionCount: 2);
+            await AddDocumentWithVersionsAsync("Communication Consent", versionCount: 3);
+            await AddDocumentWithVersionsAsync("Specimen card", versionCount: 2);
 
             // TC 3: Add Account Package documents (will be migrated to DOSSIERS-ACC)
             // These documents have TipDosiea="Dosije paket računa"
-            AddDocument("Current Accounts Contract");
-            AddDocument("Saving Accounts Contract");
-            AddDocument("Account Package RSD Instruction for Resident");
-            AddDocumentWithVersions("Account Package", versionCount: 2);
+            await AddDocumentAsync("Current Accounts Contract");
+            await AddDocumentAsync("Saving Accounts Contract");
+            //await AddDocumentAsync("Account Package RSD Instruction for Resident");
+            await AddDocumentWithVersionsAsync("Account Package", versionCount: 2);
 
             // TC 1 & 2: Add documents with "-migracija" suffix (should become "poništen")
-            AddDocument("KYC Questionnaire", addMigrationSuffix: true);
-            AddDocument("Personal Notice", addMigrationSuffix: true);
+            await AddDocumentAsync("KYC Questionnaire", addMigrationSuffix: true);
+            await AddDocumentAsync("Personal Notice", addMigrationSuffix: true);
 
             // TC 11: Add pre-existing "poništen" documents
-            AddDocument("Communication Consent", customStatus: "poništen");
-            AddDocument("Specimen card", customStatus: "poništen");
+            await AddDocumentAsync("Communication Consent", customStatus: "poništen");
+            await AddDocumentAsync("Specimen card", customStatus: "poništen");
 
             // TC 12-14: Add KDP documents (old documents that should be marked inactive after migration)
-            AddDocument("KDP za fizička lica");  // 00099 - nova verzija policy
-            AddDocument("KDP za ovlašćena lica"); // 00101 - novi dokument policy
+            await AddDocumentAsync("Specimen Card for Authorized Person");  // 00099 - nova verzija policy
+            await AddDocumentAsync("Specimen card for LE"); // 00101 - novi dokument policy
 
             // TC 15: Add exclusion document (should NOT be migrated)
-            AddDocument("Ovlašćenje licima za donošenje instrumenata PP-a u Banku"); // 00702
+           // await AddDocumentAsync("Ovlašćenje licima za donošenje instrumenata PP-a u Banku"); // 00702
 
             // TC 16: Add KDP 00824 documents - edge cases with/without account number
-            AddDocument("KDP vlasnika za FL", includeAccountNumber: true);  // WITH account number - should be active
-            AddDocument("KDP vlasnika za FL", includeAccountNumber: false); // WITHOUT account number - should NOT be active
+            await AddDocumentAsync("Travel Insurance");  // WITH account number - should be active
+            await AddDocumentAsync("PiPonuda");  // WITH account number - should be active
+            await AddDocumentAsync("PiVazeciUgovorOroceniDepozitOstaleValute", includeAccountNumber: false); // WITHOUT account number - should NOT be active
         }
         else if (clientType == "LE")
         {
             // Test Case 5: Dosije pravnog lica documents (single versions)
-            AddDocument("GDPR Revoke");
-            AddDocument("GL Transaction");
-            AddDocument("FX Transaction");
-            AddDocument("Pre-Contract Info");
-            AddDocument("Contact Data Change Email");
-            AddDocument("Contact Data Change Phone");
+            await AddDocumentAsync("GDPR Revoke");
+            await AddDocumentAsync("GL Transaction");
+            await AddDocumentAsync("FX Transaction");
+            await AddDocumentAsync("Pre-Contract Info");
+            await AddDocumentAsync("Contact Data Change Email");
+            await AddDocumentAsync("Contact Data Change Phone");
 
             // TC 10: Add documents with multiple versions
-            AddDocumentWithVersions("KYC Questionnaire for LE", versionCount: 2);
-            AddDocumentWithVersions("Specimen card for LE", versionCount: 2);
-            AddDocumentWithVersions("Communication Consent", versionCount: 3);
+            await AddDocumentWithVersionsAsync("KYC Questionnaire for LE", versionCount: 2);
+            await AddDocumentWithVersionsAsync("Specimen card for LE", versionCount: 2);
+            await AddDocumentWithVersionsAsync("Communication Consent", versionCount: 3);
 
             // TC 3: Add Account Package documents (will be migrated to DOSSIERS-ACC)
             // These documents have TipDosiea="Dosije paket računa"
-            AddDocument("Current Accounts Contract");
-            AddDocumentWithVersions("Account Package", versionCount: 2);
-            AddDocument("Prestige Package Tariff for LE");
+            await AddDocumentAsync("Current Accounts Contract");
+            await AddDocumentWithVersionsAsync("Account Package", versionCount: 2);
+            await AddDocumentAsync("Prestige Package Tariff for LE");
 
             // TC 1 & 2: Add documents with "-migracija" suffix (should become "poništen")
-            AddDocument("Communication Consent", addMigrationSuffix: true);
-            AddDocument("KYC Questionnaire for LE", addMigrationSuffix: true);
+            await AddDocumentAsync("Communication Consent", addMigrationSuffix: true);
+            await AddDocumentAsync("KYC Questionnaire for LE", addMigrationSuffix: true);
 
             // TC 11: Add pre-existing "poništen" documents
-            AddDocument("Specimen card for LE", customStatus: "poništen");
+            await AddDocumentAsync("Specimen card for LE", customStatus: "poništen");
 
             // TC 12-14: Add KDP documents for LE (old documents that should be marked inactive)
-            AddDocument("KDP za pravna lica iz aplikacije"); // 00100 - nova verzija policy
+           // await AddDocumentAsync("KDP za pravna lica iz aplikacije"); // 00100 - nova verzija policy
 
             // TC 15: Add exclusion document (should NOT be migrated)
-            AddDocument("Ovlašćenje licima za donošenje instrumenata PP-a u Banku"); // 00702
+            //await AddDocumentAsync("Ovlašćenje licima za donošenje instrumenata PP-a u Banku"); // 00702
         }
 
         return documents;
@@ -773,20 +794,20 @@ public static class Program
     /// Generates deposit documents for Dosije Depozita folders.
     /// Creates documents based on client type (PI or LE).
     /// </summary>
-    private static List<TestDocument> GenerateDepositDocuments(string clientType, int coreId, string contractNumber, int folderIndex)
+    private static async Task<List<TestDocument>> GenerateDepositDocumentsAsync(Config cfg, string clientType, int coreId, string contractNumber, int folderIndex, CancellationToken ct)
     {
         var documents = new List<TestDocument>();
         var random = new Random(coreId);
         var usedFileNames = new HashSet<string>();
 
         // Helper function to create deposit document with version support (TC 22)
-        void AddDepositDocument(string documentName, int? versionNumber = null)
+        async Task AddDepositDocumentAsync(string documentName, int? versionNumber = null)
         {
-            var docTypeCode = GetDocumentTypeCode(documentName);
+            var docTypeCode = await GetDocumentTypeCodeAsync(cfg, documentName, ct);
 
             if (string.IsNullOrEmpty(docTypeCode))
             {
-                Console.WriteLine($"[WARNING] Deposit document '{documentName}' not found in HeimdallDocumentMapper");
+                Console.WriteLine($"[WARNING] Deposit document '{documentName}' not found in IDocumentMappingService");
                 return;
             }
 
@@ -813,10 +834,10 @@ public static class Program
 
             usedFileNames.Add(fileName);
 
-            var mapping = HeimdallDocumentMapper.FindByOriginalName(documentName);
+            var mapping = await cfg.DocumentMappingService.FindByOriginalNameAsync(documentName, ct);
 
             string opisDokumenta = mapping?.Naziv ?? documentName;
-            string tipDosiea = mapping?.TipDosiea ?? "Dosije depozita";
+            string tipDosiea = mapping?.TipDosijea ?? "Dosije depozita";
 
             // Create deposit-specific properties
             var props = new Dictionary<string, object>();
@@ -868,11 +889,11 @@ public static class Program
         }
 
         // Helper to add multiple versions of deposit document (TC 22)
-        void AddDepositDocumentWithVersions(string documentName, int versionCount)
+        async Task AddDepositDocumentWithVersionsAsync(string documentName, int versionCount)
         {
             for (int v = 1; v <= versionCount; v++)
             {
-                AddDepositDocument(documentName, versionNumber: v);
+                await AddDepositDocumentAsync(documentName, versionNumber: v);
             }
         }
 
@@ -881,34 +902,34 @@ public static class Program
         {
             // TC 24: Minimum required deposit documents for PI (00008)
             // 1. Ugovor o oročenom depozitu
-            AddDepositDocumentWithVersions("PiVazeciUgovorOroceniDepozitDvojezicniRSD", versionCount: 3);
+            await AddDepositDocumentWithVersionsAsync("PiVazeciUgovorOroceniDepozitDvojezicniRSD", versionCount: 3);
 
             // 2. Ponuda (REQUIRED - previously missing)
-            AddDepositDocument("PiPonuda");
+            await AddDepositDocumentAsync("PiPonuda");
 
             // 3. Plan isplate depozita (REQUIRED - previously missing)
-            AddDepositDocument("PiAnuitetniPlan");
+            await AddDepositDocumentAsync("PiAnuitetniPlan");
 
             // 4. Obavezni elementi Ugovora
-            AddDepositDocumentWithVersions("PiObavezniElementiUgovora", versionCount: 2);
+            await AddDepositDocumentWithVersionsAsync("PiObavezniElementiUgovora", versionCount: 2);
 
             // TC 22: Additional deposit documents with versions
-            AddDepositDocumentWithVersions("ZahtevZaOtvaranjeRacunaOrocenogDepozita", versionCount: 2);
+            await AddDepositDocumentWithVersionsAsync("ZahtevZaOtvaranjeRacunaOrocenogDepozita", versionCount: 2);
         }
         else if (clientType == "LE")
         {
             // TC 24: Minimum required deposit documents for LE (00010)
             // 1. Ugovor o oročenom depozitu
-            AddDepositDocumentWithVersions("SmeUgovorOroceniDepozitPreduzetnici", versionCount: 3);
+            await AddDepositDocumentWithVersionsAsync("SmeUgovorOroceniDepozitPreduzetnici", versionCount: 3);
 
             // 2. Ponuda (REQUIRED - previously missing)
-            AddDepositDocument("SmePonuda");
+            await AddDepositDocumentAsync("SmePonuda");
 
             // 3. Plan isplate depozita (REQUIRED - previously missing)
-            AddDepositDocument("SmeAnuitetniPlan");
+            await AddDepositDocumentAsync("SmeAnuitetniPlan");
 
             // 4. Obavezni elementi Ugovora (REQUIRED - previously missing)
-            AddDepositDocumentWithVersions("SmeObavezniElementiUgovora", versionCount: 2);
+            await AddDepositDocumentWithVersionsAsync("SmeObavezniElementiUgovora", versionCount: 2);
         }
 
         return documents;
@@ -1227,340 +1248,5 @@ public static class Program
 
         return properties;
     }
-
-    /// <summary>
-    /// Generates custom properties for documents within a dossier.
-    /// Implements migration test cases for document-level properties.
-    /// </summary>
-    private static Dictionary<string, object> GenerateDocumentProperties(
-        string clientType,
-        int coreId,
-        int docIndex,
-        string documentName)
-    {
-        var properties = new Dictionary<string, object>();
-        var random = new Random(coreId + docIndex);
-
-        // Standard Content Model properties
-        properties["cm:title"] = documentName;
-        properties["cm:description"] = $"Mock document for {clientType} client {coreId}";
-
-        // Core ID linking document to client
-        properties["ecm:coreId"] = coreId.ToString();
-        properties["ecm:docClientId"] = coreId.ToString();
-
-        // Test Cases 1-2: All documents are created as "validiran" (active)
-        // The migration process will determine which ones should become "poništen" based on DocumentNameMapper
-        string docStatus = "validiran";
-
-        properties["ecm:docStatus"] = docStatus;
-        properties["ecm:docStatus"] = "ACTIVE";
-
-        // Tip dokumenta (Document Type)
-        var docTypes = new[] { "00001", "00002", "00003", "00099", "00100", "00101", "00824" };
-        var docTypeCode = docTypes[random.Next(docTypes.Length)];
-        properties["ecm:docTypeCode"] = docTypeCode;
-        properties["ecm:docType"] = docTypeCode;
-        properties["ecm:bnkTypeId"] = docTypeCode;
-        properties["ecm:typeId"] = docTypeCode;
-
-        // Document type names based on code
-        var docTypeNames = new Dictionary<string, string>
-        {
-            { "00001", "Current Accounts Contract" },
-            { "00002", "Saving Accounts Contract" },
-            { "00003", "Personal Notice" },
-            { "00099", "KDP za fizička lica" },
-            { "00100", "KDP za pravna lica" },
-            { "00101", "KDP za ovlašćena lica" },
-            { "00824", "KDP vlasnika za FL" }
-        };
-        properties["ecm:docTypeName"] = docTypeNames.ContainsKey(docTypeCode)
-            ? docTypeNames[docTypeCode]
-            : "Generic Document";
-
-        // Tip dosijea dokumenta (Document's Dossier Type)
-        string docDossierType;
-        if (clientType == "ACC")
-        {
-            docDossierType = "300"; // Dosije paket računa
-        }
-        else if (clientType == "FL")
-        {
-            docDossierType = "500"; // Dosije fizičkog lica
-        }
-        else // PL
-        {
-            docDossierType = "400"; // Dosije pravnog lica
-        }
-        properties["ecm:docDossierType"] = docDossierType;
-
-        // Client type
-        properties["ecm:clientType"] = clientType;
-        properties["ecm:docClientType"] = clientType;
-        properties["ecm:bnkClientType"] = clientType;
-
-        // Source - Test Cases 6-7
-        string source = docDossierType == "700" ? "DUT" : "Heimdall";
-        properties["ecm:source"] = source;
-        properties["ecm:bnkSource"] = source;
-        properties["ecm:docSourceId"] = random.Next(1000, 9999).ToString();
-
-        // Version information - Test Case 10: Multiple versions support
-        properties["ecm:versionLabel"] = "1.0";
-        properties["ecm:versionType"] = "Major";
-
-        // Category
-        var categoryIds = new[] { "CAT001", "CAT002", "CAT003", "CAT004" };
-        var categoryId = categoryIds[random.Next(categoryIds.Length)];
-        properties["ecm:docCategoryId"] = categoryId;
-        properties["ecm:docCategoryName"] = $"Category {categoryId}";
-
-        // Opis dokumenta (Document Description)
-        properties["ecm:docDesc"] = $"Document {documentName} for client {coreId}";
-        properties["ecm:opis"] = properties["ecm:docDesc"];
-
-        // Kreirao (Created by)
-        var creators = new[] { "Admin", "Migration Bot", "System" };
-        properties["ecm:creator"] = creators[random.Next(creators.Length)];
-        properties["ecm:createdByName"] = properties["ecm:creator"];
-        properties["ecm:kreiraoId"] = random.Next(1000, 9999).ToString();
-
-        // OJ Kreiran ID
-        properties["ecm:ojKreiranId"] = $"OJ-{random.Next(100, 999)}";
-
-        // Datum kreiranja (Creation Date)
-        var creationDate = DateTime.UtcNow.AddDays(-random.Next(1, 365));
-        properties["ecm:datumKreiranja"] = creationDate.ToString("o");
-
-        // Broj ugovora (Contract Number) - Test Case 16: Required for KDP documents
-        if (docTypeCode == "00824" && docStatus == "validiran")
-        {
-            properties["ecm:contractNumber"] = $"{coreId}{random.Next(100, 999)}";
-        }
-
-        // Status odobravanja (Approval Status)
-        var approvalStatuses = new[] { "1", "2", "3" }; // 1=pending, 2=approved, 3=rejected
-        properties["ecm:docStatusOdobravanjaId"] = approvalStatuses[random.Next(approvalStatuses.Length)];
-
-        // Stepen zavođenja (Registration level)
-        properties["ecm:stepenZavodjenjaId"] = random.Next(1, 4).ToString();
-
-        // Nivo arhiviranja (Archiving level)
-        properties["ecm:nivoArhiviranja"] = random.Next(1, 4).ToString();
-
-        // Tip kreiranja (Creation type)
-        var creationTypes = new[] { "Manual", "Automatic", "Migration", "Import" };
-        properties["ecm:creationType"] = creationTypes[random.Next(creationTypes.Length)];
-
-        // Boolean flags
-        properties["ecm:exported"] = random.Next(2) == 0;
-        properties["ecm:storniran"] = false;
-        properties["ecm:kompletiran"] = true;
-        properties["ecm:ibUDelovodniku"] = random.Next(2) == 0;
-        properties["ecm:poslataOriginalnaDokumentacija"] = random.Next(2) == 0;
-        properties["ecm:active"] = docStatus == "validiran";
-
-        // Status editabilnosti (Editability status)
-        var editStatuses = new[] { "Editable", "Read-only", "Locked" };
-        properties["ecm:editabilityStatus"] = editStatuses[random.Next(editStatuses.Length)];
-
-        // Staff indicator
-        properties["ecm:staff"] = random.Next(2) == 0 ? "Y" : "N";
-        properties["ecm:docStaff"] = properties["ecm:staff"];
-
-        // OPU user
-        properties["ecm:opuUser"] = $"OPU-{random.Next(100, 999)}";
-
-        // Segment
-        var segments = new[] { "Retail", "Corporate", "SME", "Premium" };
-        properties["ecm:segment"] = segments[random.Next(segments.Length)];
-
-        // Residence
-        properties["ecm:residency"] = random.Next(2) == 0 ? "Resident" : "Non-resident";
-        properties["ecm:bnkResidence"] = properties["ecm:residency"];
-
-        // MTBR
-        properties["ecm:bnkMTBR"] = $"MTBR-{random.Next(1000, 9999)}";
-
-        // Office ID
-        properties["ecm:bnkOfficeId"] = $"OFF-{random.Next(100, 999)}";
-
-        // Type of product
-        properties["ecm:bnkTypeOfProduct"] = clientType == "PL" ? "00010" : "00008";
-        properties["ecm:productType"] = properties["ecm:bnkTypeOfProduct"];
-
-        // Client ID
-        properties["ecm:bnkClientId"] = coreId.ToString();
-
-        // Collaborator
-        var collaborators = new[] { "Branch 001", "Partner Bank", "" };
-        properties["ecm:collaborator"] = collaborators[random.Next(collaborators.Length)];
-
-        // Barclex
-        properties["ecm:barclex"] = $"BX{random.Next(10000, 99999)}";
-
-        // Last thumbnail modification
-        properties["ecm:lastThumbnailModification"] = DateTime.UtcNow.AddHours(-random.Next(1, 48)).ToString("o");
-
-        return properties;
-    }
-
-    /// <summary>
-    /// Generates properties specifically for deposit dossiers (Dosije depozita).
-    /// Test Cases 17-25: Special handling for deposit documents.
-    /// </summary>
-    private static Dictionary<string, object> GenerateDepositDossierProperties(
-        int coreId,
-        string productType,
-        string contractNumber)
-    {
-        var properties = new Dictionary<string, object>();
-        var random = new Random(coreId);
-
-        // Standard properties
-        properties["cm:title"] = $"Deposit Dossier {coreId}";
-        properties["cm:description"] = $"Deposit dossier for CoreId {coreId}";
-
-        // Test Case 18: Unique identifier format DE{CoreId}{ProductType}{ContractNumber}
-        var timestamp = DateTime.UtcNow.ToString("yyyyMMddHHmmss");
-        var uniqueFolderId = $"DE{coreId}{productType}{contractNumber}_{timestamp}";
-        properties["ecm:uniqueFolderId"] = uniqueFolderId;
-        properties["ecm:folderId"] = uniqueFolderId;
-
-        // Dossier type
-        properties["ecm:bnkDossierType"] = "700"; // Dosije depozita
-
-        // Core ID
-        properties["ecm:coreId"] = coreId.ToString();
-
-        // Product type (00008 for FL, 00010 for SB)
-        properties["ecm:productType"] = productType;
-        properties["ecm:bnkTypeOfProduct"] = productType;
-
-        // Contract number
-        properties["ecm:contractNumber"] = contractNumber;
-
-        // Test Case 7: Source must be DUT for deposit dossiers
-        properties["ecm:source"] = "DUT";
-        properties["ecm:bnkSource"] = "DUT";
-
-        // Test Case 25: Status should be ACTIVE for migrated deposit documents
-        properties["ecm:docStatus"] = "ACTIVE";
-        properties["ecm:active"] = true;
-
-        // Client type (determined by product type)
-        var clientType = productType == "00008" ? "FL" : "PL";
-        properties["ecm:clientType"] = clientType;
-        properties["ecm:bnkClientType"] = clientType;
-
-        // Client name
-        if (clientType == "FL")
-        {
-            var firstNames = new[] { "Petar", "Marko", "Ana", "Jovana", "Milan" };
-            var lastNames = new[] { "Petrović", "Jovanović", "Nikolić", "Marković" };
-            properties["ecm:clientName"] = $"{firstNames[random.Next(firstNames.Length)]} {lastNames[random.Next(lastNames.Length)]}";
-        }
-        else
-        {
-            var companies = new[] { "Privredno Društvo", "DOO Kompanija", "AD Firma" };
-            properties["ecm:clientName"] = $"{companies[random.Next(companies.Length)]} {coreId}";
-        }
-
-        // Deposit processed date
-        var depositDate = DateTime.UtcNow.AddDays(-random.Next(30, 730));
-        properties["ecm:depositProcessedDate"] = depositDate.ToString("o");
-
-        // Creation date
-        properties["ecm:datumKreiranja"] = DateTime.UtcNow.AddDays(-random.Next(1, 30)).ToString("o");
-
-        // Segment
-        properties["ecm:segment"] = clientType == "FL" ? "Retail" : "Corporate";
-
-        // Creator
-        properties["ecm:creator"] = "DUT Migration System";
-        properties["ecm:kreiraoId"] = random.Next(1000, 9999).ToString();
-
-        return properties;
-    }
-
-    /// <summary>
-    /// Generates properties for deposit documents with specific requirements.
-    /// Test Cases 22-25: Deposit document migration rules.
-    /// </summary>
-    private static Dictionary<string, object> GenerateDepositDocumentProperties(
-        int coreId,
-        string productType,
-        string contractNumber,
-        int versionNumber,
-        string documentType)
-    {
-        var properties = new Dictionary<string, object>();
-        var random = new Random(coreId + versionNumber);
-
-        // Standard properties
-        properties["cm:title"] = $"{documentType} v{versionNumber}";
-        properties["cm:description"] = $"Deposit document for contract {contractNumber}";
-
-        // Core ID
-        properties["ecm:coreId"] = coreId.ToString();
-        properties["ecm:docClientId"] = coreId.ToString();
-
-        // Dossier type
-        properties["ecm:docDossierType"] = "700";
-
-        // Test Case 25: All deposit documents should be ACTIVE
-        properties["ecm:docStatus"] = "ACTIVE";
-        properties["ecm:docStatus"] = "validiran";
-        properties["ecm:active"] = true;
-
-        // Document type
-        properties["ecm:docTypeCode"] = documentType;
-        properties["ecm:docType"] = documentType;
-
-        // Document type names for deposits (Test Case 24)
-        var depositDocNames = new Dictionary<string, string>
-        {
-            { "DEP_UGV", "Ugovor o oročenom depozitu" },
-            { "DEP_PON", "Ponuda" },
-            { "DEP_PLA", "Plan isplate depozita" },
-            { "DEP_OBE", "Obavezni elementi Ugovora" }
-        };
-        properties["ecm:docTypeName"] = depositDocNames.ContainsKey(documentType)
-            ? depositDocNames[documentType]
-            : documentType;
-
-        // Test Case 7: Source DUT for deposits
-        properties["ecm:source"] = "DUT";
-        properties["ecm:bnkSource"] = "DUT";
-
-        // Product type
-        properties["ecm:productType"] = productType;
-        properties["ecm:bnkTypeOfProduct"] = productType;
-
-        // Contract number
-        properties["ecm:contractNumber"] = contractNumber;
-
-        // Test Case 22: Version support - multiple versions per document
-        properties["ecm:versionLabel"] = $"{versionNumber}.0";
-        properties["ecm:versionType"] = versionNumber == 1 ? "Initial" : "Revision";
-
-        // Client type
-        var clientType = productType == "00008" ? "FL" : "PL";
-        properties["ecm:clientType"] = clientType;
-        properties["ecm:docClientType"] = clientType;
-
-        // Creation date
-        var creationDate = DateTime.UtcNow.AddDays(-random.Next(1, 365));
-        properties["ecm:datumKreiranja"] = creationDate.ToString("o");
-
-        // Creator
-        properties["ecm:creator"] = "DUT System";
-        properties["ecm:createdByName"] = "DUT System";
-
-        // Completion status
-        properties["ecm:kompletiran"] = true;
-
-        return properties;
-    }
+    
 }

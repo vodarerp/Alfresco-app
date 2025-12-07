@@ -30,7 +30,8 @@
       "Bash(\"C:\\Users\\Nikola Preradov\\source\\repos\\Alfresco\\CA_MockData\\README.md\")",
       "Bash(Select-String -Pattern \"error|warning CS\")",
       "Bash(Select-Object -First 20)",
-      "Bash(find:*)"
+      "Bash(find:*)",
+      "Bash(Select-String -Pattern \"error|Build succeeded|Build FAILED\" -Context 1,1)"
     ],
     "deny": [],
     "ask": []

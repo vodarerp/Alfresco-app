@@ -17,20 +17,11 @@ using SqlServer.Abstraction.Interfaces;
 using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Text;
+using System.Text.RegularExpressions;
 
 namespace Migration.Infrastructure.Implementation.Services
 {
-    /// <summary>
-    /// Service for discovering documents directly by ecm:docType (MigrationByDocument mode).
-    /// This is an alternative to FolderDiscovery + DocumentDiscovery flow.
-    ///
-    /// Flow:
-    /// 1. Find DOSSIER-{type} folders based on FolderTypes config
-    /// 2. For each DOSSIER folder, search documents by ecm:docType using AFTS
-    /// 3. Extract parent folders from document path (include=path)
-    /// 4. Insert unique folders into FolderStaging (ignore duplicates)
-    /// 5. Apply document mapping and insert into DocStaging
-    /// </summary>
+    
     public class DocumentSearchService : IDocumentSearchService
     {
         private readonly IAlfrescoReadApi _alfrescoReadApi;
@@ -124,10 +115,19 @@ namespace Migration.Infrastructure.Implementation.Services
             var searchResult = await SearchDocumentsByTypeAsync(currentFolderId, docTypes, _currentSkipCount, batchSize, ct)
                 .ConfigureAwait(false);
 
-            result.DocumentsFound = searchResult.Documents.Count;
+            var regex = new Regex($"^{Regex.Escape(currentType)}[0-9]", RegexOptions.IgnoreCase);
+            var finalDocuments = searchResult.Documents.Where(o =>
+                                                        {
+                                                            var lastParentName = o.Entry.Path?.Elements?.LastOrDefault()?.Name;
+                                                            return lastParentName != null && regex.IsMatch(lastParentName);
+                                                        }).ToList();
+
+
+
+            result.DocumentsFound = finalDocuments.Count;
             result.HasMore = searchResult.HasMore;
 
-            if (searchResult.Documents.Count == 0)
+            if (finalDocuments.Count == 0)
             {
                 _fileLogger.LogInformation("No documents found in DOSSIER-{Type}, moving to next folder", currentType);
 
@@ -144,10 +144,10 @@ namespace Migration.Infrastructure.Implementation.Services
                 return result;
             }
 
-            _fileLogger.LogInformation("Found {Count} documents in DOSSIER-{Type}", searchResult.Documents.Count, currentType);
+            _fileLogger.LogInformation("Found {Count} documents in DOSSIER-{Type}", finalDocuments.Count, currentType);
 
             // Extract unique parent folders from documents
-            var uniqueFolders = ExtractUniqueFolders(searchResult.Documents, currentType);
+            var uniqueFolders = ExtractUniqueFolders(finalDocuments, currentType);
             result.FoldersFound = uniqueFolders.Count;
 
             _fileLogger.LogInformation("Extracted {Count} unique folders from batch", uniqueFolders.Count);
@@ -159,7 +159,7 @@ namespace Migration.Infrastructure.Implementation.Services
 
             // Process documents - apply mapping and insert
             var docsToInsert = new List<DocStaging>();
-            foreach (var doc in searchResult.Documents)
+            foreach (var doc in finalDocuments)
             {
                 var parentFolderId = GetParentFolderIdFromPath(doc.Entry);
                 if (string.IsNullOrEmpty(parentFolderId))
@@ -449,7 +449,7 @@ namespace Migration.Infrastructure.Implementation.Services
             };
 
             var response = await _alfrescoReadApi.SearchAsync(req, ct).ConfigureAwait(false);
-            var documents = response?.List?.Entries ?? new List<ListEntry>();
+            var documents = response?.List?.Entries ?? new List<ListEntry>();            
             var hasMore = response?.List?.Pagination?.HasMoreItems ?? false;
 
             return (documents, hasMore);

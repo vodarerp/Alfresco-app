@@ -77,12 +77,9 @@ namespace Alfresco.Contracts.Mapper
        
         public static string CreateDepositDossierId(string coreId, string productType, string contractNumber)
         {
-            if (string.IsNullOrWhiteSpace(coreId) ||
-                string.IsNullOrWhiteSpace(productType) ||
-                string.IsNullOrWhiteSpace(contractNumber))
-            {
-                return string.Empty;
-            }
+            
+            if (string.IsNullOrWhiteSpace(productType)) productType = "000001";
+            if (string.IsNullOrWhiteSpace(contractNumber)) contractNumber = "20250102";
 
             return $"DE-{coreId}-{productType}_{contractNumber}";
         }

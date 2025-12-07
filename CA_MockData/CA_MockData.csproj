@@ -9,6 +9,8 @@
 
   <ItemGroup>
     <ProjectReference Include="..\Alfresco.Contracts\Alfresco.Contracts.csproj" />
+    <ProjectReference Include="..\Migration.Infrastructure\Migration.Infrastructure.csproj" />
+    <ProjectReference Include="..\SqlServer.Infrastructure\SqlServer.Infrastructure.csproj" />
   </ItemGroup>
 
 </Project>

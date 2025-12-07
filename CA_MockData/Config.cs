@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
+using Migration.Abstraction.Interfaces;
 
 namespace CA_MockData
 {
@@ -17,6 +18,11 @@ namespace CA_MockData
         public int DegreeOfParallelism { get; set; }
         public int MaxRetries { get; set; }
         public int RetryBaseDelayMs { get; set; }
+
+        /// <summary>
+        /// Document mapping service for retrieving document metadata
+        /// </summary>
+        public IDocumentMappingService DocumentMappingService { get; set; } = default!;
 
         /// <summary>
         /// If true, creates folder structure: ROOT -> dosie-{Type} -> {Type}{CoreId}
