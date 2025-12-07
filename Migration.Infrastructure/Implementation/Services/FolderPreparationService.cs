@@ -2,7 +2,6 @@ using Alfresco.Contracts.Enums;
 using Alfresco.Contracts.Models;
 using Alfresco.Contracts.Options;
 using Alfresco.Contracts.Oracle.Models;
-using Dapper;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -574,12 +573,13 @@ namespace Migration.Infrastructure.Implementation.Services
                         Name = f.FolderPath.Split('/').LastOrDefault() ?? f.FolderPath,
                         DestFolderId = f.FolderPath,
                         DossierDestFolderId = f.DestinationRootId,
-                        Status = "Pending",
+                        Status = MigrationStatus.Ready.ToDbString(),
                         CreatedAt = DateTime.UtcNow,
                         UpdatedAt = DateTime.UtcNow
                     }).ToList();
 
-                    var insertedCount = await folderRepo.InsertManyAsync(foldersToInsert, ct).ConfigureAwait(false);
+                    // Use InsertManyIgnoreDuplicatesAsync to handle potential duplicates
+                    var insertedCount = await folderRepo.InsertManyIgnoreDuplicatesAsync(foldersToInsert, ct).ConfigureAwait(false);
                     await uow.CommitAsync(ct: ct).ConfigureAwait(false);
 
                     _fileLogger.LogInformation("Inserted {Count} folders into FolderStaging with Status='Pending'", insertedCount);
@@ -619,38 +619,28 @@ namespace Migration.Infrastructure.Implementation.Services
                 await uow.BeginAsync(ct: ct).ConfigureAwait(false);
                 try
                 {
-                    // Use raw SQL to update folders by DestFolderId
-                    // This is more efficient than loading each folder individually
-                    var updateSql = @"
-                        UPDATE FolderStaging
-                        SET Status = @Status,
-                            NodeId = @NodeId,
-                            UpdatedAt = @UpdatedAt
-                        WHERE DestFolderId = @DestFolderId";
+                    // Prepare updates for batch operation
+                    var updates = results.Select(r => (
+                        DestFolderId: r.FolderPath,
+                        Status: r.Success ? MigrationStatus.Done.ToDbString() : MigrationStatus.Error.ToDbString(),
+                        NodeId: r.AlfrescoFolderId
+                    )).ToList();
 
-                    foreach (var (folderPath, alfrescoFolderId, success, error) in results)
-                    {
-                        var status = success ? "Completed" : "Failed";
-
-                        await uow.Connection.ExecuteAsync(
-                            updateSql,
-                            new
-                            {
-                                Status = status,
-                                NodeId = alfrescoFolderId,
-                                UpdatedAt = DateTime.UtcNow,
-                                DestFolderId = folderPath
-                            },
-                            uow.Transaction).ConfigureAwait(false);
-
-                        // Log errors
-                        if (!success && !string.IsNullOrEmpty(error))
-                        {
-                            _fileLogger.LogWarning("Folder {Path} failed: {Error}", folderPath, error);
-                        }
-                    }
+                    // Use repository extension method for batch update
+                    await folderRepo.BatchUpdateFoldersByDestFolderIdAsync(
+                        uow.Connection,
+                        uow.Transaction,
+                        updates,
+                        ct).ConfigureAwait(false);
 
                     await uow.CommitAsync(ct: ct).ConfigureAwait(false);
+
+                    // Log errors
+                    var failures = results.Where(r => !r.Success && !string.IsNullOrEmpty(r.Error)).ToList();
+                    foreach (var failure in failures)
+                    {
+                        _fileLogger.LogWarning("Folder {Path} failed: {Error}", failure.FolderPath, failure.Error);
+                    }
 
                     var successCount = results.Count(r => r.Success);
                     var failedCount = results.Count - successCount;

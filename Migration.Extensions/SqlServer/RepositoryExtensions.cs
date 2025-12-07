@@ -132,7 +132,7 @@ namespace Migration.Extensions.SqlServer
             var sql = $@"UPDATE FolderStaging
                         SET Status = '{MigrationStatus.Ready.ToDbString()}',
                             Error = 'Reset from stuck IN PROGRESS state',
-                            
+
                             UpdatedAt = GETUTCDATE()
                         WHERE Status = '{MigrationStatus.InProgress.ToDbString()}'
                           AND UpdatedAt < DATEADD(MINUTE, -{totalMinutes}, GETUTCDATE())";
@@ -140,6 +140,39 @@ namespace Migration.Extensions.SqlServer
             var cmd = new CommandDefinition(sql, transaction: tran, cancellationToken: ct);
             return await conn.ExecuteAsync(cmd).ConfigureAwait(false);
         }
+
+        /// <summary>
+        /// Batch update FolderStaging records by DestFolderId with status and NodeId.
+        /// Used by FolderPreparationService to update folder creation results.
+        /// </summary>
+        public static async Task BatchUpdateFoldersByDestFolderIdAsync(
+            this IFolderStagingRepository repo,
+            IDbConnection conn,
+            IDbTransaction tran,
+            IEnumerable<(string DestFolderId, string Status, string? NodeId)> updates,
+            CancellationToken ct = default)
+        {
+            if (!updates.Any()) return;
+
+            var sql = @"
+                UPDATE FolderStaging
+                SET Status = @Status,
+                    NodeId = @NodeId,
+                    UpdatedAt = @UpdatedAt
+                WHERE DestFolderId = @DestFolderId";
+
+            var parameters = updates.Select(u => new
+            {
+                Status = u.Status,
+                NodeId = u.NodeId ?? string.Empty,
+                UpdatedAt = DateTime.UtcNow,
+                DestFolderId = u.DestFolderId
+            });
+
+            var cmd = new CommandDefinition(sql, parameters, transaction: tran, cancellationToken: ct);
+            await conn.ExecuteAsync(cmd).ConfigureAwait(false);
+        }
+
         #endregion
     }
 }
