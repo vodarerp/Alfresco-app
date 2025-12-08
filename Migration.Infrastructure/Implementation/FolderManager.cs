@@ -16,16 +16,18 @@ namespace Migration.Infrastructure.Implementation
     public class FolderManager : IFolderManager
     {
         private readonly IFolderPathService _pathService;
-        private readonly ILogger<FolderManager> _logger;
+        private readonly ILogger _fileLogger;
+        private readonly ILogger _dbLogger;
         private readonly MigrationOptions _options;
 
         public FolderManager(
             IFolderPathService pathService,
             IOptions<MigrationOptions> options,
-            ILogger<FolderManager> logger)
+            ILoggerFactory logger)
         {
             _pathService = pathService ?? throw new ArgumentNullException(nameof(pathService));
-            _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+            _fileLogger = logger.CreateLogger("FileLogger");
+            _dbLogger = logger.CreateLogger("DbLogger");
             _options = options?.Value ?? throw new ArgumentNullException(nameof(options));
 
             if (string.IsNullOrWhiteSpace(_options.RootDocumentPath))
@@ -54,7 +56,7 @@ namespace Migration.Infrastructure.Implementation
 
                 if (Directory.Exists(fullPath))
                 {
-                    _logger.LogDebug("Folder structure already exists: {Path}", fullPath);
+                    _fileLogger.LogDebug("Folder structure already exists: {Path}", fullPath);
                     return fullPath;
                 }
 
@@ -62,7 +64,7 @@ namespace Migration.Infrastructure.Implementation
                 // This will create both dosie-{ClientType} and {ClientType}{CoreId} folders if needed
                 await Task.Run(() => Directory.CreateDirectory(fullPath), ct).ConfigureAwait(false);
 
-                _logger.LogInformation(
+                _fileLogger.LogInformation(
                     "Created folder structure for {ClientType} client {CoreId}: {Path}",
                     clientType, coreId, fullPath);
 
@@ -70,7 +72,9 @@ namespace Migration.Infrastructure.Implementation
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex,
+                _fileLogger.LogError("Failed to create folder structure for {ClientType} client {CoreId}",
+                    clientType, coreId);
+                _dbLogger.LogError(ex,
                     "Failed to create folder structure for {ClientType} client {CoreId}",
                     clientType, coreId);
                 throw new InvalidOperationException(
@@ -92,7 +96,7 @@ namespace Migration.Infrastructure.Implementation
             }
             catch (Exception ex)
             {
-                _logger.LogWarning(ex,
+                _fileLogger.LogWarning(ex,
                     "Error checking folder structure existence for {ClientType} client {CoreId}",
                     clientType, coreId);
                 return false;

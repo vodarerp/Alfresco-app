@@ -24,7 +24,8 @@ namespace Migration.Infrastructure.Implementation.Document
         private readonly IAlfrescoWriteApi _write;
         private readonly IFolderManager _folderManager;
         private readonly IClientApi _clientApi;
-        private readonly ILogger<DocumentResolver> _logger;
+        private readonly ILogger _fileLogger;
+        private readonly ILogger _dbLogger;
 
         // Thread-safe cache: Key = "parentId_folderName", Value = folder ID
         // Example: "abc-123_DOSSIERS-LE" -> "def-456-ghi-789"
@@ -40,14 +41,15 @@ namespace Migration.Infrastructure.Implementation.Document
             IAlfrescoWriteApi write,
             IFolderManager folderManager,
             IClientApi clientApi,
-            ILogger<DocumentResolver> logger)
+            ILoggerFactory logger)
         {
             _doc = doc;
             _read = read;
             _write = write;
             _folderManager = folderManager ?? throw new ArgumentNullException(nameof(folderManager));
             _clientApi = clientApi ?? throw new ArgumentNullException(nameof(clientApi));
-            _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+            _fileLogger = logger.CreateLogger("FileLogger");
+            _dbLogger = logger.CreateLogger("DbLogger");
         }
         /// <summary>
         /// Resolves folder by name with backward compatibility (creates if missing)
@@ -88,12 +90,12 @@ namespace Migration.Infrastructure.Implementation.Document
 
             if (_folderCache.TryGetValue(cacheKey, out var cachedFolderId))
             {
-                _logger.LogTrace("Cache HIT for folder '{FolderName}' under parent '{ParentId}' → FolderId: {FolderId}",
+                _fileLogger.LogTrace("Cache HIT for folder '{FolderName}' under parent '{ParentId}' → FolderId: {FolderId}",
                     newFolderName, destinationRootId, cachedFolderId);
                 return cachedFolderId;
             }
 
-            _logger.LogDebug("Cache MISS for folder '{FolderName}', acquiring lock...", newFolderName);
+            _fileLogger.LogDebug("Cache MISS for folder '{FolderName}', acquiring lock...", newFolderName);
 
             // ========================================
             // Step 2: Acquire lock using lock striping (fixed 1024 locks, no memory leak)
@@ -108,7 +110,7 @@ namespace Migration.Infrastructure.Implementation.Document
                 // ========================================
                 if (_folderCache.TryGetValue(cacheKey, out cachedFolderId))
                 {
-                    _logger.LogTrace("Cache HIT after lock (folder created by another thread) for '{FolderName}' → FolderId: {FolderId}",
+                    _fileLogger.LogTrace("Cache HIT after lock (folder created by another thread) for '{FolderName}' → FolderId: {FolderId}",
                         newFolderName, cachedFolderId);
                     return cachedFolderId;
                 }
@@ -116,14 +118,14 @@ namespace Migration.Infrastructure.Implementation.Document
                 // ========================================
                 // Step 4: Check if folder exists in Alfresco
                 // ========================================
-                _logger.LogDebug("Checking if folder '{FolderName}' exists under parent '{ParentId}'...",
+                _fileLogger.LogDebug("Checking if folder '{FolderName}' exists under parent '{ParentId}'...",
                     newFolderName, destinationRootId);
 
                 var folderID = await _read.GetFolderByRelative(destinationRootId, newFolderName, ct).ConfigureAwait(false);
 
                 if (!string.IsNullOrEmpty(folderID))
                 {
-                    _logger.LogDebug("Folder '{FolderName}' already exists in Alfresco. FolderId: {FolderId}",
+                    _fileLogger.LogDebug("Folder '{FolderName}' already exists in Alfresco. FolderId: {FolderId}",
                         newFolderName, folderID);
 
                     // Cache the existing folder ID
@@ -134,7 +136,7 @@ namespace Migration.Infrastructure.Implementation.Document
                 // ========================================
                 // Step 5: Folder doesn't exist - Call ClientAPI to notify/enrich
                 // ========================================
-                _logger.LogDebug("Folder '{FolderName}' doesn't exist in Alfresco, calling ClientAPI...",
+                _fileLogger.LogDebug("Folder '{FolderName}' doesn't exist in Alfresco, calling ClientAPI...",
                     newFolderName);
 
                 var clientDataProps = await CallClientApiForFolderAsync(newFolderName, ct).ConfigureAwait(false);
@@ -163,36 +165,37 @@ namespace Migration.Infrastructure.Implementation.Document
                 // ========================================
                 // Step 6: Create folder (with or without properties)
                 // ========================================
-                _logger.LogDebug("Creating folder '{FolderName}' under parent '{ParentId}'...",
+                _fileLogger.LogDebug("Creating folder '{FolderName}' under parent '{ParentId}'...",
                     newFolderName, destinationRootId);
 
                 if (properties != null && properties.Count > 0)
                 {
                     try
                     {
-                        _logger.LogDebug(
+                        _fileLogger.LogDebug(
                             "Attempting to create folder '{FolderName}' with {PropertyCount} properties",
                             newFolderName, properties.Count);
 
                         //folderID = await _write.CreateFolderAsync(destinationRootId, newFolderName, properties, ct).ConfigureAwait(false);
                         folderID = await _write.CreateFolderAsync(destinationRootId, newFolderName, properties, ct).ConfigureAwait(false);
-                        _logger.LogInformation(
+                        _fileLogger.LogInformation(
                             "Successfully created folder '{FolderName}' with properties. FolderId: {FolderId}",
                             newFolderName, folderID);
                     }
                     catch (Exception ex)
                     {
-                        _logger.LogWarning(ex,
-                            "Failed to create folder '{FolderName}' with properties. " +
-                            "Error: {ErrorType} - {ErrorMessage}. Checking if folder was created by another thread...",
-                            newFolderName, ex.GetType().Name, ex.Message);
+                        _fileLogger.LogWarning("Failed to create folder '{FolderName}' with properties. Checking if exists...",
+                            newFolderName);
+                        _dbLogger.LogWarning(ex,
+                            "Failed to create folder '{FolderName}' with properties - Error: {ErrorType}",
+                            newFolderName, ex.GetType().Name);
 
                         // Check if folder exists (might have been created by another thread during race condition)
                         folderID = await _read.GetFolderByRelative(destinationRootId, newFolderName, ct).ConfigureAwait(false);
 
                         if (!string.IsNullOrEmpty(folderID))
                         {
-                            _logger.LogInformation(
+                            _fileLogger.LogInformation(
                                 "Folder '{FolderName}' was created by another thread during race condition. FolderId: {FolderId}",
                                 newFolderName, folderID);
 
@@ -206,16 +209,17 @@ namespace Migration.Infrastructure.Implementation.Document
                         {
                             folderID = await _write.CreateFolderAsync(destinationRootId, newFolderName, null, ct).ConfigureAwait(false);
 
-                            _logger.LogWarning(
+                            _fileLogger.LogWarning(
                                 "Successfully created folder '{FolderName}' WITHOUT properties as fallback. FolderId: {FolderId}",
                                 newFolderName, folderID);
                         }
                         catch (Exception fallbackEx)
                         {
-                            _logger.LogError(fallbackEx,
-                                "Failed to create folder '{FolderName}' even without properties. " +
-                                "Error: {ErrorType} - {ErrorMessage}",
-                                newFolderName, fallbackEx.GetType().Name, fallbackEx.Message);
+                            _fileLogger.LogError("Failed to create folder '{FolderName}' even without properties",
+                                newFolderName);
+                            _dbLogger.LogError(fallbackEx,
+                                "Failed to create folder '{FolderName}' even without properties",
+                                newFolderName);
                             throw; // Re-throw if both attempts fail
                         }
                     }
@@ -225,7 +229,7 @@ namespace Migration.Infrastructure.Implementation.Document
                     // No properties provided, create normally
                     folderID = await _write.CreateFolderAsync(destinationRootId, newFolderName, null, ct).ConfigureAwait(false);
 
-                    _logger.LogDebug(
+                    _fileLogger.LogDebug(
                         "Successfully created folder '{FolderName}' without properties. FolderId: {FolderId}",
                         newFolderName, folderID);
                 }
@@ -234,7 +238,7 @@ namespace Migration.Infrastructure.Implementation.Document
                 // Step 7: Cache the result
                 // ========================================
                 _folderCache.TryAdd(cacheKey, folderID);
-                _logger.LogTrace("Cached folder ID {FolderId} for key '{CacheKey}'", folderID, cacheKey);
+                _fileLogger.LogTrace("Cached folder ID {FolderId} for key '{CacheKey}'", folderID, cacheKey);
 
                 return folderID;
             }
@@ -262,13 +266,13 @@ namespace Migration.Infrastructure.Implementation.Document
 
                 if (string.IsNullOrWhiteSpace(coreId))
                 {
-                    _logger.LogWarning(
+                    _fileLogger.LogWarning(
                         "Could not extract CoreID from folder name '{FolderName}', skipping ClientAPI call",
                         folderName);
                     return toRet;
                 }
 
-                _logger.LogDebug("Extracted CoreID '{CoreId}' from folder '{FolderName}', calling ClientAPI...",
+                _fileLogger.LogDebug("Extracted CoreID '{CoreId}' from folder '{FolderName}', calling ClientAPI...",
                     coreId, folderName);
 
                 // Call ClientAPI to retrieve client data
@@ -276,13 +280,13 @@ namespace Migration.Infrastructure.Implementation.Document
 
                 if (toRet != null)
                 {
-                    _logger.LogInformation(
+                    _fileLogger.LogInformation(
                         "ClientAPI returned data for CoreID '{CoreId}': ClientName='{ClientName}', ClientType='{ClientType}'",
                         coreId, toRet.ClientName, toRet.ClientType);
                 }
                 else
                 {
-                    _logger.LogWarning(
+                    _fileLogger.LogWarning(
                         "ClientAPI returned null for CoreID '{CoreId}' (folder '{FolderName}')",
                         coreId, folderName);
                 }
@@ -290,9 +294,11 @@ namespace Migration.Infrastructure.Implementation.Document
             catch (Exception ex)
             {
                 // Log error but don't throw - ClientAPI failure should not block folder creation
-                _logger.LogError(ex,
-                    "ClientAPI call failed for folder '{FolderName}'. Error: {ErrorType} - {ErrorMessage}. Continuing with folder creation.",
-                    folderName, ex.GetType().Name, ex.Message);
+                _fileLogger.LogWarning("ClientAPI call failed for folder '{FolderName}'. Continuing with folder creation.",
+                    folderName);
+                _dbLogger.LogError(ex,
+                    "ClientAPI call failed for folder '{FolderName}'",
+                    folderName);
             }
 
             return toRet;

@@ -14,18 +14,20 @@ namespace Migration.Infrastructure.Implementation
     public class ClientEnrichmentService : IClientEnrichmentService
     {
         private readonly IClientApi _clientApi;
-        private readonly ILogger<ClientEnrichmentService> _logger;
+        private readonly ILogger _fileLogger;
+        private readonly ILogger _dbLogger;
         private readonly IAlfrescoReadApi? _alfrescoReadApi;
         private readonly IAlfrescoWriteApi? _alfrescoWriteApi;
 
         public ClientEnrichmentService(
             IClientApi clientApi,
-            ILogger<ClientEnrichmentService> logger,
+            ILoggerFactory logger,
             IAlfrescoReadApi? alfrescoReadApi = null,
             IAlfrescoWriteApi? alfrescoWriteApi = null)
         {
             _clientApi = clientApi ?? throw new ArgumentNullException(nameof(clientApi));
-            _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+            _fileLogger = logger.CreateLogger("FileLogger");
+            _dbLogger = logger.CreateLogger("DbLogger");
             _alfrescoReadApi = alfrescoReadApi;
             _alfrescoWriteApi = alfrescoWriteApi;
         }
@@ -41,7 +43,7 @@ namespace Migration.Infrastructure.Implementation
 
             if (string.IsNullOrWhiteSpace(folder.CoreId))
             {
-                _logger.LogWarning(
+                _fileLogger.LogWarning(
                     "Cannot enrich folder {FolderId} ({FolderName}) - CoreId is missing",
                     folder.Id, folder.Name);
                 return folder;
@@ -59,7 +61,7 @@ namespace Migration.Infrastructure.Implementation
                     // Remove dashes from folder name to get new folder name (PI-123 -> PI123)
                     var newFolderName = folder.Name.Replace("-", string.Empty);
 
-                    _logger.LogDebug(
+                    _fileLogger.LogDebug(
                         "Checking if new folder '{NewFolderName}' exists for old folder '{OldFolderName}' in parent '{ParentId}'",
                         newFolderName, folder.Name, folder.DossierDestFolderId);
 
@@ -70,13 +72,13 @@ namespace Migration.Infrastructure.Implementation
 
                     if (newFolderExists)
                     {
-                        _logger.LogInformation(
+                        _fileLogger.LogInformation(
                             "New folder '{NewFolderName}' already exists for folder {FolderId}. Skipping ClientAPI call and folder creation.",
                             newFolderName, folder.Id);
                         return folder;
                     }
 
-                    _logger.LogDebug(
+                    _fileLogger.LogDebug(
                         "New folder '{NewFolderName}' does not exist. Will copy properties from old folder and enrich with ClientAPI.",
                         newFolderName);
 
@@ -86,13 +88,13 @@ namespace Migration.Infrastructure.Implementation
 
                     if (oldFolder?.Entry?.Properties == null)
                     {
-                        _logger.LogWarning(
+                        _fileLogger.LogWarning(
                             "Could not retrieve properties from old folder {FolderId} (NodeId: {NodeId}). Proceeding with ClientAPI only.",
                             folder.Id, folder.NodeId);
                     }
                     else
                     {
-                        _logger.LogDebug(
+                        _fileLogger.LogDebug(
                             "Retrieved {Count} properties from old folder '{OldFolderName}'",
                             oldFolder.Entry.Properties.Count, folder.Name);
 
@@ -110,7 +112,7 @@ namespace Migration.Infrastructure.Implementation
                             newFolderProperties,
                             ct).ConfigureAwait(false);
 
-                        _logger.LogInformation(
+                        _fileLogger.LogInformation(
                             "Created new folder '{NewFolderName}' (NodeId: {NewFolderId}) with {Count} properties copied from old folder '{OldFolderName}' and enriched with ClientAPI data",
                             newFolderName, newFolderId, newFolderProperties.Count, folder.Name);
 
@@ -124,7 +126,7 @@ namespace Migration.Infrastructure.Implementation
                     }
                 }
 
-                _logger.LogDebug(
+                _fileLogger.LogDebug(
                     "Enriching folder {FolderId} ({FolderName}) with client data for CoreId: {CoreId}",
                     folder.Id, folder.Name, folder.CoreId);
 
@@ -134,7 +136,7 @@ namespace Migration.Infrastructure.Implementation
                 // Populate all client-related fields from ClientAPI response
                 PopulateFolderWithClientData(folder, clientDataFallback);
 
-                _logger.LogInformation(
+                _fileLogger.LogInformation(
                     "Successfully enriched folder {FolderId} with client data: " +
                     "CoreId={CoreId}, ClientName={ClientName}, ClientType={ClientType}, " +
                     "MbrJmbg={MbrJmbg}, Residency={Residency}",
@@ -145,10 +147,11 @@ namespace Migration.Infrastructure.Implementation
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex,
-                    "Failed to enrich folder {FolderId} ({FolderName}) with client data for CoreId: {CoreId}. " +
-                    "Continuing without ClientAPI properties. Error: {ErrorType} - {ErrorMessage}",
-                    folder.Id, folder.Name, folder.CoreId, ex.GetType().Name, ex.Message);
+                _fileLogger.LogError("Failed to enrich folder {FolderId} ({FolderName}) - Error: {Error}",
+                    folder.Id, folder.Name, ex.Message);
+                _dbLogger.LogError(ex,
+                    "Failed to enrich folder {FolderId} ({FolderName}) with client data for CoreId: {CoreId}",
+                    folder.Id, folder.Name, folder.CoreId);
 
                 // Return folder without ClientAPI properties - application continues
                 return folder;
@@ -168,7 +171,7 @@ namespace Migration.Infrastructure.Implementation
             // Per documentation line 121-129: Only these document types need account numbers
             if (!IsKdpDocument(document.DocumentType))
             {
-                _logger.LogDebug(
+                _fileLogger.LogDebug(
                     "Skipping account enrichment for document {DocId} - not a KDP document (type: {DocumentType})",
                     document.Id, document.DocumentType);
                 return document;
@@ -176,7 +179,7 @@ namespace Migration.Infrastructure.Implementation
 
             if (string.IsNullOrWhiteSpace(document.CoreId))
             {
-                _logger.LogWarning(
+                _fileLogger.LogWarning(
                     "Cannot enrich document {DocId} with accounts - CoreId is missing",
                     document.Id);
                 return document;
@@ -184,7 +187,7 @@ namespace Migration.Infrastructure.Implementation
 
             if (!document.OriginalCreatedAt.HasValue)
             {
-                _logger.LogWarning(
+                _fileLogger.LogWarning(
                     "Cannot enrich document {DocId} with accounts - OriginalCreatedAt is missing",
                     document.Id);
                 return document;
@@ -192,7 +195,7 @@ namespace Migration.Infrastructure.Implementation
 
             try
             {
-                _logger.LogDebug(
+                _fileLogger.LogDebug(
                     "Enriching document {DocId} (type: {DocumentType}) with active accounts for CoreId: {CoreId} as of {Date}",
                     document.Id, document.DocumentType, document.CoreId, document.OriginalCreatedAt);
 
@@ -204,7 +207,7 @@ namespace Migration.Infrastructure.Implementation
 
                 if (accounts == null || !accounts.Any())
                 {
-                    _logger.LogWarning(
+                    _fileLogger.LogWarning(
                         "No active accounts found for document {DocId}, CoreId: {CoreId}, Date: {Date}",
                         document.Id, document.CoreId, document.OriginalCreatedAt);
                     document.AccountNumbers = string.Empty;
@@ -214,7 +217,7 @@ namespace Migration.Infrastructure.Implementation
                 // Per documentation line 123-129: "racuni su odvojeni zarezom"
                 document.AccountNumbers = string.Join(",", accounts);
 
-                _logger.LogInformation(
+                _fileLogger.LogInformation(
                     "Successfully enriched document {DocId} with {Count} active accounts: {AccountNumbers}",
                     document.Id, accounts.Count, document.AccountNumbers);
 
@@ -222,10 +225,11 @@ namespace Migration.Infrastructure.Implementation
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex,
-                    "Failed to enrich document {DocId} with active accounts for CoreId: {CoreId}. " +
-                    "Continuing without account numbers. Error: {ErrorType} - {ErrorMessage}",
-                    document.Id, document.CoreId, ex.GetType().Name, ex.Message);
+                _fileLogger.LogError("Failed to enrich document {DocId} - Error: {Error}",
+                    document.Id, ex.Message);
+                _dbLogger.LogError(ex,
+                    "Failed to enrich document {DocId} with active accounts for CoreId: {CoreId}",
+                    document.Id, document.CoreId);
 
                 // Set empty account numbers and continue - application continues
                 document.AccountNumbers = string.Empty;
@@ -237,18 +241,18 @@ namespace Migration.Infrastructure.Implementation
         {
             if (string.IsNullOrWhiteSpace(coreId))
             {
-                _logger.LogWarning("Cannot validate client - CoreId is null or empty");
+                _fileLogger.LogWarning("Cannot validate client - CoreId is null or empty");
                 return false;
             }
 
             try
             {
-                _logger.LogDebug("Validating client exists for CoreId: {CoreId}", coreId);
+                _fileLogger.LogDebug("Validating client exists for CoreId: {CoreId}", coreId);
 
                 var exists = await _clientApi.ValidateClientExistsAsync(coreId, ct)
                     .ConfigureAwait(false);
 
-                _logger.LogInformation(
+                _fileLogger.LogInformation(
                     "Client validation for CoreId: {CoreId} result: {Exists}",
                     coreId, exists);
 
@@ -256,10 +260,11 @@ namespace Migration.Infrastructure.Implementation
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex,
-                    "Failed to validate client for CoreId: {CoreId}. " +
-                    "Assuming client does not exist. Error: {ErrorType} - {ErrorMessage}",
-                    coreId, ex.GetType().Name, ex.Message);
+                _fileLogger.LogError("Failed to validate client for CoreId: {CoreId} - Error: {Error}",
+                    coreId, ex.Message);
+                _dbLogger.LogError(ex,
+                    "Failed to validate client for CoreId: {CoreId}",
+                    coreId);
 
                 // Return false on error - treat as non-existent client
                 return false;

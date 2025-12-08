@@ -20,7 +20,8 @@ namespace Migration.Infrastructure.Implementation
     public class ClientApi : IClientApi
     {
         private readonly HttpClient _httpClient;
-        private readonly ILogger<ClientApi> _logger;
+        private readonly ILogger _fileLogger;
+        private readonly ILogger _dbLogger;
         private readonly ClientApiOptions _options;
         private readonly IMemoryCache _cache;
 
@@ -31,11 +32,12 @@ namespace Migration.Infrastructure.Implementation
         public ClientApi(
             HttpClient httpClient,
             IOptions<ClientApiOptions> options,
-            ILogger<ClientApi> logger,
+            ILoggerFactory logger,
             IMemoryCache cache)
         {
             _httpClient = httpClient ?? throw new ArgumentNullException(nameof(httpClient));
-            _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+            _fileLogger = logger.CreateLogger("FileLogger");
+            _dbLogger = logger.CreateLogger("DbLogger");
             _options = options?.Value ?? throw new ArgumentNullException(nameof(options));
             _cache = cache ?? throw new ArgumentNullException(nameof(cache));
         }
@@ -44,7 +46,7 @@ namespace Migration.Infrastructure.Implementation
         {
             if (string.IsNullOrWhiteSpace(coreId))
             {
-                _logger.LogWarning("GetClientDataAsync called with null or empty CoreId, returning empty ClientData");
+                _fileLogger.LogWarning("GetClientDataAsync called with null or empty CoreId, returning empty ClientData");
                 return CreateEmptyClientData(coreId ?? string.Empty);
             }
 
@@ -52,15 +54,15 @@ namespace Migration.Infrastructure.Implementation
             var cacheKey = $"{CacheKeyPrefix}ClientData_{coreId}";
             if (_cache.TryGetValue(cacheKey, out ClientData? cachedData) && cachedData != null)
             {
-                _logger.LogDebug("Cache HIT for client data CoreId: {CoreId}", coreId);
+                _fileLogger.LogDebug("Cache HIT for client data CoreId: {CoreId}", coreId);
                 return cachedData;
             }
 
-            _logger.LogDebug("Cache MISS for client data CoreId: {CoreId}, fetching from API", coreId);
+            _fileLogger.LogDebug("Cache MISS for client data CoreId: {CoreId}, fetching from API", coreId);
 
             try
             {
-                _logger.LogDebug("Fetching client data for CoreId: {CoreId}", coreId);
+                _fileLogger.LogDebug("Fetching client data for CoreId: {CoreId}", coreId);
 
                 // Use GetClientDetailExtended endpoint which has most comprehensive data
                 var endpoint = $"{_options.GetClientDataEndpoint}/{coreId}";
@@ -73,7 +75,7 @@ namespace Migration.Infrastructure.Implementation
 
                 if (mockClientData == null)
                 {
-                    _logger.LogWarning("Client API returned null data for CoreId: {CoreId}, returning empty ClientData", coreId);
+                    _fileLogger.LogWarning("Client API returned null data for CoreId: {CoreId}, returning empty ClientData", coreId);
                     return CreateEmptyClientData(coreId);
                 }
 
@@ -100,38 +102,41 @@ namespace Migration.Infrastructure.Implementation
                     BarCLEXCode = mockClientData.BarCLEXCode
                 };
 
-                _logger.LogInformation(
+                _fileLogger.LogInformation(
                     "Successfully retrieved client data for CoreId: {CoreId}, ClientName: {ClientName}, ClientType: {ClientType}",
                     coreId, clientData.ClientName, clientData.ClientType);
 
                 // Cache the result
                 _cache.Set(cacheKey, clientData, CacheDuration);
-                _logger.LogDebug("Cached client data for CoreId: {CoreId} with TTL: {Duration}", coreId, CacheDuration);
+                _fileLogger.LogDebug("Cached client data for CoreId: {CoreId} with TTL: {Duration}", coreId, CacheDuration);
 
                 return clientData;
             }
             catch (HttpRequestException ex)
             {
-                _logger.LogError(ex,
-                    "HTTP request failed while fetching client data for CoreId: {CoreId}. " +
-                    "Error: {ErrorMessage}. Returning empty ClientData.",
-                    coreId, ex.Message);
+                _fileLogger.LogError("HTTP request failed while fetching client data for CoreId: {CoreId}. Returning empty ClientData.",
+                    coreId);
+                _dbLogger.LogError(ex,
+                    "HTTP request failed while fetching client data for CoreId: {CoreId}",
+                    coreId);
                 return CreateEmptyClientData(coreId);
             }
             catch (TaskCanceledException ex)
             {
-                _logger.LogError(ex,
-                    "Request timeout while fetching client data for CoreId: {CoreId}. " +
-                    "Error: {ErrorMessage}. Returning empty ClientData.",
-                    coreId, ex.Message);
+                _fileLogger.LogError("Request timeout while fetching client data for CoreId: {CoreId}. Returning empty ClientData.",
+                    coreId);
+                _dbLogger.LogError(ex,
+                    "Request timeout while fetching client data for CoreId: {CoreId}",
+                    coreId);
                 return CreateEmptyClientData(coreId);
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex,
-                    "Unexpected error while fetching client data for CoreId: {CoreId}. " +
-                    "Error: {ErrorType} - {ErrorMessage}. Returning empty ClientData.",
-                    coreId, ex.GetType().Name, ex.Message);
+                _fileLogger.LogError("Unexpected error while fetching client data for CoreId: {CoreId}. Returning empty ClientData.",
+                    coreId);
+                _dbLogger.LogError(ex,
+                    "Unexpected error while fetching client data for CoreId: {CoreId}",
+                    coreId);
                 return CreateEmptyClientData(coreId);
             }
         }
@@ -140,19 +145,19 @@ namespace Migration.Infrastructure.Implementation
         {
             if (string.IsNullOrWhiteSpace(coreId))
             {
-                _logger.LogWarning("GetActiveAccountsAsync called with null or empty CoreId, returning empty list");
+                _fileLogger.LogWarning("GetActiveAccountsAsync called with null or empty CoreId, returning empty list");
                 return new List<string>();
             }
 
             try
             {
-                _logger.LogDebug(
+                _fileLogger.LogDebug(
                     "Fetching active accounts for CoreId: {CoreId} as of date: {AsOfDate}",
                     coreId, asOfDate);
 
                 // Mock API doesn't have active accounts endpoint, so we'll generate mock data
                 // In production, this would call a real endpoint
-                _logger.LogWarning(
+                _fileLogger.LogWarning(
                     "GetActiveAccountsAsync called but mock API doesn't support this. Returning empty list. CoreId: {CoreId}",
                     coreId);
 
@@ -169,13 +174,13 @@ namespace Migration.Infrastructure.Implementation
 
                 if (accounts == null)
                 {
-                    _logger.LogWarning(
+                    _fileLogger.LogWarning(
                         "Client API returned null accounts list for CoreId: {CoreId}, returning empty list",
                         coreId);
                     return new List<string>();
                 }
 
-                _logger.LogInformation(
+                _fileLogger.LogInformation(
                     "Successfully retrieved {Count} active accounts for CoreId: {CoreId} as of {AsOfDate}",
                     accounts.Count, coreId, asOfDate);
 
@@ -184,7 +189,7 @@ namespace Migration.Infrastructure.Implementation
             }
             catch (HttpRequestException ex)
             {
-                _logger.LogError(ex,
+                _fileLogger.LogError(ex,
                     "HTTP request failed while fetching active accounts for CoreId: {CoreId}. " +
                     "Error: {ErrorMessage}. Returning empty list.",
                     coreId, ex.Message);
@@ -192,7 +197,7 @@ namespace Migration.Infrastructure.Implementation
             }
             catch (TaskCanceledException ex)
             {
-                _logger.LogError(ex,
+                _fileLogger.LogError(ex,
                     "Request timeout while fetching active accounts for CoreId: {CoreId}. " +
                     "Error: {ErrorMessage}. Returning empty list.",
                     coreId, ex.Message);
@@ -200,10 +205,11 @@ namespace Migration.Infrastructure.Implementation
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex,
-                    "Unexpected error while fetching active accounts for CoreId: {CoreId}. " +
-                    "Error: {ErrorType} - {ErrorMessage}. Returning empty list.",
-                    coreId, ex.GetType().Name, ex.Message);
+                _fileLogger.LogError("Unexpected error while fetching active accounts for CoreId: {CoreId}. Returning empty list.",
+                    coreId);
+                _dbLogger.LogError(ex,
+                    "Unexpected error while fetching active accounts for CoreId: {CoreId}",
+                    coreId);
                 return new List<string>();
             }
         }
@@ -212,7 +218,7 @@ namespace Migration.Infrastructure.Implementation
         {
             if (string.IsNullOrWhiteSpace(coreId))
             {
-                _logger.LogWarning("ValidateClientExistsAsync called with null or empty CoreId, returning false");
+                _fileLogger.LogWarning("ValidateClientExistsAsync called with null or empty CoreId, returning false");
                 return false;
             }
 
@@ -220,15 +226,15 @@ namespace Migration.Infrastructure.Implementation
             var cacheKey = $"{CacheKeyPrefix}ClientExists_{coreId}";
             if (_cache.TryGetValue(cacheKey, out bool cachedExists))
             {
-                _logger.LogDebug("Cache HIT for client validation CoreId: {CoreId}, exists: {Exists}", coreId, cachedExists);
+                _fileLogger.LogDebug("Cache HIT for client validation CoreId: {CoreId}, exists: {Exists}", coreId, cachedExists);
                 return cachedExists;
             }
 
-            _logger.LogDebug("Cache MISS for client validation CoreId: {CoreId}, checking API", coreId);
+            _fileLogger.LogDebug("Cache MISS for client validation CoreId: {CoreId}, checking API", coreId);
 
             try
             {
-                _logger.LogDebug("Validating client exists for CoreId: {CoreId}", coreId);
+                _fileLogger.LogDebug("Validating client exists for CoreId: {CoreId}", coreId);
 
                 // Use GetClientDetail endpoint to check if client exists
                 var endpoint = $"{_options.ValidateClientEndpoint}/{coreId}";
@@ -237,38 +243,41 @@ namespace Migration.Infrastructure.Implementation
 
                 var exists = response.IsSuccessStatusCode;
 
-                _logger.LogInformation(
+                _fileLogger.LogInformation(
                     "Client validation for CoreId: {CoreId} result: {Exists}",
                     coreId, exists);
 
                 // Cache the result
                 _cache.Set(cacheKey, exists, CacheDuration);
-                _logger.LogDebug("Cached client validation for CoreId: {CoreId} with TTL: {Duration}", coreId, CacheDuration);
+                _fileLogger.LogDebug("Cached client validation for CoreId: {CoreId} with TTL: {Duration}", coreId, CacheDuration);
 
                 return exists;
             }
             catch (HttpRequestException ex)
             {
-                _logger.LogError(ex,
-                    "HTTP request failed while validating client for CoreId: {CoreId}. " +
-                    "Error: {ErrorMessage}. Assuming client does not exist.",
-                    coreId, ex.Message);
+                _fileLogger.LogError("HTTP request failed while validating client for CoreId: {CoreId}. Assuming client does not exist.",
+                    coreId);
+                _dbLogger.LogError(ex,
+                    "HTTP request failed while validating client for CoreId: {CoreId}",
+                    coreId);
                 return false;
             }
             catch (TaskCanceledException ex)
             {
-                _logger.LogError(ex,
-                    "Request timeout while validating client for CoreId: {CoreId}. " +
-                    "Error: {ErrorMessage}. Assuming client does not exist.",
-                    coreId, ex.Message);
+                _fileLogger.LogError("Request timeout while validating client for CoreId: {CoreId}. Assuming client does not exist.",
+                    coreId);
+                _dbLogger.LogError(ex,
+                    "Request timeout while validating client for CoreId: {CoreId}",
+                    coreId);
                 return false;
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex,
-                    "Unexpected error while validating client for CoreId: {CoreId}. " +
-                    "Error: {ErrorType} - {ErrorMessage}. Assuming client does not exist.",
-                    coreId, ex.GetType().Name, ex.Message);
+                _fileLogger.LogError("Unexpected error while validating client for CoreId: {CoreId}. Assuming client does not exist.",
+                    coreId);
+                _dbLogger.LogError(ex,
+                    "Unexpected error while validating client for CoreId: {CoreId}",
+                    coreId);
                 return false;
             }
         }

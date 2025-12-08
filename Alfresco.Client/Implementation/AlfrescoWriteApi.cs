@@ -19,13 +19,15 @@ namespace Alfresco.Client.Implementation
     {
         private readonly HttpClient _client;
         private readonly AlfrescoOptions _options;
-        private readonly ILogger<AlfrescoWriteApi> _logger;
+        private readonly ILogger _fileLogger;
+        private readonly ILogger _dbLogger;
 
-        public AlfrescoWriteApi(HttpClient client, IOptions<AlfrescoOptions> options, ILogger<AlfrescoWriteApi> logger)
+        public AlfrescoWriteApi(HttpClient client, IOptions<AlfrescoOptions> options, ILoggerFactory logger)
         {
             _client = client;
             _options = options.Value;
-            _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+            _fileLogger = logger.CreateLogger("FileLogger");
+            _dbLogger = logger.CreateLogger("DbLogger");
         }
 
         public async Task<string> CreateFileAsync(string parentFolderId, string newFileName, CancellationToken ct = default)
@@ -74,7 +76,7 @@ namespace Alfresco.Client.Implementation
             // First attempt: Try with properties if provided
             if (properties != null && properties.Count > 0)
             {
-                _logger.LogDebug(
+                _fileLogger.LogDebug(
                     "Attempting to create folder '{FolderName}' with {PropertyCount} properties under parent '{ParentId}'",
                     newFolderName, properties.Count, parentFolderId);
 
@@ -82,7 +84,7 @@ namespace Alfresco.Client.Implementation
                 {
                     var folderId = await CreateFolderInternalAsync(parentFolderId, newFolderName, properties, jsonSerializerSettings, ct).ConfigureAwait(false);
 
-                    _logger.LogInformation(
+                    _fileLogger.LogInformation(
                         "Successfully created folder '{FolderName}' with properties. FolderId: {FolderId}",
                         newFolderName, folderId);
 
@@ -90,7 +92,7 @@ namespace Alfresco.Client.Implementation
                 }
                 catch (AlfrescoPropertyException propEx)
                 {
-                    _logger.LogWarning(
+                    _fileLogger.LogWarning(
                         "Property error when creating folder '{FolderName}': {ErrorKey} - {BriefSummary} (LogId: {LogId}). " +
                         "Retrying without properties.",
                         newFolderName, propEx.ErrorKey, propEx.BriefSummary, propEx.LogId);
@@ -100,10 +102,11 @@ namespace Alfresco.Client.Implementation
                 }
                 catch (Exception ex)
                 {
-                    _logger.LogError(ex,
-                        "Unexpected error creating folder '{FolderName}' with properties. " +
-                        "Error: {ErrorType} - {ErrorMessage}. Retrying without properties.",
-                        newFolderName, ex.GetType().Name, ex.Message);
+                    _fileLogger.LogError("Unexpected error creating folder '{FolderName}' with properties. Retrying without properties.",
+                        newFolderName);
+                    _dbLogger.LogError(ex,
+                        "Unexpected error creating folder '{FolderName}' with properties",
+                        newFolderName);
 
                     // Fallback: Retry without properties
                     return await CreateFolderInternalAsync(parentFolderId, newFolderName, null, jsonSerializerSettings, ct).ConfigureAwait(false);
@@ -112,7 +115,7 @@ namespace Alfresco.Client.Implementation
             else
             {
                 // No properties, create normally
-                _logger.LogDebug(
+                _fileLogger.LogDebug(
                     "Creating folder '{FolderName}' without properties under parent '{ParentId}'",
                     newFolderName, parentFolderId);
 
@@ -185,7 +188,7 @@ namespace Alfresco.Client.Implementation
                 catch (JsonException)
                 {
                     // Could not parse error response, throw generic error
-                    _logger.LogWarning(
+                    _fileLogger.LogWarning(
                         "Could not parse Alfresco error response. Status: {StatusCode}, Content: {Content}",
                         response.StatusCode, responseContent);
                 }
@@ -208,7 +211,7 @@ namespace Alfresco.Client.Implementation
         {
             try
             {
-                _logger.LogDebug("Moving node {NodeId} to folder {TargetFolderId}", nodeId, targetFolderId);
+                _fileLogger.LogDebug("Moving node {NodeId} to folder {TargetFolderId}", nodeId, targetFolderId);
 
                 var jsonSerializerSettings = new JsonSerializerSettings
                 {
@@ -226,14 +229,14 @@ namespace Alfresco.Client.Implementation
 
                 if (res.IsSuccessStatusCode)
                 {
-                    _logger.LogDebug("Successfully moved node {NodeId} to folder {TargetFolderId}", nodeId, targetFolderId);
+                    _fileLogger.LogDebug("Successfully moved node {NodeId} to folder {TargetFolderId}", nodeId, targetFolderId);
                     return true;
                 }
 
                 // Handle error response
                 var errorContent = await res.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
 
-                _logger.LogWarning(
+                _fileLogger.LogWarning(
                     "Failed to move node {NodeId} to folder {TargetFolderId}: {StatusCode} - {Error}",
                     nodeId, targetFolderId, res.StatusCode, errorContent);
 
@@ -244,21 +247,21 @@ namespace Alfresco.Client.Implementation
 
                     if (errorResponse?.Error != null)
                     {
-                        _logger.LogError(
+                        _fileLogger.LogError(
                             "Alfresco move error for node {NodeId}: {ErrorKey} - {BriefSummary} (LogId: {LogId})",
                             nodeId, errorResponse.Error.ErrorKey, errorResponse.Error.BriefSummary, errorResponse.Error.LogId);
                     }
                 }
                 catch (JsonException)
                 {
-                    _logger.LogWarning("Could not parse error response for move operation on node {NodeId}", nodeId);
+                    _fileLogger.LogWarning("Could not parse error response for move operation on node {NodeId}", nodeId);
                 }
 
                 return false;
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Error moving node {NodeId} to folder {TargetFolderId}", nodeId, targetFolderId);
+                _fileLogger.LogError(ex, "Error moving node {NodeId} to folder {TargetFolderId}", nodeId, targetFolderId);
                 throw;
             }
         }
@@ -267,7 +270,7 @@ namespace Alfresco.Client.Implementation
         {
             try
             {
-                _logger.LogDebug("Copying node {NodeId} to folder {TargetFolderId}", nodeId, targetFolderId);
+                _fileLogger.LogDebug("Copying node {NodeId} to folder {TargetFolderId}", nodeId, targetFolderId);
 
                 var jsonSerializerSettings = new JsonSerializerSettings
                 {
@@ -285,14 +288,14 @@ namespace Alfresco.Client.Implementation
 
                 if (res.IsSuccessStatusCode)
                 {
-                    _logger.LogDebug("Successfully copied node {NodeId} to folder {TargetFolderId}", nodeId, targetFolderId);
+                    _fileLogger.LogDebug("Successfully copied node {NodeId} to folder {TargetFolderId}", nodeId, targetFolderId);
                     return true;
                 }
 
                 // Handle error response
                 var errorContent = await res.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
 
-                _logger.LogWarning(
+                _fileLogger.LogWarning(
                     "Failed to copy node {NodeId} to folder {TargetFolderId}: {StatusCode} - {Error}",
                     nodeId, targetFolderId, res.StatusCode, errorContent);
 
@@ -303,21 +306,21 @@ namespace Alfresco.Client.Implementation
 
                     if (errorResponse?.Error != null)
                     {
-                        _logger.LogError(
+                        _fileLogger.LogError(
                             "Alfresco copy error for node {NodeId}: {ErrorKey} - {BriefSummary} (LogId: {LogId})",
                             nodeId, errorResponse.Error.ErrorKey, errorResponse.Error.BriefSummary, errorResponse.Error.LogId);
                     }
                 }
                 catch (JsonException)
                 {
-                    _logger.LogWarning("Could not parse error response for copy operation on node {NodeId}", nodeId);
+                    _fileLogger.LogWarning("Could not parse error response for copy operation on node {NodeId}", nodeId);
                 }
 
                 return false;
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Error copying node {NodeId} to folder {TargetFolderId}", nodeId, targetFolderId);
+                _fileLogger.LogError(ex, "Error copying node {NodeId} to folder {TargetFolderId}", nodeId, targetFolderId);
                 throw;
             }
         }
@@ -326,7 +329,7 @@ namespace Alfresco.Client.Implementation
         {
             try
             {
-                _logger.LogDebug("Updating properties for node {NodeId} ({Count} properties)", nodeId, properties.Count);
+                _fileLogger.LogDebug("Updating properties for node {NodeId} ({Count} properties)", nodeId, properties.Count);
 
                 var jsonSerializerSettings = new JsonSerializerSettings
                 {
@@ -343,7 +346,7 @@ namespace Alfresco.Client.Implementation
                 };
 
                 var json = JsonConvert.SerializeObject(body, jsonSerializerSettings);
-                _logger.LogTrace("Update properties request body: {Json}", json);
+                _fileLogger.LogTrace("Update properties request body: {Json}", json);
 
                 using var content = new StringContent(json, Encoding.UTF8, "application/json");
                 using var response = await _client.PutAsync(
@@ -353,14 +356,14 @@ namespace Alfresco.Client.Implementation
 
                 if (response.IsSuccessStatusCode)
                 {
-                    _logger.LogDebug("Successfully updated properties for node {NodeId}", nodeId);
+                    _fileLogger.LogDebug("Successfully updated properties for node {NodeId}", nodeId);
                     return true;
                 }
 
                 // Handle error response
                 var errorContent = await response.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
 
-                _logger.LogWarning(
+                _fileLogger.LogWarning(
                     "Failed to update properties for node {NodeId}: {StatusCode} - {Error}",
                     nodeId, response.StatusCode, errorContent);
 
@@ -374,7 +377,7 @@ namespace Alfresco.Client.Implementation
                         // Check if it's a property error (unknown property, etc.)
                         if (IsPropertyError(errorResponse))
                         {
-                            _logger.LogError(
+                            _fileLogger.LogError(
                                 "Property error updating node {NodeId}: {ErrorKey} - {BriefSummary}",
                                 nodeId, errorResponse.Error.ErrorKey, errorResponse.Error.BriefSummary);
 
@@ -389,7 +392,7 @@ namespace Alfresco.Client.Implementation
                 catch (JsonException)
                 {
                     // If we can't parse error response, just log and return false
-                    _logger.LogWarning("Could not parse error response for node {NodeId}", nodeId);
+                    _fileLogger.LogWarning("Could not parse error response for node {NodeId}", nodeId);
                 }
 
                 return false;
@@ -401,7 +404,7 @@ namespace Alfresco.Client.Implementation
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Error updating properties for node {NodeId}", nodeId);
+                _fileLogger.LogError(ex, "Error updating properties for node {NodeId}", nodeId);
                 throw;
             }
         }
