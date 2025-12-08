@@ -15,7 +15,7 @@
             <RowDefinition Height="*"></RowDefinition>
             <RowDefinition Height="Auto"></RowDefinition>
         </Grid.RowDefinitions>
-        <TabControl x:Name="tcMain" Grid.Row="0" SelectedIndex="0" SelectionChanged="TabControl_SelectionChanged" >
+        <TabControl  x:Name="tcMain" Grid.Row="0" SelectedIndex="0" SelectionChanged="TabControl_SelectionChanged" >
             <TabItem Header="Dashboard" Visibility="Collapsed">
                 <Grid x:Name="MainGrid" Grid.Row="0">
                     <Grid.ColumnDefinitions>
