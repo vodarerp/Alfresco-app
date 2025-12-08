@@ -25,7 +25,8 @@ namespace Migration.Infrastructure.Implementation.Services
         private readonly IServiceScopeFactory _scopeFactory;
         private readonly ILogger _fileLogger;
         private readonly ILogger _dbLogger;
-        
+        private readonly ILogger _uiLogger;
+
         private readonly string _rootDestinationFolderId;
 
         private const int MAX_PARALLELISM = 50; // 30-50 concurrent folder creations
@@ -46,6 +47,7 @@ namespace Migration.Infrastructure.Implementation.Services
             _scopeFactory = scopeFactory ?? throw new ArgumentNullException(nameof(scopeFactory));
             _fileLogger = logger.CreateLogger("FileLogger");
             _dbLogger = logger.CreateLogger("DbLogger");
+            _uiLogger = logger.CreateLogger("UiLogger");
             _rootDestinationFolderId = migrationOptions?.Value?.RootDestinationFolderId ?? throw new ArgumentNullException(nameof(migrationOptions));
         }
 
@@ -75,7 +77,32 @@ namespace Migration.Infrastructure.Implementation.Services
 
                 if (totalFolders == 0)
                 {
-                    _fileLogger.LogWarning("No folders to create - DocStaging might be empty");
+                    _fileLogger.LogInformation("✅ No new folders to create - all folders already exist or no documents ready for processing");
+                    _dbLogger.LogInformation("No new folders to create - skipping folder preparation");
+                    _uiLogger.LogInformation("Folder Preparation: No new folders needed");
+
+                    // Update phase checkpoint to indicate completion (0 folders to process)
+                    await UpdateTotalItemsAsync(0, ct).ConfigureAwait(false);
+
+                    // Check if there are documents ready for Move phase
+                    var documentsReady = await CheckDocumentsReadyForMoveAsync(ct).ConfigureAwait(false);
+
+                    if (documentsReady > 0)
+                    {
+                        _fileLogger.LogInformation("✅ FolderPreparation phase completed - {Count} documents ready for Move phase", documentsReady);
+                        _dbLogger.LogInformation("FolderPreparation skipped - {Count} documents ready for move", documentsReady);
+                        _uiLogger.LogInformation("Folder Preparation: Skipped (all folders exist) - {Count} documents ready for Move", documentsReady);
+                    }
+                    else
+                    {
+                        _fileLogger.LogWarning("⚠️ No documents ready for Move phase - DocStaging might be empty or all documents already processed");
+                        _dbLogger.LogWarning("No documents ready for move after FolderPreparation");
+                        _uiLogger.LogWarning("Folder Preparation: No documents ready for migration");
+                    }
+
+                    // Mark checkpoint as having processed 0 items (which is correct - nothing to do)
+                    await SaveCheckpointAsync(0, ct).ConfigureAwait(false);
+
                     return;
                 }
 
@@ -679,6 +706,37 @@ namespace Migration.Infrastructure.Implementation.Services
                 _fileLogger.LogWarning(ex, "Failed to batch update FolderStaging");
                 _dbLogger.LogError(ex, "Failed to batch update FolderStaging");
                 // Don't throw - this is not critical
+            }
+        }
+
+        /// <summary>
+        /// Checks how many documents are ready for Move phase (have Status=READY and DestinationFolderId populated)
+        /// </summary>
+        private async Task<long> CheckDocumentsReadyForMoveAsync(CancellationToken ct)
+        {
+            try
+            {
+                await using var scope = _scopeFactory.CreateAsyncScope();
+                var uow = scope.ServiceProvider.GetRequiredService<IUnitOfWork>();
+                var docRepo = scope.ServiceProvider.GetRequiredService<IDocStagingRepository>();
+
+                await uow.BeginAsync(ct: ct).ConfigureAwait(false);
+                try
+                {
+                    var count = await docRepo.CountReadyForProcessingAsync(ct).ConfigureAwait(false);
+                    await uow.CommitAsync(ct: ct).ConfigureAwait(false);
+                    return count;
+                }
+                catch
+                {
+                    await uow.RollbackAsync(ct: ct).ConfigureAwait(false);
+                    throw;
+                }
+            }
+            catch (Exception ex)
+            {
+                _fileLogger.LogError(ex, "Failed to check documents ready for move");
+                return 0;
             }
         }
     }

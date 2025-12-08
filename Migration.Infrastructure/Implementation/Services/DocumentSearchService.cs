@@ -73,6 +73,11 @@ namespace Migration.Infrastructure.Implementation.Services
         {
             _docTypesOverride = docTypes;
             _fileLogger.LogInformation("DocTypes override set: {DocTypes}", string.Join(", ", docTypes));
+
+            // Reset folder iteration when docTypes change - start from beginning
+            _currentFolderTypeIndex = 0;
+            _currentSkipCount = 0;
+            _fileLogger.LogInformation("Reset folder iteration - starting from folder index 0");
         }
 
         public List<string> GetCurrentDocTypes()
