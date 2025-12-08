@@ -85,7 +85,7 @@ namespace Migration.Infrastructure.Implementation.Services
                     // FAZA 1: DocumentSearch (searches by ecm:docType, populates both tables)
                     // ====================================================================
                     await ExecutePhaseAsync(
-                        MigrationPhase.FolderDiscovery,  // Reuse phase enum - this replaces FolderDiscovery+DocumentDiscovery
+                        MigrationPhase.DocumentSearch,
                         "FAZA 1: DocumentSearch (by ecm:docType)",
                         async (token) => await _documentSearch.RunLoopAsync(token),
                         ct);
