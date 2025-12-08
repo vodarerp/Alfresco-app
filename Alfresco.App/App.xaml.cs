@@ -9,6 +9,7 @@ using Alfresco.Client.Helpers;
 using Alfresco.Client.Implementation;
 using Alfresco.Contracts.Options;
 using Alfresco.Contracts.Oracle;
+using Alfresco.Contracts.SqlServer;
 using Dapper;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -39,6 +40,7 @@ using Polly.Extensions.Http;
 using SqlServer.Abstraction.Interfaces;
 using SqlServer.Infrastructure.Implementation;
 using System.Configuration;
+using System.IO;
 using System.Windows;
 using System.Xml.Linq;
 using static Alfresco.App.Helpers.PolicyHelpers;
@@ -85,14 +87,23 @@ namespace Alfresco.App
 
         public App()
         {
+            // Ensure connections config exists in local directory
+            EnsureConnectionsConfigExists();
 
             AppHost = Host.CreateDefaultBuilder()
+                .ConfigureAppConfiguration((context, config) =>
+                {
+                    // Load connections config from local directory
+                    config.AddJsonFile("appsettings.Connections.json", optional: true, reloadOnChange: true);
+                })
                 .ConfigureServices((context, services) =>
                 {
+                    // Register ConnectionsOptions - loaded from appsettings.Connections.json
+                    services.Configure<ConnectionsOptions>(context.Configuration);
 
-                    
-
+                    // Register individual connection options for backward compatibility
                     services.Configure<AlfrescoOptions>(context.Configuration.GetSection("Alfresco"));
+                    services.Configure<SqlServerOptions>(context.Configuration.GetSection("SqlServer"));
 
                     services.AddTransient<BasicAuthHandler>();
 
@@ -118,8 +129,17 @@ namespace Alfresco.App
                     })
                         .ConfigureHttpClient((sp, cli) =>
                         {
-                            var options = sp.GetRequiredService<IOptions<AlfrescoOptions>>().Value;
-                            cli.BaseAddress = new Uri(options.BaseUrl);
+                            // Try ConnectionsOptions first, fallback to AlfrescoOptions
+                            var connOptions = sp.GetService<IOptions<ConnectionsOptions>>()?.Value;
+                            var baseUrl = connOptions?.Alfresco?.BaseUrl;
+
+                            if (string.IsNullOrEmpty(baseUrl))
+                            {
+                                var options = sp.GetRequiredService<IOptions<AlfrescoOptions>>().Value;
+                                baseUrl = options.BaseUrl;
+                            }
+
+                            cli.BaseAddress = new Uri(baseUrl);
                             cli.DefaultRequestHeaders.Accept.Add(new System.Net.Http.Headers.MediaTypeWithQualityHeaderValue("application/json"));
                             cli.DefaultRequestHeaders.ConnectionClose = false; // Keep-Alive
                         })
@@ -197,15 +217,26 @@ namespace Alfresco.App
                     })
                         .ConfigureHttpClient((sp, cli) =>
                         {
-                            var options = sp.GetRequiredService<IOptions<Migration.Infrastructure.Implementation.ClientApiOptions>>().Value;
-                            cli.BaseAddress = new Uri(options.BaseUrl);
+                            // Try ConnectionsOptions first, fallback to ClientApiOptions
+                            var connOptions = sp.GetService<IOptions<ConnectionsOptions>>()?.Value;
+                            var baseUrl = connOptions?.ClientApi?.BaseUrl;
+                            string? apiKey = connOptions?.ClientApi?.ApiKey;
+
+                            if (string.IsNullOrEmpty(baseUrl))
+                            {
+                                var options = sp.GetRequiredService<IOptions<Migration.Infrastructure.Implementation.ClientApiOptions>>().Value;
+                                baseUrl = options.BaseUrl;
+                                apiKey = options.ApiKey;
+                            }
+
+                            cli.BaseAddress = new Uri(baseUrl);
                             cli.DefaultRequestHeaders.Accept.Add(
                                 new System.Net.Http.Headers.MediaTypeWithQualityHeaderValue("application/json"));
 
                             // Add API key header if configured
-                            if (!string.IsNullOrEmpty(options.ApiKey))
+                            if (!string.IsNullOrEmpty(apiKey))
                             {
-                                cli.DefaultRequestHeaders.Add("X-API-Key", options.ApiKey);
+                                cli.DefaultRequestHeaders.Add("X-API-Key", apiKey);
                             }
                         })
                         .ConfigurePrimaryHttpMessageHandler(() => new System.Net.Http.SocketsHttpHandler
@@ -257,7 +288,13 @@ namespace Alfresco.App
                    // services.Configure<WorkerSetting>(context.Configuration.GetSection("WorkerSetting"));
 
                     //services.AddScoped<IUnitOfWork>(sp => new OracleUnitOfWork(sp.GetRequiredService<OracleOptions>().ConnectionString));
-                    services.AddScoped<IUnitOfWork>(sp => new SqlServerUnitOfWork(sp.GetRequiredService<Alfresco.Contracts.SqlServer.SqlServerOptions>().ConnectionString));
+
+                    // Use ConnectionsOptions for centralized connection management
+                    services.AddScoped<IUnitOfWork>(sp =>
+                    {
+                        var connOptions = sp.GetRequiredService<IOptions<ConnectionsOptions>>().Value;
+                        return new SqlServerUnitOfWork(connOptions.SqlServer.ConnectionString);
+                    });
 
                     services.AddTransient<IFolderReader, FolderReader>();
                     services.AddTransient<IFolderIngestor,FolderIngestor>();
@@ -388,8 +425,37 @@ namespace Alfresco.App
         protected override async void OnExit(ExitEventArgs e)
         {
             if (AppHost is not null) await AppHost.StopAsync();
-            
+
             base.OnExit(e);
+        }
+
+        /// <summary>
+        /// Ensures connections config exists in local directory, creates from template if not
+        /// </summary>
+        private static void EnsureConnectionsConfigExists()
+        {
+            try
+            {
+                var currentDir = AppDomain.CurrentDomain.BaseDirectory;
+                var localConnectionsPath = Path.Combine(currentDir, "appsettings.Connections.json");
+
+                // If local connections file doesn't exist, create it from example
+                if (!File.Exists(localConnectionsPath))
+                {
+                    var examplePath = Path.Combine(currentDir, "appsettings.Connections.Example.json");
+
+                    if (File.Exists(examplePath))
+                    {
+                        // Copy example to local directory
+                        File.Copy(examplePath, localConnectionsPath);
+                    }
+                       
+                }
+            }
+            catch 
+            {
+               
+            }
         }
 
     }

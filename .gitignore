@@ -362,3 +362,7 @@ MigrationBackup/
 # Fody - auto-generated XML schema
 FodyWeavers.xsd
 *.zip
+
+# Connection strings and sensitive configuration
+appsettings.Connections.json
+**/appsettings.Connections.json

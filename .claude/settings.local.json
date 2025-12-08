@@ -35,7 +35,8 @@
       "Bash(Select-String -Pattern \"error|warning CS|Build succeeded|Build FAILED\" -Context 1,1)",
       "Bash(Select-String -Pattern \"CA_MockData|Build succeeded|Build FAILED\" -Context 1,1)",
       "Bash(sqlcmd:*)",
-      "Bash(Select-Object -Last 30)"
+      "Bash(Select-Object -Last 30)",
+      "Bash(Select-String -Pattern \"error|warning|Build succeeded|Build FAILED\" -Context 1,1)"
     ],
     "deny": [],
     "ask": []
