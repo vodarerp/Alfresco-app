@@ -527,53 +527,55 @@ namespace Migration.Infrastructure.Implementation.Services
                 string? migratedDocType = null;
                 string? migratedNaziv = null;
 
-                await uow.BeginAsync(ct: ct).ConfigureAwait(false);
-                try
-                {
-                    if (!string.IsNullOrWhiteSpace(doc.DocDescription))
-                    {
-                        // Try to find by original name (Naziv field)
-                        var mapping = await mappingService.FindByOriginalNameAsync(doc.DocDescription, ct).ConfigureAwait(false);
+                migratedDocType = doc.NewDocumentCode;
+                migratedNaziv = doc.NewDocumentName;
+                //await uow.BeginAsync(ct: ct).ConfigureAwait(false);
+                //try
+                //{
+                //    if (!string.IsNullOrWhiteSpace(doc.DocDescription))
+                //    {
+                //        // Try to find by original name (Naziv field)
+                //        var mapping = await mappingService.FindByOriginalNameAsync(doc.DocDescription, ct).ConfigureAwait(false);
 
-                        // If not found, try by Serbian name (NazivDokumenta field)
-                        if (mapping == null)
-                        {
-                            mapping = await mappingService.FindBySerbianNameAsync(doc.DocDescription, ct).ConfigureAwait(false);
-                        }
+                //        // If not found, try by Serbian name (NazivDokumenta field)
+                //        if (mapping == null)
+                //        {
+                //            mapping = await mappingService.FindBySerbianNameAsync(doc.DocDescription, ct).ConfigureAwait(false);
+                //        }
 
-                        // If not found, try by migrated name (NazivDokumentaMigracija field)
-                        if (mapping == null)
-                        {
-                            mapping = await mappingService.FindByMigratedNameAsync(doc.DocDescription, ct).ConfigureAwait(false);
-                        }
+                //        // If not found, try by migrated name (NazivDokumentaMigracija field)
+                //        if (mapping == null)
+                //        {
+                //            mapping = await mappingService.FindByMigratedNameAsync(doc.DocDescription, ct).ConfigureAwait(false);
+                //        }
 
-                        if (mapping != null)
-                        {
-                            migratedDocType = mapping.SifraDokumentaMigracija;
-                            migratedNaziv = mapping.NazivDokumentaMigracija;
+                //        if (mapping != null)
+                //        {
+                //            migratedDocType = mapping.SifraDokumentaMigracija;
+                //            migratedNaziv = mapping.NazivDokumentaMigracija;
 
-                            _fileLogger.LogInformation(
-                                "DocumentMapping found for document {DocId}: DocType='{DocType}', Naziv='{Naziv}'",
-                                doc.Id, migratedDocType ?? "null", migratedNaziv ?? "null");
-                        }
-                        else
-                        {
-                            _fileLogger.LogWarning(
-                                "DocumentMapping NOT found for document {DocId} with ecm:docDesc='{DocDesc}' - will use default values",
-                                doc.Id, doc.DocDescription);
-                        }
-                    }
+                //            _fileLogger.LogInformation(
+                //                "DocumentMapping found for document {DocId}: DocType='{DocType}', Naziv='{Naziv}'",
+                //                doc.Id, migratedDocType ?? "null", migratedNaziv ?? "null");
+                //        }
+                //        else
+                //        {
+                //            _fileLogger.LogWarning(
+                //                "DocumentMapping NOT found for document {DocId} with ecm:docDesc='{DocDesc}' - will use default values",
+                //                doc.Id, doc.DocDescription);
+                //        }
+                //    }
 
-                    await uow.CommitAsync(ct: ct).ConfigureAwait(false);
-                }
-                catch (Exception ex)
-                {
-                    _fileLogger.LogError(ex,
-                        "Failed to lookup DocumentMapping for document {DocId}, will use default values",
-                        doc.Id);
-                    await uow.RollbackAsync(ct: ct).ConfigureAwait(false);
-                    // Continue with default values - don't fail the entire migration
-                }
+                //    await uow.CommitAsync(ct: ct).ConfigureAwait(false);
+                //}
+                //catch (Exception ex)
+                //{
+                //    _fileLogger.LogError(ex,
+                //        "Failed to lookup DocumentMapping for document {DocId}, will use default values",
+                //        doc.Id);
+                //    await uow.RollbackAsync(ct: ct).ConfigureAwait(false);
+                //    // Continue with default values - don't fail the entire migration
+                //}
 
                 // ========================================
                 // STEP 3: Update document properties (ecm:docType and ecm:naziv)

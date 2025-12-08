@@ -177,7 +177,7 @@ namespace Alfresco.Client.Implementation
                             $"(ErrorKey: {errorResponse.Error.ErrorKey}, LogId: {errorResponse.Error.LogId})");
                     }
                 }
-                catch (AlfrescoPropertyException)
+                catch (AlfrescoPropertyException ex)
                 {
                     // Re-throw property exceptions
                     throw;

@@ -33,5 +33,21 @@ namespace Migration.Abstraction.Interfaces
             Dictionary<string, object>? properties,
             bool createIfMissing,
             CancellationToken ct);
+
+        /// <summary>
+        /// Resolves folder with UniqueFolderInfo context for property enrichment
+        /// </summary>
+        /// <param name="destinationRootId">Parent folder ID</param>
+        /// <param name="newFolderName">Folder name to resolve</param>
+        /// <param name="properties">Optional properties for folder creation</param>
+        /// <param name="folderInfo">Folder info with additional data for property building (TipProizvoda, CoreId, etc.)</param>
+        /// <param name="ct">Cancellation token</param>
+        /// <returns>Folder ID (existing or newly created)</returns>
+        Task<string> ResolveAsync(
+            string destinationRootId,
+            string newFolderName,
+            Dictionary<string, object>? properties,
+            Alfresco.Contracts.Models.UniqueFolderInfo? folderInfo,
+            CancellationToken ct);
     }
 }

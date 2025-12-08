@@ -1,5 +1,6 @@
 ﻿using Alfresco.Abstraction.Interfaces;
 using Alfresco.Contracts.Mapper;
+using Alfresco.Contracts.Models;
 using Microsoft.Extensions.Logging;
 using Migration.Abstraction.Interfaces;
 using Migration.Abstraction.Models;
@@ -297,18 +298,57 @@ namespace Migration.Infrastructure.Implementation.Document
             return toRet;
         }
 
-        private Dictionary<string, object> BuildPropertiesClientData(ClientData clientData) 
+        /// <summary>
+        /// Resolves folder with UniqueFolderInfo context for property enrichment
+        /// </summary>
+        public async Task<string> ResolveAsync(
+            string destinationRootId,
+            string newFolderName,
+            Dictionary<string, object>? properties,
+            UniqueFolderInfo? folderInfo,
+            CancellationToken ct)
+        {
+            // Enrich properties with deposit-specific data if folderInfo is provided
+            if (folderInfo != null && folderInfo.TargetDossierType == 700) // 700 = Deposit dossier
+            {
+                properties = properties ?? new Dictionary<string, object>();
+
+                // Add ecm:bnkTypeOfProduct from TipProizvoda
+                if (!string.IsNullOrEmpty(folderInfo.TipProizvoda))
+                {
+                    properties["ecm:bnkTypeOfProduct"] = folderInfo.TipProizvoda;
+                }
+
+                // Add ecm:CoreId
+                if (!string.IsNullOrEmpty(folderInfo.CoreId))
+                {
+                    properties["ecm:coreId"] = folderInfo.CoreId;
+                }
+
+                // Add ecm:bnkNumberOfControcat formatted as YYYYMMDD
+                if (folderInfo.CreationDate.HasValue)
+                {
+                    var contractNumber = folderInfo.CreationDate.Value.ToString("yyyyMMdd");
+                    properties["ecm:bnkNumberOfContract"] = contractNumber;
+                }
+            }
+
+            // Call the standard ResolveAsync with enriched properties
+            return await ResolveAsync(destinationRootId, newFolderName, properties, true, ct).ConfigureAwait(false);
+        }
+
+        private Dictionary<string, object> BuildPropertiesClientData(ClientData clientData)
         {
             Dictionary<string,object> properties = new Dictionary<string,object>();
 
             properties.Add("ecm:bnkClientType", clientData.Segment ?? string.Empty);
             properties.Add("ecm:bnkClientSubtype", clientData.ClientSubtype ?? string.Empty);
-            properties.Add("ecm:bnkOfficeId", clientData.BarCLEXOpu ?? string.Empty);            
+            properties.Add("ecm:bnkOfficeId", clientData.BarCLEXOpu ?? string.Empty);
             properties.Add("ecm:bnkStaff", clientData.Staff ?? string.Empty);
             properties.Add("ecm:bnkResidence", clientData.ClientName ?? string.Empty);
             properties.Add("ecm:bnkBarclex", $"{clientData.BarCLEXGroupCode ?? string.Empty} {clientData.BarCLEXGroupName ?? string.Empty} ");
             properties.Add("ecm:bnkContributor", $"{clientData.BarCLEXCode ?? string.Empty} {clientData.BarCLEXName ?? string.Empty} ");
-           
+
 
 
 

@@ -288,14 +288,33 @@ namespace Migration.Infrastructure.Implementation.Services
                 // Create each level in hierarchy starting from the parent dossier folder
                 var currentParentId = parentDossierFolderId;
 
-                foreach (var folderName in pathParts)
+                for (int i = 0; i < pathParts.Length; i++)
                 {
-                    // DocumentResolver.ResolveAsync is idempotent: checks if folder exists, creates if not, caches result
-                    currentParentId = await documentResolver.ResolveAsync(
-                        currentParentId,
-                        folderName,
-                        folder.Properties, // Pass properties (may be null)
-                        ct).ConfigureAwait(false);
+                    var folderName = pathParts[i];
+
+                    // Only add properties to the FIRST level (main dossier folder)
+                    // Sub-folders (year/month) don't need special properties
+                    var isMainDossierFolder = (i == 0);
+
+                    if (isMainDossierFolder)
+                    {
+                        // Use new overload with UniqueFolderInfo for property enrichment
+                        currentParentId = await documentResolver.ResolveAsync(
+                            currentParentId,
+                            folderName,
+                            folder.Properties, // May be null
+                            folder, // Pass UniqueFolderInfo for property building
+                            ct).ConfigureAwait(false);
+                    }
+                    else
+                    {
+                        // Sub-folders created without special properties
+                        currentParentId = await documentResolver.ResolveAsync(
+                            currentParentId,
+                            folderName,
+                            null, // No properties for sub-folders
+                            ct).ConfigureAwait(false);
+                    }
                 }
 
                 _fileLogger.LogDebug(

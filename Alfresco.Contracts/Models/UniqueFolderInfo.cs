@@ -30,5 +30,30 @@ namespace Alfresco.Contracts.Models
         /// Example: "500_PI102206"
         /// </summary>
         public string CacheKey { get; set; } = string.Empty;
+
+        /// <summary>
+        /// Product type code from DocumentMapping.TipProizvoda
+        /// Example: "00008" (FL deposits), "00010" (PL deposits)
+        /// Used for ecm:bnkTypeOfProduct property
+        /// </summary>
+        public string? TipProizvoda { get; set; }
+
+        /// <summary>
+        /// CoreId extracted from folder name or document
+        /// Used for ecm:CoreId property
+        /// </summary>
+        public string? CoreId { get; set; }
+
+        /// <summary>
+        /// Document creation date (OriginalCreatedAt)
+        /// Used for creating ecm:bnkNumberOfControcat in YYYYMMDD format
+        /// </summary>
+        public DateTime? CreationDate { get; set; }
+
+        /// <summary>
+        /// Target dossier type (300, 400, 500, 700, etc.)
+        /// Used to determine if folder needs special properties (e.g., deposits = 700)
+        /// </summary>
+        public int? TargetDossierType { get; set; }
     }
 }

@@ -799,6 +799,7 @@ namespace Migration.Infrastructure.Implementation.Services
                 doc.TipDosijea = fullMapping?.TipDosijea ?? docDossierType ?? folder.TipDosijea ?? "";
                 doc.DocumentType = mappedDocType ?? existingDocType;
                 doc.NewDocumentName = mappedDocName ?? "";
+                doc.ProductType = fullMapping?.TipProizvoda ?? "";
 
                 // Determine status
                 var statusInfo = DocumentStatusDetectorV3.DetermineStatus(fullMapping, existingStatus);

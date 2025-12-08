@@ -95,15 +95,29 @@ namespace SqlServer.Infrastructure.Implementation
             // Query DocStaging for all DISTINCT combinations of (TargetDossierType, DossierDestFolderId)
             // These represent unique destination folders that need to be created
             // Only include documents that are READY for processing
+            // Also fetch first document per folder to extract properties needed for folder creation
             var sql = @"
-                SELECT DISTINCT
+                WITH FirstDocPerFolder AS (
+                    SELECT
+                        TargetDossierType,
+                        DossierDestFolderId,
+                        ProductType,
+                        CoreId,
+                        OriginalCreatedAt,
+                        ROW_NUMBER() OVER (PARTITION BY TargetDossierType, DossierDestFolderId ORDER BY Id) AS RowNum
+                    FROM DocStaging
+                    WHERE Status = 'READY'
+                      AND TargetDossierType IS NOT NULL
+                      AND DossierDestFolderId IS NOT NULL
+                )
+                SELECT
                     TargetDossierType,
                     DossierDestFolderId,
-                    '' AS FolderPath  -- Will be constructed from DossierDestFolderId
-                FROM DocStaging
-                WHERE Status = 'READY'
-                  AND TargetDossierType IS NOT NULL
-                  AND DossierDestFolderId IS NOT NULL
+                    ProductType,
+                    CoreId,
+                    OriginalCreatedAt
+                FROM FirstDocPerFolder
+                WHERE RowNum = 1
                 ORDER BY TargetDossierType, DossierDestFolderId";
 
             var cmd = new CommandDefinition(sql, transaction: Tx, cancellationToken: ct);
@@ -123,7 +137,13 @@ namespace SqlServer.Infrastructure.Implementation
                 // CacheKey for folder lookup
                 CacheKey = $"{r.TargetDossierType}_{r.DossierDestFolderId}",
 
-                // No properties for now (can be extended later if needed)
+                // Store additional data for property creation
+                TipProizvoda = r.ProductType?.ToString(),
+                CoreId = r.CoreId?.ToString(),
+                CreationDate = r.OriginalCreatedAt as DateTime?,
+                TargetDossierType = r.TargetDossierType as int?,
+
+                // Properties will be built in DocumentResolver when folder is created
                 Properties = null
             }).ToList();
 
