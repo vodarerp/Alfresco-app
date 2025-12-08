@@ -65,9 +65,9 @@
                             <TextBox Grid.Column="1"
                                      Text="{Binding DocTypes, UpdateSourceTrigger=PropertyChanged}"
                                      FontSize="11" Padding="5"
-                                     ToolTip="Enter document types separated by comma (e.g., 00756, 00824, 00125)"/>
+                                     ToolTip="Enter document type (e.g., 00756, 00824, 00125)"/>
                         </Grid>
-                        <TextBlock Text="Enter document types separated by comma (e.g., 00756, 00824)"
+                        <TextBlock Text="Enter document type(e.g., 00756, 00824 etc)"
                                    Foreground="#ECF0F1" FontSize="10" FontStyle="Italic" Margin="0,5,0,0"/>
                     </StackPanel>
                 </Border>

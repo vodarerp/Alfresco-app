@@ -230,6 +230,9 @@ namespace Migration.Infrastructure.Implementation.Services
 
             Interlocked.Increment(ref _batchCounter);
 
+            // Save checkpoint progress after each batch for UI display
+            await SaveCheckpointProgressAsync(ct).ConfigureAwait(false);
+
             sw.Stop();
             _fileLogger.LogInformation(
                 "DocumentSearch batch completed: {DocsFound} docs found, {DocsInserted} inserted, " +
@@ -259,6 +262,12 @@ namespace Migration.Infrastructure.Implementation.Services
                 delay, maxEmptyResults);
             _dbLogger.LogInformation("DocumentSearch service started");
             _uiLogger.LogInformation("Document Search (by docType) started");
+
+            // Load checkpoint to resume from last position
+            await LoadCheckpointAsync(ct).ConfigureAwait(false);
+
+            // Set TotalItems estimate for progress tracking (updated as we discover more)
+            await UpdateTotalItemsEstimateAsync(ct).ConfigureAwait(false);
 
             // Initial progress report
             var progress = new WorkerProgress
@@ -908,6 +917,134 @@ namespace Migration.Infrastructure.Implementation.Services
                 .Replace("*", "\\*")
                 .Replace("?", "\\?")
                 .Replace(":", "\\:");
+        }
+
+        /// <summary>
+        /// Saves current progress to PhaseCheckpoint for UI display
+        /// </summary>
+        private async Task SaveCheckpointProgressAsync(CancellationToken ct)
+        {
+            try
+            {
+                await using var scope = _scopeFactory.CreateAsyncScope();
+                var uow = scope.ServiceProvider.GetRequiredService<IUnitOfWork>();
+                var phaseCheckpointRepo = scope.ServiceProvider.GetRequiredService<IPhaseCheckpointRepository>();
+
+                await uow.BeginAsync(ct: ct).ConfigureAwait(false);
+
+                try
+                {
+                    // Get or create checkpoint for FolderDiscovery phase (used for DocumentSearch in MigrationByDocument mode)
+                    var checkpoint = await phaseCheckpointRepo.GetCheckpointAsync(MigrationPhase.FolderDiscovery, ct).ConfigureAwait(false);
+
+                    if (checkpoint != null)
+                    {
+                        // Update progress - TotalProcessed = documents processed
+                        checkpoint.TotalProcessed = _totalDocumentsProcessed;
+                        checkpoint.LastProcessedIndex = _currentSkipCount;
+
+                        await phaseCheckpointRepo.UpdateAsync(checkpoint, ct).ConfigureAwait(false);
+                    }
+
+                    await uow.CommitAsync(ct).ConfigureAwait(false);
+
+                    _fileLogger.LogDebug("Checkpoint progress saved: {TotalProcessed} documents processed, skip count: {Skip}",
+                        _totalDocumentsProcessed, _currentSkipCount);
+                }
+                catch
+                {
+                    await uow.RollbackAsync(ct).ConfigureAwait(false);
+                    throw;
+                }
+            }
+            catch (Exception ex)
+            {
+                _fileLogger.LogWarning(ex, "Failed to save checkpoint progress");
+            }
+        }
+
+        /// <summary>
+        /// Loads checkpoint to resume from last position
+        /// </summary>
+        private async Task LoadCheckpointAsync(CancellationToken ct)
+        {
+            try
+            {
+                await using var scope = _scopeFactory.CreateAsyncScope();
+                var uow = scope.ServiceProvider.GetRequiredService<IUnitOfWork>();
+                var phaseCheckpointRepo = scope.ServiceProvider.GetRequiredService<IPhaseCheckpointRepository>();
+
+                await uow.BeginAsync(ct: ct).ConfigureAwait(false);
+
+                try
+                {
+                    var checkpoint = await phaseCheckpointRepo.GetCheckpointAsync(MigrationPhase.FolderDiscovery, ct).ConfigureAwait(false);
+
+                    if (checkpoint != null && checkpoint.Status == PhaseStatus.InProgress)
+                    {
+                        _totalDocumentsProcessed = checkpoint.TotalProcessed;
+                        _currentSkipCount = (int)(checkpoint.LastProcessedIndex ?? 0);
+
+                        _fileLogger.LogInformation("Resuming from checkpoint: {TotalProcessed} documents processed, skip count: {Skip}",
+                            _totalDocumentsProcessed, _currentSkipCount);
+                    }
+
+                    await uow.CommitAsync(ct).ConfigureAwait(false);
+                }
+                catch
+                {
+                    await uow.RollbackAsync(ct).ConfigureAwait(false);
+                    throw;
+                }
+            }
+            catch (Exception ex)
+            {
+                _fileLogger.LogWarning(ex, "Failed to load checkpoint");
+            }
+        }
+
+        /// <summary>
+        /// Updates TotalItems estimate based on Alfresco search results
+        /// This provides UI with a rough progress indicator
+        /// </summary>
+        private async Task UpdateTotalItemsEstimateAsync(CancellationToken ct)
+        {
+            try
+            {
+                // Start with a conservative estimate - we'll update as we discover more
+                // For now, just set to 0 to indicate unknown total
+                // The modified CalculatePhaseProgress will handle this gracefully
+
+                await using var scope = _scopeFactory.CreateAsyncScope();
+                var uow = scope.ServiceProvider.GetRequiredService<IUnitOfWork>();
+                var phaseCheckpointRepo = scope.ServiceProvider.GetRequiredService<IPhaseCheckpointRepository>();
+
+                await uow.BeginAsync(ct: ct).ConfigureAwait(false);
+
+                try
+                {
+                    var checkpoint = await phaseCheckpointRepo.GetCheckpointAsync(MigrationPhase.FolderDiscovery, ct).ConfigureAwait(false);
+
+                    if (checkpoint != null)
+                    {
+                        // Set TotalItems to null to indicate we don't know total count yet
+                        // UI will show incremental progress based on TotalProcessed
+                        checkpoint.TotalItems = null;
+                        await phaseCheckpointRepo.UpdateAsync(checkpoint, ct).ConfigureAwait(false);
+                    }
+
+                    await uow.CommitAsync(ct).ConfigureAwait(false);
+                }
+                catch
+                {
+                    await uow.RollbackAsync(ct).ConfigureAwait(false);
+                    throw;
+                }
+            }
+            catch (Exception ex)
+            {
+                _fileLogger.LogWarning(ex, "Failed to update total items estimate");
+            }
         }
 
         #endregion

@@ -30,8 +30,8 @@ namespace Migration.Infrastructure.Implementation.Services
         private readonly IFolderPreparationService _folderPreparation;
         private readonly IMoveService _moveService;
         private readonly IPhaseCheckpointRepository _phaseCheckpointRepo;
-        private readonly ILogger<MigrationWorker> _logger;
-        private readonly IUnitOfWork _uow;
+        private readonly ILogger _logger;
+       
         private readonly string _connectionString;
         private readonly MigrationOptions _migrationOptions;
 
@@ -41,8 +41,7 @@ namespace Migration.Infrastructure.Implementation.Services
             IFolderPreparationService folderPreparation,
             IMoveService moveService,
             IPhaseCheckpointRepository phaseCheckpointRepo,
-            ILogger<MigrationWorker> logger,
-            IUnitOfWork uow,
+            ILoggerFactory logger,
             IOptions<global::Alfresco.Contracts.SqlServer.SqlServerOptions> sqlOptions,
             IOptions<MigrationOptions> migrationOptions,
             IDocumentSearchService? documentSearch = null)
@@ -53,8 +52,7 @@ namespace Migration.Infrastructure.Implementation.Services
             _folderPreparation = folderPreparation ?? throw new ArgumentNullException(nameof(folderPreparation));
             _moveService = moveService ?? throw new ArgumentNullException(nameof(moveService));
             _phaseCheckpointRepo = phaseCheckpointRepo ?? throw new ArgumentNullException(nameof(phaseCheckpointRepo));
-            _logger = logger ?? throw new ArgumentNullException(nameof(logger));
-            _uow = uow ?? throw new ArgumentNullException(nameof(uow));
+            _logger = logger.CreateLogger("FileLogger");
             _connectionString = sqlOptions?.Value?.ConnectionString ?? throw new ArgumentNullException(nameof(sqlOptions));
             _migrationOptions = migrationOptions?.Value ?? throw new ArgumentNullException(nameof(migrationOptions));
         }
@@ -85,7 +83,7 @@ namespace Migration.Infrastructure.Implementation.Services
                     // FAZA 1: DocumentSearch (searches by ecm:docType, populates both tables)
                     // ====================================================================
                     await ExecutePhaseAsync(
-                        MigrationPhase.DocumentSearch,
+                        MigrationPhase.FolderDiscovery,
                         "FAZA 1: DocumentSearch (by ecm:docType)",
                         async (token) => await _documentSearch.RunLoopAsync(token),
                         ct);
@@ -188,6 +186,10 @@ namespace Migration.Infrastructure.Implementation.Services
 
                 // Calculate progress for current phase
                 var progress = CalculatePhaseProgress(currentPhaseCheckpoint);
+
+                _logger.LogDebug("GetStatusAsync: Phase={Phase}, Status={Status}, TotalItems={TotalItems}, TotalProcessed={TotalProcessed}, Progress={Progress}%",
+                    currentPhaseCheckpoint.Phase, currentPhaseCheckpoint.Status,
+                    currentPhaseCheckpoint.TotalItems, currentPhaseCheckpoint.TotalProcessed, progress);
 
                 return new MigrationPipelineStatus
                 {
@@ -315,7 +317,15 @@ namespace Migration.Infrastructure.Implementation.Services
                         startedAt = DateTime.UtcNow,
                         updatedAt = DateTime.UtcNow
                     }, transaction: tran, cancellationToken: ct);
-                    await conn.ExecuteAsync(cmd);
+                    var rowsAffected = await conn.ExecuteAsync(cmd);
+
+                    _logger.LogInformation("Phase {Phase} ({PhaseDisplayName}) marked as InProgress - {RowsAffected} rows updated",
+                        (int)phase, phaseDisplayName, rowsAffected);
+
+                    if (rowsAffected == 0)
+                    {
+                        _logger.LogWarning("WARNING: Failed to update PhaseCheckpoints - no rows affected for Phase {Phase}!", (int)phase);
+                    }
                 }, ct);
 
                 // Execute the phase (calls service's RunLoopAsync, PrepareAllFoldersAsync, etc.)
@@ -435,11 +445,21 @@ namespace Migration.Infrastructure.Implementation.Services
                 return (int)((checkpoint.TotalProcessed / (double)checkpoint.TotalItems.Value) * 100);
             }
 
-            // If TotalItems is unknown, return 0 if NotStarted, 50 if InProgress, 100 if Completed
+            // If TotalItems is unknown, show progress based on TotalProcessed activity
+            // This provides feedback that work is being done even when we don't know total count
+            if (checkpoint.Status == PhaseStatus.InProgress && checkpoint.TotalProcessed > 0)
+            {
+                // Show incremental progress based on processed items
+                // Cap at 95% to indicate it's still in progress
+                var estimatedProgress = Math.Min(95, 10 + (checkpoint.TotalProcessed / 100));
+                return (int)estimatedProgress;
+            }
+
+            // If TotalItems is unknown and no items processed yet, return fixed values
             return checkpoint.Status switch
             {
                 PhaseStatus.NotStarted => 0,
-                PhaseStatus.InProgress => 50,
+                PhaseStatus.InProgress => 10, // Show some progress to indicate it started
                 PhaseStatus.Completed => 100,
                 PhaseStatus.Failed => 0,
                 _ => 0

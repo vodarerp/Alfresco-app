@@ -220,8 +220,10 @@ namespace Alfresco.App.UserControls
 
         private async void btnStart_Click(object sender, RoutedEventArgs e)
         {
+        
             try
             {
+                btnStart.IsEnabled = false;
                 // If MigrationByDocument mode, validate and apply DocTypes from UI
                 if (_migrationOptions.MigrationByDocument && _documentSearchService != null)
                 {
@@ -270,6 +272,8 @@ namespace Alfresco.App.UserControls
                             StatusMessage = "Migration completed successfully!";
                             btnStart.IsEnabled = true;
                             btnStop.IsEnabled = false;
+                            MessageBox.Show($"Migration of docType {DocTypes} finished!");
+
                         });
                     }
                     catch (OperationCanceledException)
@@ -298,6 +302,8 @@ namespace Alfresco.App.UserControls
                 btnStart.IsEnabled = true;
                 btnStop.IsEnabled = false;
             }
+
+            btnStart.IsEnabled = true;
         }
 
         private void btnStop_Click(object sender, RoutedEventArgs e)
