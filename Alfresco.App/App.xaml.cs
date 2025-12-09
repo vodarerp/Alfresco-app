@@ -93,8 +93,28 @@ namespace Alfresco.App
             AppHost = Host.CreateDefaultBuilder()
                 .ConfigureAppConfiguration((context, config) =>
                 {
-                    // Load connections config from local directory
-                    config.AddJsonFile("appsettings.Connections.json", optional: true, reloadOnChange: true);
+                   // Determine the correct path for appsettings.Connections.json
+                   var basePath = AppDomain.CurrentDomain.BaseDirectory;
+                   string connectionsPath;
+
+                    // In Development mode, read from project source folder
+                    // In Production mode, read from executable directory
+                    if (basePath.Contains(@"\bin\Debug\") || basePath.Contains(@"\bin\Release\"))
+                    {
+                        // Development mode - go to project root
+                        var projectRoot = Directory.GetParent(basePath).Parent.Parent.Parent.FullName;
+                        connectionsPath = Path.Combine(projectRoot, "appsettings.Connections.json");
+                    }
+                    else
+                    {
+                        // Production mode - use file next to executable
+                        connectionsPath = Path.Combine(basePath, "appsettings.Connections.json");
+                    }
+
+                    // Load connections config from determined path
+                    config.AddJsonFile(connectionsPath, optional: true, reloadOnChange: true);
+                    //config.AddJsonFile("appsettings.Connections.json", optional: true, reloadOnChange: true);
+
                 })
                 .ConfigureServices((context, services) =>
                 {
@@ -130,17 +150,19 @@ namespace Alfresco.App
                         .ConfigureHttpClient((sp, cli) =>
                         {
                             // Try ConnectionsOptions first, fallback to AlfrescoOptions
-                            var connOptions = sp.GetService<IOptions<ConnectionsOptions>>()?.Value;
-                            var baseUrl = connOptions?.Alfresco?.BaseUrl;
+                            //var connOptions = sp.GetService<IOptions<ConnectionsOptions>>()?.Value;
+                            //var baseUrl = connOptions?.Alfresco?.BaseUrl;
+                            var options = sp.GetRequiredService<IOptions<AlfrescoOptions>>().Value;
+                            var credentials = Convert.ToBase64String(
+                                System.Text.Encoding.ASCII.GetBytes($"{options.Username}:{options.Password}")
+                            );
 
-                            if (string.IsNullOrEmpty(baseUrl))
-                            {
-                                var options = sp.GetRequiredService<IOptions<AlfrescoOptions>>().Value;
-                                baseUrl = options.BaseUrl;
-                            }
+                            //baseUrl = options.BaseUrl;
 
-                            cli.BaseAddress = new Uri(baseUrl);
+
+                            cli.BaseAddress = new Uri(options.BaseUrl);
                             cli.DefaultRequestHeaders.Accept.Add(new System.Net.Http.Headers.MediaTypeWithQualityHeaderValue("application/json"));
+                            cli.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Basic", credentials);
                             cli.DefaultRequestHeaders.ConnectionClose = false; // Keep-Alive
                         })
                         .ConfigurePrimaryHttpMessageHandler(() => new System.Net.Http.SocketsHttpHandler
@@ -170,8 +192,12 @@ namespace Alfresco.App
                         .ConfigureHttpClient((sp, cli) =>
                         {
                             var options = sp.GetRequiredService<IOptions<AlfrescoOptions>>().Value;
+                            var credentials = Convert.ToBase64String(
+                                System.Text.Encoding.ASCII.GetBytes($"{options.Username}:{options.Password}")
+                            );
                             cli.BaseAddress = new Uri(options.BaseUrl);
                             cli.DefaultRequestHeaders.Accept.Add(new System.Net.Http.Headers.MediaTypeWithQualityHeaderValue("application/json"));
+                            cli.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Basic", credentials);
                             cli.DefaultRequestHeaders.ConnectionClose = false; // Keep-Alive
                         })
                         .ConfigurePrimaryHttpMessageHandler(() => new System.Net.Http.SocketsHttpHandler
@@ -389,7 +415,24 @@ namespace Alfresco.App
                 .ConfigureLogging((context,logging) =>
                 {
                     logging.ClearProviders();
-                    logging.AddLog4Net("log4net.config");
+
+                    // Determine log4net.config path (same logic as appsettings.Connections.json)
+                    var basePath = AppDomain.CurrentDomain.BaseDirectory;
+                    string log4netConfigPath;
+
+                    if (basePath.Contains(@"\bin\Debug\") || basePath.Contains(@"\bin\Release\"))
+                    {
+                        // Development mode - use source file
+                        var projectRoot = Directory.GetParent(basePath).Parent.Parent.Parent.FullName;
+                        log4netConfigPath = Path.Combine(projectRoot, "log4net.config");
+                    }
+                    else
+                    {
+                        // Production mode - use file next to executable
+                        log4netConfigPath = Path.Combine(basePath, "log4net.config");
+                    }
+
+                    logging.AddLog4Net(log4netConfigPath);
                     logging.AddFilter("System.Net.Http.HttpClient", LogLevel.Warning);
                     logging.AddFilter("Microsoft", LogLevel.Warning);
                     logging.AddFilter("System", LogLevel.Warning);

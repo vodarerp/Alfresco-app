@@ -122,7 +122,8 @@ namespace Alfresco.Client.Implementation
 
         public async Task<bool> PingAsync(CancellationToken ct = default)
         {
-            using var response = await _client.GetAsync("/alfresco/api/-default-/public/alfresco/versions/1/probes/-live-", ct).ConfigureAwait(false);
+            //using var response = await _client.GetAsync("/alfresco/api/-default-/public/alfresco/versions/1/probes/-live-", ct).ConfigureAwait(false);
+            using var response = await _client.GetAsync("/alfresco/api/discovery", ct).ConfigureAwait(false);
             return response.IsSuccessStatusCode;
         }
         //{

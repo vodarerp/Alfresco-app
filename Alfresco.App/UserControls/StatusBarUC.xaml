@@ -10,16 +10,20 @@
         <Border >
             <Grid Grid.Row="0">
                 <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="auto"></ColumnDefinition>
                     <ColumnDefinition Width="*"></ColumnDefinition>
                     <ColumnDefinition Width="*"></ColumnDefinition>
                 </Grid.ColumnDefinitions>
-                <Grid >
+                <Grid Grid.Column="0" Margin="10,0,0,0">
+                    <Button Name="ConfigButton" Content="⚙" Width="30" Height="25" VerticalAlignment="Center" HorizontalAlignment="Left" Click="ConfigButton_Click" ToolTip="Configuration"/>
+                </Grid>
+                <Grid Grid.Column="1">
                 </Grid>
                 <!--<StackPanel Grid.Column="0" Orientation="Horizontal" VerticalAlignment="Center" HorizontalAlignment="Left" Margin="10,0,0,0">
                 <TextBlock Text="Total: " FontWeight="Bold" VerticalAlignment="Center"/>
                 <TextBlock Text="Ready" VerticalAlignment="Center"/>
             </StackPanel>-->
-                <Grid Grid.Column="1">
+                <Grid Grid.Column="2">
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="*"/>
                         <ColumnDefinition Width="auto"/>

@@ -210,5 +210,22 @@ namespace Alfresco.App.UserControls
         {
             TestConnection();
         }
+
+        private void ConfigButton_Click(object sender, RoutedEventArgs e)
+        {
+            var settingsWindow = new Window
+            {
+                Title = "Application Settings",
+                Content = new SettingsUC(),
+                Width = 850,
+                Height = 650,
+                WindowStartupLocation = WindowStartupLocation.CenterScreen,
+                ResizeMode = ResizeMode.CanResize
+            };
+            settingsWindow.ShowDialog();
+
+            // After settings window closes, test connections again
+            TestConnection();
+        }
     }
 }
