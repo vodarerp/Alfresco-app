@@ -4,9 +4,12 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Migration.Abstraction.Interfaces;
 using System;
+using System.Collections.Generic;
 using System.ComponentModel;
+using System.Configuration;
 using System.Diagnostics;
 using System.IO;
+using System.Linq;
 using System.Net.Http;
 using System.Runtime.CompilerServices;
 using System.Text.Json;
@@ -24,6 +27,7 @@ namespace Alfresco.App.UserControls
         private string _appSettingsPath;
         private string _appSettingsConnectionsPath;
         private string _log4netConfigPath;
+        private bool _isMigrationByDocument;
 
         public SettingsUC()
         {
@@ -55,7 +59,48 @@ namespace Alfresco.App.UserControls
                 _log4netConfigPath = Path.Combine(basePath, "log4net.config");
             }
 
+            // Setup placeholder behavior for textboxes
+            SetupPlaceholders();
+
             LoadCurrentConfiguration();
+            CheckUserEdits();
+        }
+
+        private void SetupPlaceholders()
+        {
+            // Set up placeholder behavior for textboxes with Tag property
+            SetupPlaceholderForTextBox(RootFolderIdTextBox);
+            SetupPlaceholderForTextBox(FolderTypesTextBox);
+        }
+
+        private void SetupPlaceholderForTextBox(TextBox textBox)
+        {
+            if (textBox.Tag != null && string.IsNullOrEmpty(textBox.Text))
+            {
+                textBox.Text = textBox.Tag.ToString();
+                textBox.Foreground = System.Windows.Media.Brushes.Gray;
+                textBox.FontStyle = FontStyles.Italic;
+            }
+
+            textBox.GotFocus += (s, e) =>
+            {
+                if (textBox.Text == textBox.Tag?.ToString())
+                {
+                    textBox.Text = "";
+                    textBox.Foreground = System.Windows.Media.Brushes.Black;
+                    textBox.FontStyle = FontStyles.Normal;
+                }
+            };
+
+            textBox.LostFocus += (s, e) =>
+            {
+                if (string.IsNullOrWhiteSpace(textBox.Text) && textBox.Tag != null)
+                {
+                    textBox.Text = textBox.Tag.ToString();
+                    textBox.Foreground = System.Windows.Media.Brushes.Gray;
+                    textBox.FontStyle = FontStyles.Italic;
+                }
+            };
         }
 
         private void LoadCurrentConfiguration()
@@ -76,6 +121,99 @@ namespace Alfresco.App.UserControls
                 // Load Client API settings
                 ClientApiBaseUrlTextBox.Text = configuration.GetSection("ClientApi:BaseUrl").Value ?? "";
 
+                // Load Advanced Settings - Migration Configuration
+                // Use RootDestinationFolderId (both destination and discovery use same value)
+                var rootFolderId = configuration.GetSection("Migration:RootDestinationFolderId").Value ?? "";
+                if (!string.IsNullOrEmpty(rootFolderId))
+                {
+                    RootFolderIdTextBox.Text = rootFolderId;
+                    RootFolderIdTextBox.Foreground = System.Windows.Media.Brushes.Black;
+                    RootFolderIdTextBox.FontStyle = FontStyles.Normal;
+                }
+
+                //var xx = configuration.GetSection("Migration:MigrationByDocument").Value;
+                //_isMigrationByDocument = configuration.GetSection("Migration:MigrationByDocument").Value.ToLower() == "true";
+                _isMigrationByDocument = configuration.GetSection("Migration:MigrationByDocument").Get<bool>();
+
+                if (_isMigrationByDocument)
+                {
+                    // If migration by document, disable RootFolderId input
+                    //RootFolderIdTextBox.IsEnabled = false;
+                    var folderTypes = configuration.GetSection("Migration:DocumentTypeDiscovery:FolderTypes").Get<string[]>();
+                    if (folderTypes != null && folderTypes.Length > 0)
+                    {
+                        FolderTypesTextBox.Text = string.Join(", ", folderTypes);
+                        FolderTypesTextBox.Foreground = System.Windows.Media.Brushes.Black;
+                        FolderTypesTextBox.FontStyle = FontStyles.Normal;
+                    }
+                    else
+                    {
+                        // Set default values if empty
+                        FolderTypesTextBox.Text = "LE, PI, D";
+                        FolderTypesTextBox.Foreground = System.Windows.Media.Brushes.Black;
+                        FolderTypesTextBox.FontStyle = FontStyles.Normal;
+                    }
+
+                    // Load Date Filter settings from FolderDiscovery section
+                    var useDateFilter = configuration.GetSection("Migration:DocumentTypeDiscovery:UseDateFilter").Value;
+                    UseDateFilterCheckBox.IsChecked = useDateFilter?.ToLower() == "true";
+
+                    // Parse dates
+                    var dateFromStr = configuration.GetSection("Migration:DocumentTypeDiscovery:DateFrom").Value;
+                    if (!string.IsNullOrEmpty(dateFromStr) && DateTime.TryParse(dateFromStr, out var dateFrom))
+                    {
+                        DateFromPicker.SelectedDate = dateFrom;
+                    }
+
+                    var dateToStr = configuration.GetSection("Migration:DocumentTypeDiscovery:DateTo").Value;
+                    if (!string.IsNullOrEmpty(dateToStr) && DateTime.TryParse(dateToStr, out var dateTo))
+                    {
+                        DateToPicker.SelectedDate = dateTo;
+                    }
+
+                }
+                else
+                {
+                    var folderTypes = configuration.GetSection("Migration:FolderDiscovery:FolderTypes").Get<string[]>();
+                    if (folderTypes != null && folderTypes.Length > 0)
+                    {
+                        FolderTypesTextBox.Text = string.Join(", ", folderTypes);
+                        FolderTypesTextBox.Foreground = System.Windows.Media.Brushes.Black;
+                        FolderTypesTextBox.FontStyle = FontStyles.Normal;
+                    }
+                    else
+                    {
+                        // Set default values if empty
+                        FolderTypesTextBox.Text = "LE, PI, D";
+                        FolderTypesTextBox.Foreground = System.Windows.Media.Brushes.Black;
+                        FolderTypesTextBox.FontStyle = FontStyles.Normal;
+                    }
+
+                    // Load Date Filter settings from FolderDiscovery section
+                    var useDateFilter = configuration.GetSection("Migration:FolderDiscovery:UseDateFilter").Value;
+                    UseDateFilterCheckBox.IsChecked = useDateFilter?.ToLower() == "true";
+
+                    // Parse dates
+                    var dateFromStr = configuration.GetSection("Migration:FolderDiscovery:DateFrom").Value;
+                    if (!string.IsNullOrEmpty(dateFromStr) && DateTime.TryParse(dateFromStr, out var dateFrom))
+                    {
+                        DateFromPicker.SelectedDate = dateFrom;
+                    }
+
+                    var dateToStr = configuration.GetSection("Migration:FolderDiscovery:DateTo").Value;
+                    if (!string.IsNullOrEmpty(dateToStr) && DateTime.TryParse(dateToStr, out var dateTo))
+                    {
+                        DateToPicker.SelectedDate = dateTo;
+                    }
+                }// Load Folder Types for search with default values
+               
+
+                // Load Migration Mode (read-only)
+                var migrationByDocument = configuration.GetSection("Migration:MigrationByDocument").Value;
+                MigrationModeTextBox.Text = migrationByDocument?.ToLower() == "true" ? "By Document" : "By Folder";
+
+               
+
                 StatusTextBlock.Text = "Configuration loaded successfully.";
                 StatusTextBlock.Foreground = System.Windows.Media.Brushes.Green;
             }
@@ -93,9 +231,21 @@ namespace Alfresco.App.UserControls
                 var builder = new SqlConnectionStringBuilder(connectionString);
                 SqlServerTextBox.Text = builder.DataSource;
                 SqlDatabaseTextBox.Text = builder.InitialCatalog;
-                SqlUserTextBox.Text = builder.UserID;
-                SqlPasswordBox.Password = builder.Password;
-                SqlIntegratedSecurityCheckBox.IsChecked = builder.IntegratedSecurity;
+                if (builder.IntegratedSecurity)
+                {
+                    SqlUserTextBox.Text = "";
+                    SqlPasswordBox.Password = "";
+                }
+                else
+                {
+                    SqlUserTextBox.Text = builder.UserID;
+                    SqlPasswordBox.Password = builder.Password;
+                }
+                
+                SqlIntegratedSecurityCheckBox.IsChecked = !builder.IntegratedSecurity;
+
+
+
             }
             catch
             {
@@ -106,11 +256,12 @@ namespace Alfresco.App.UserControls
         private string BuildSqlConnectionString()
         {
             var builder = new SqlConnectionStringBuilder();
+            var isSqlAuth = SqlIntegratedSecurityCheckBox.IsChecked.HasValue && SqlIntegratedSecurityCheckBox.IsChecked.Value;
             builder.DataSource = SqlServerTextBox.Text;
             builder.InitialCatalog = SqlDatabaseTextBox.Text;
-            builder.IntegratedSecurity = SqlIntegratedSecurityCheckBox.IsChecked ?? false;
+            builder.IntegratedSecurity = !isSqlAuth;
 
-            if (!builder.IntegratedSecurity)
+            if (isSqlAuth)
             {
                 builder.UserID = SqlUserTextBox.Text;
                 builder.Password = SqlPasswordBox.Password;
@@ -241,6 +392,9 @@ namespace Alfresco.App.UserControls
                 // Save to appsettings.Connections.json
                 await SaveConnectionsConfiguration();
 
+                // Save to appsettings.json (Migration settings)
+                await SaveAppSettingsConfiguration();
+
                 // Update log4net.config with SQL connection string
                 UpdateLog4NetConfig();
 
@@ -301,6 +455,159 @@ namespace Alfresco.App.UserControls
 
             var json = JsonSerializer.Serialize(connectionsConfig, options);
             await File.WriteAllTextAsync(_appSettingsConnectionsPath, json);
+        }
+
+        private async Task SaveAppSettingsConfiguration()
+        {
+            // Read existing appsettings.json to preserve all settings
+            var jsonString = await File.ReadAllTextAsync(_appSettingsPath);
+
+            // Parse as JsonDocument to work with the structure directly
+            using var jsonDoc = JsonDocument.Parse(jsonString);
+
+            // Convert to a mutable JSON structure using Newtonsoft.Json for easier manipulation
+            var jsonObj = Newtonsoft.Json.Linq.JObject.Parse(jsonString);
+
+            // Navigate to Migration section (create if doesn't exist)
+            var migration = jsonObj["Migration"] as Newtonsoft.Json.Linq.JObject;
+            //var isMigrationByDocument = migration["MigrationByDocument"];
+            if (migration == null)
+            {
+                migration = new Newtonsoft.Json.Linq.JObject();
+                jsonObj["Migration"] = migration;
+            }
+
+            // Update only the specific fields, preserving all other settings
+            // Both RootDestinationFolderId and RootDiscoveryFolderId use same value
+            // Don't save if it's the placeholder text
+            var rootFolderId = RootFolderIdTextBox.Text;
+            if (rootFolderId != RootFolderIdTextBox.Tag?.ToString() && !string.IsNullOrWhiteSpace(rootFolderId))
+            {
+                migration["RootDestinationFolderId"] = rootFolderId;
+                migration["RootDiscoveryFolderId"] = rootFolderId;
+            }
+
+            // Navigate to FolderDiscovery section (create if doesn't exist)
+
+
+            // Parse and update Folder Types (skip if it's the placeholder text)
+
+            var folderTypesText = FolderTypesTextBox.Text;
+            if (folderTypesText == null || folderTypesText.Length == 0) folderTypesText = "LE, PI, D";
+
+            var isMigrationByDocument = migration["MigrationByDocument"]!.Value<bool>;
+            //var migrationByDocument = migration["DocumentTypeDiscovery"] as Newtonsoft.Json.Linq.JObject;
+
+            if (_isMigrationByDocument)
+            {
+                var migrationByDocument = migration["DocumentTypeDiscovery"] as Newtonsoft.Json.Linq.JObject;
+                if (migrationByDocument == null)
+                {
+                    migrationByDocument = new Newtonsoft.Json.Linq.JObject();
+                    migration["DocumentTypeDiscovery"] = migrationByDocument;
+                }
+
+                // Update FolderDiscovery settings
+                migrationByDocument["UseDateFilter"] = UseDateFilterCheckBox.IsChecked ?? false;
+
+                if (DateFromPicker.SelectedDate.HasValue)
+                {
+                    migrationByDocument["DateFrom"] = DateFromPicker.SelectedDate.Value.ToString("yyyy-MM-ddTHH:mm:ss.fffK");
+                }
+
+                if (DateToPicker.SelectedDate.HasValue)
+                {
+                    migrationByDocument["DateTo"] = DateToPicker.SelectedDate.Value.ToString("yyyy-MM-ddTHH:mm:ss.fffK");
+                }
+
+                if (!string.IsNullOrWhiteSpace(folderTypesText) && folderTypesText != FolderTypesTextBox.Tag?.ToString())
+                {
+                    var folderTypes = folderTypesText
+                        .Split(new[] { ',', ';' }, StringSplitOptions.RemoveEmptyEntries)
+                        .Select(t => t.Trim())
+                        .ToArray();
+
+                    migrationByDocument["FolderTypes"] = new Newtonsoft.Json.Linq.JArray(folderTypes);
+                }
+            }
+            else
+            {
+                var folderDiscovery = migration["FolderDiscovery"] as Newtonsoft.Json.Linq.JObject;
+                if (folderDiscovery == null)
+                {
+                    folderDiscovery = new Newtonsoft.Json.Linq.JObject();
+                    migration["FolderDiscovery"] = folderDiscovery;
+                }
+
+                // Update FolderDiscovery settings
+                folderDiscovery["UseDateFilter"] = UseDateFilterCheckBox.IsChecked ?? false;
+
+                if (DateFromPicker.SelectedDate.HasValue)
+                {
+                    folderDiscovery["DateFrom"] = DateFromPicker.SelectedDate.Value.ToString("yyyy-MM-ddTHH:mm:ss.fffK");
+                }
+
+                if (DateToPicker.SelectedDate.HasValue)
+                {
+                    folderDiscovery["DateTo"] = DateToPicker.SelectedDate.Value.ToString("yyyy-MM-ddTHH:mm:ss.fffK");
+                }
+
+                if (!string.IsNullOrWhiteSpace(folderTypesText) && folderTypesText != FolderTypesTextBox.Tag?.ToString())
+                {
+                    var folderTypes = folderTypesText
+                        .Split(new[] { ',', ';' }, StringSplitOptions.RemoveEmptyEntries)
+                        .Select(t => t.Trim())
+                        .ToArray();
+
+                    folderDiscovery["FolderTypes"] = new Newtonsoft.Json.Linq.JArray(folderTypes);
+                }
+            }
+
+
+
+                //if (isMigrationByDocument?.ToLower() == "true")
+                //{
+                //    // If migration by document, disable RootFolderId input
+                //    //RootFolderIdTextBox.IsEnabled = false;
+                //    var folderTypes = configuration.GetSection("Migration:DocumentTypeDiscovery:FolderTypes").Get<string[]>();
+                //    if (folderTypes != null && folderTypes.Length > 0)
+                //    {
+                //        FolderTypesTextBox.Text = string.Join(", ", folderTypes);
+                //        FolderTypesTextBox.Foreground = System.Windows.Media.Brushes.Black;
+                //        FolderTypesTextBox.FontStyle = FontStyles.Normal;
+                //    }
+                //    else
+                //    {
+                //        // Set default values if empty
+                //        FolderTypesTextBox.Text = "LE, PI, D";
+                //        FolderTypesTextBox.Foreground = System.Windows.Media.Brushes.Black;
+                //        FolderTypesTextBox.FontStyle = FontStyles.Normal;
+                //    }
+
+                //}
+                //else
+                //{
+                //    var folderTypes = configuration.GetSection("Migration:FolderDiscovery:FolderTypes").Get<string[]>();
+                //    if (folderTypes != null && folderTypes.Length > 0)
+                //    {
+                //        FolderTypesTextBox.Text = string.Join(", ", folderTypes);
+                //        FolderTypesTextBox.Foreground = System.Windows.Media.Brushes.Black;
+                //        FolderTypesTextBox.FontStyle = FontStyles.Normal;
+                //    }
+                //    else
+                //    {
+                //        // Set default values if empty
+                //        FolderTypesTextBox.Text = "LE, PI, D";
+                //        FolderTypesTextBox.Foreground = System.Windows.Media.Brushes.Black;
+                //        FolderTypesTextBox.FontStyle = FontStyles.Normal;
+                //    }
+                //}// Load Folder Types for search with default values
+
+            
+
+            // Serialize back to JSON with formatting, preserving comments
+            var updatedJson = jsonObj.ToString(Newtonsoft.Json.Formatting.Indented);
+            await File.WriteAllTextAsync(_appSettingsPath, updatedJson);
         }
 
         private void UpdateLog4NetConfig()
@@ -375,9 +682,14 @@ namespace Alfresco.App.UserControls
 
         private void SqlIntegratedSecurityCheckBox_Changed(object sender, RoutedEventArgs e)
         {
+            CheckUserEdits();
+        }
+
+        private void CheckUserEdits()
+        {
             bool isIntegrated = SqlIntegratedSecurityCheckBox.IsChecked ?? false;
-            SqlUserTextBox.IsEnabled = !isIntegrated;
-            SqlPasswordBox.IsEnabled = !isIntegrated;
+            SqlUserTextBox.IsEnabled = isIntegrated;
+            SqlPasswordBox.IsEnabled = isIntegrated;
         }
 
         #region INotifyPropertyChange implementation

@@ -503,22 +503,23 @@ namespace Migration.Infrastructure.Implementation.Services
                 var dateFrom = _options.Value.DocumentTypeDiscovery.DateFrom;
                 var dateTo = _options.Value.DocumentTypeDiscovery.DateTo;
 
-                if (!string.IsNullOrWhiteSpace(dateFrom))
+                if (!string.IsNullOrWhiteSpace(dateFrom) && !string.IsNullOrWhiteSpace(dateTo))
                 {
                     // Parse and format date
-                    if (DateTime.TryParse(dateFrom, out var fromDate))
+                    if (DateTime.TryParse(dateFrom, out var fromDate) && DateTime.TryParse(dateTo, out var toDate))
                     {
-                        query += $" AND ecm\\:docCreationDate:[{fromDate:yyyy-MM-dd} TO MAX]";
+                        //query += $" AND ecm\\:docCreationDate:[{fromDate:yyyy-MM-dd} TO {toDate:yyyy-MM-dd}]";
+                        query += $" AND cm\\:created:[{fromDate:yyyy-MM-dd} TO {toDate:yyyy-MM-dd}]";
                     }
                 }
 
-                if (!string.IsNullOrWhiteSpace(dateTo))
-                {
-                    if (DateTime.TryParse(dateTo, out var toDate))
-                    {
-                        query += $" AND ecm\\:docCreationDate:[MIN TO {toDate:yyyy-MM-dd}]";
-                    }
-                }
+                //if (!string.IsNullOrWhiteSpace(dateTo))
+                //{
+                //    if (DateTime.TryParse(dateTo, out var toDate))
+                //    {
+                //        query += $" AND ecm\\:docCreationDate:[MIN TO {toDate:yyyy-MM-dd}]";
+                //    }
+                //}
             }
 
             return query;

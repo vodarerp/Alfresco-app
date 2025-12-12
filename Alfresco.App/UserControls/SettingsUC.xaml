@@ -44,13 +44,22 @@
                         <TextBlock Grid.Row="1" Grid.Column="0" Text="Database:" VerticalAlignment="Center" Margin="0,5"/>
                         <TextBox Grid.Row="1" Grid.Column="1" Name="SqlDatabaseTextBox" Margin="5" Padding="5"/>
 
+                        <!--<CheckBox Grid.Row="4" Grid.Column="1" Name="SqlIntegratedSecurityCheckBox" Content="SQL Server Authentification" Margin="5" Checked="SqlIntegratedSecurityCheckBox_Changed" Unchecked="SqlIntegratedSecurityCheckBox_Changed"/>
+
                         <TextBlock Grid.Row="2" Grid.Column="0" Text="User:" VerticalAlignment="Center" Margin="0,5"/>
                         <TextBox Grid.Row="2" Grid.Column="1" Name="SqlUserTextBox" Margin="5" Padding="5"/>
 
                         <TextBlock Grid.Row="3" Grid.Column="0" Text="Password:" VerticalAlignment="Center" Margin="0,5"/>
-                        <PasswordBox Grid.Row="3" Grid.Column="1" Name="SqlPasswordBox" Margin="5" Padding="5"/>
+                        <PasswordBox Grid.Row="3" Grid.Column="1" Name="SqlPasswordBox" Margin="5" Padding="5"/>-->
 
-                        <CheckBox Grid.Row="4" Grid.Column="1" Name="SqlIntegratedSecurityCheckBox" Content="Use Integrated Security" Margin="5" Checked="SqlIntegratedSecurityCheckBox_Changed" Unchecked="SqlIntegratedSecurityCheckBox_Changed"/>
+
+                        <CheckBox Grid.Row="2" Grid.Column="1" Name="SqlIntegratedSecurityCheckBox" Content="SQL Server Authentification" Margin="5" Checked="SqlIntegratedSecurityCheckBox_Changed" Unchecked="SqlIntegratedSecurityCheckBox_Changed"/>                        
+                        
+                        <TextBlock Grid.Row="3" Grid.Column="0" Text="User:" VerticalAlignment="Center" Margin="0,5"/>
+                        <TextBox Grid.Row="3" Grid.Column="1" Name="SqlUserTextBox" Margin="5" Padding="5"/>
+
+                        <TextBlock Grid.Row="4" Grid.Column="0" Text="Password:" VerticalAlignment="Center" Margin="0,5"/>
+                        <PasswordBox Grid.Row="4" Grid.Column="1" Name="SqlPasswordBox" Margin="5" Padding="5"/>
                     </Grid>
                 </GroupBox>
 
@@ -98,7 +107,52 @@
                     </Grid>
                 </GroupBox>
 
-                
+                <!-- Advanced Settings - Migration Configuration -->
+                <GroupBox Header="Advanced Settings - Migration" Margin="0,0,0,15" Padding="10">
+                    <Grid>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                        </Grid.RowDefinitions>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="200"/>
+                            <ColumnDefinition Width="*"/>
+                        </Grid.ColumnDefinitions>
+
+                        <TextBlock Grid.Row="0" Grid.Column="0" Text="Root Folder ID:" VerticalAlignment="Center" Margin="0,5"/>
+                        <TextBox Grid.Row="0" Grid.Column="1" Name="RootFolderIdTextBox" Margin="5" Padding="5"
+                                 ToolTip="Alfresco root folder ID za destination i discovery (UUID format)"
+                                 Tag="Enter Alfresco root folder UUID"/>
+
+                        <TextBlock Grid.Row="1" Grid.Column="0" Text="Folder Types:" VerticalAlignment="Center" Margin="0,5"/>
+                        <TextBox Grid.Row="1" Grid.Column="1" Name="FolderTypesTextBox" Margin="5" Padding="5"
+                                 ToolTip="Tipovi foldera za pretragu razdvojeni zarezom"
+                                 Tag="Npr: LE, PI, D"/>
+
+                        <TextBlock Grid.Row="2" Grid.Column="0" Text="Migration Mode:" VerticalAlignment="Center" Margin="0,5"/>
+                        <TextBox Grid.Row="2" Grid.Column="1" Name="MigrationModeTextBox" Margin="5" Padding="5"
+                                 IsReadOnly="True" Background="#F0F0F0"
+                                 ToolTip="Način migracije - po dokumentu ili folderu (samo prikaz)"/>
+
+                        <TextBlock Grid.Row="3" Grid.Column="0" Text="Use Date Filter:" VerticalAlignment="Center" Margin="0,5"/>
+                        <CheckBox Grid.Row="3" Grid.Column="1" Name="UseDateFilterCheckBox" Margin="5" VerticalAlignment="Center"
+                                  ToolTip="Omogući filtriranje po datumu"/>
+
+                        <TextBlock Grid.Row="4" Grid.Column="0" Text="Date From:" VerticalAlignment="Center" Margin="0,5"/>
+                        <DatePicker Grid.Row="4" Grid.Column="1" Name="DateFromPicker" Margin="5" Padding="5"
+                                    ToolTip="Datum od (ako je Date Filter uključen)"/>
+
+                        <TextBlock Grid.Row="5" Grid.Column="0" Text="Date To:" VerticalAlignment="Center" Margin="0,5"/>
+                        <DatePicker Grid.Row="5" Grid.Column="1" Name="DateToPicker" Margin="5" Padding="5"
+                                    ToolTip="Datum do (ako je Date Filter uključen)"/>
+                    </Grid>
+                </GroupBox>
+
+
             </StackPanel>
         </ScrollViewer>
 
