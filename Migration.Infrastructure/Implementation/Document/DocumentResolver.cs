@@ -2,6 +2,8 @@
 using Alfresco.Contracts.Mapper;
 using Alfresco.Contracts.Models;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
+using Migration.Abstraction.Configuration;
 using Migration.Abstraction.Interfaces;
 using Migration.Abstraction.Models;
 
@@ -26,6 +28,7 @@ namespace Migration.Infrastructure.Implementation.Document
         private readonly IClientApi _clientApi;
         private readonly ILogger _fileLogger;
         private readonly ILogger _dbLogger;
+        private readonly FolderNodeTypeMappingConfig _nodeTypeMapping;
 
         // Thread-safe cache: Key = "parentId_folderName", Value = folder ID
         // Example: "abc-123_DOSSIERS-LE" -> "def-456-ghi-789"
@@ -41,7 +44,8 @@ namespace Migration.Infrastructure.Implementation.Document
             IAlfrescoWriteApi write,
             IFolderManager folderManager,
             IClientApi clientApi,
-            ILoggerFactory logger)
+            ILoggerFactory logger,
+            IOptions<FolderNodeTypeMappingConfig> nodeTypeMapping)
         {
             _doc = doc;
             _read = read;
@@ -50,13 +54,14 @@ namespace Migration.Infrastructure.Implementation.Document
             _clientApi = clientApi ?? throw new ArgumentNullException(nameof(clientApi));
             _fileLogger = logger.CreateLogger("FileLogger");
             _dbLogger = logger.CreateLogger("DbLogger");
+            _nodeTypeMapping = nodeTypeMapping?.Value ?? new FolderNodeTypeMappingConfig();
         }
         /// <summary>
         /// Resolves folder by name with backward compatibility (creates if missing)
         /// </summary>
         public async Task<string> ResolveAsync(string destinationRootId, string newFolderName, CancellationToken ct)
         {
-            return await ResolveAsync(destinationRootId, newFolderName, null, true, ct).ConfigureAwait(false);
+            return await ResolveAsync(destinationRootId, newFolderName, null, null, true, ct).ConfigureAwait(false);
         }
 
         /// <summary>
@@ -64,7 +69,7 @@ namespace Migration.Infrastructure.Implementation.Document
         /// </summary>
         public async Task<string> ResolveAsync(string destinationRootId, string newFolderName, Dictionary<string, object>? properties, CancellationToken ct)
         {
-            return await ResolveAsync(destinationRootId, newFolderName, properties, true, ct).ConfigureAwait(false);
+            return await ResolveAsync(destinationRootId, newFolderName, properties, null, true, ct).ConfigureAwait(false);
         }
 
         /// <summary>
@@ -80,6 +85,27 @@ namespace Migration.Infrastructure.Implementation.Document
             string destinationRootId,
             string newFolderName,
             Dictionary<string, object>? properties,
+            bool createIfMissing,
+            CancellationToken ct)
+        {
+            return await ResolveAsync(destinationRootId, newFolderName, properties, null, createIfMissing, ct).ConfigureAwait(false);
+        }
+
+        /// <summary>
+        /// Resolves folder with explicit nodeType and creation control
+        /// </summary>
+        /// <param name="destinationRootId">Parent folder ID</param>
+        /// <param name="newFolderName">Folder name to resolve</param>
+        /// <param name="properties">Optional properties for folder creation</param>
+        /// <param name="customNodeType">Custom Alfresco nodeType (e.g., "ecm:clientFolder"). If null, uses default "cm:folder"</param>
+        /// <param name="createIfMissing">If true, creates folder if not found. If false, throws exception.</param>
+        /// <param name="ct">Cancellation token</param>
+        /// <returns>Folder ID (existing or newly created)</returns>
+        public async Task<string> ResolveAsync(
+            string destinationRootId,
+            string newFolderName,
+            Dictionary<string, object>? properties,
+            string? customNodeType,
             bool createIfMissing,
             CancellationToken ct)
         {
@@ -173,14 +199,13 @@ namespace Migration.Infrastructure.Implementation.Document
                     try
                     {
                         _fileLogger.LogDebug(
-                            "Attempting to create folder '{FolderName}' with {PropertyCount} properties",
-                            newFolderName, properties.Count);
+                            "Attempting to create folder '{FolderName}' with {PropertyCount} properties (NodeType: {NodeType})",
+                            newFolderName, properties.Count, customNodeType ?? "cm:folder");
 
-                        //folderID = await _write.CreateFolderAsync(destinationRootId, newFolderName, properties, ct).ConfigureAwait(false);
-                        folderID = await _write.CreateFolderAsync(destinationRootId, newFolderName, properties, ct).ConfigureAwait(false);
+                        folderID = await _write.CreateFolderAsync(destinationRootId, newFolderName, properties, customNodeType, ct).ConfigureAwait(false);
                         _fileLogger.LogInformation(
-                            "Successfully created folder '{FolderName}' with properties. FolderId: {FolderId}",
-                            newFolderName, folderID);
+                            "Successfully created folder '{FolderName}' with properties. FolderId: {FolderId}, NodeType: {NodeType}",
+                            newFolderName, folderID, customNodeType ?? "cm:folder");
                     }
                     catch (Exception ex)
                     {
@@ -207,11 +232,11 @@ namespace Migration.Infrastructure.Implementation.Document
                         // Fallback: Try without properties (folder truly doesn't exist, properties were the issue)
                         try
                         {
-                            folderID = await _write.CreateFolderAsync(destinationRootId, newFolderName, null, ct).ConfigureAwait(false);
+                            folderID = await _write.CreateFolderAsync(destinationRootId, newFolderName, null, customNodeType, ct).ConfigureAwait(false);
 
                             _fileLogger.LogWarning(
-                                "Successfully created folder '{FolderName}' WITHOUT properties as fallback. FolderId: {FolderId}",
-                                newFolderName, folderID);
+                                "Successfully created folder '{FolderName}' WITHOUT properties as fallback. FolderId: {FolderId}, NodeType: {NodeType}",
+                                newFolderName, folderID, customNodeType ?? "cm:folder");
                         }
                         catch (Exception fallbackEx)
                         {
@@ -227,11 +252,11 @@ namespace Migration.Infrastructure.Implementation.Document
                 else
                 {
                     // No properties provided, create normally
-                    folderID = await _write.CreateFolderAsync(destinationRootId, newFolderName, null, ct).ConfigureAwait(false);
+                    folderID = await _write.CreateFolderAsync(destinationRootId, newFolderName, null, customNodeType, ct).ConfigureAwait(false);
 
                     _fileLogger.LogDebug(
-                        "Successfully created folder '{FolderName}' without properties. FolderId: {FolderId}",
-                        newFolderName, folderID);
+                        "Successfully created folder '{FolderName}' without properties. FolderId: {FolderId}, NodeType: {NodeType}",
+                        newFolderName, folderID, customNodeType ?? "cm:folder");
                 }
 
                 // ========================================
@@ -314,6 +339,19 @@ namespace Migration.Infrastructure.Implementation.Document
             UniqueFolderInfo? folderInfo,
             CancellationToken ct)
         {
+            // Determine nodeType based on folder info
+            string? customNodeType = null;
+
+            if (folderInfo != null && folderInfo.TargetDossierType.HasValue)
+            {
+                // Get custom nodeType from configuration based on DossierType
+                customNodeType = _nodeTypeMapping.GetNodeType(folderInfo.TargetDossierType.Value);
+
+                _fileLogger.LogDebug(
+                    "Determined nodeType '{NodeType}' for DossierType {DossierType} (folder: {FolderName})",
+                    customNodeType, folderInfo.TargetDossierType.Value, newFolderName);
+            }
+
             // Enrich properties with deposit-specific data if folderInfo is provided
             if (folderInfo != null && folderInfo.TargetDossierType == 700) // 700 = Deposit dossier
             {
@@ -339,8 +377,8 @@ namespace Migration.Infrastructure.Implementation.Document
                 }
             }
 
-            // Call the standard ResolveAsync with enriched properties
-            return await ResolveAsync(destinationRootId, newFolderName, properties, true, ct).ConfigureAwait(false);
+            // Call the standard ResolveAsync with enriched properties and custom nodeType
+            return await ResolveAsync(destinationRootId, newFolderName, properties, customNodeType, true, ct).ConfigureAwait(false);
         }
 
         private Dictionary<string, object> BuildPropertiesClientData(ClientData clientData)

@@ -17,6 +17,7 @@ using Microsoft.Extensions.Diagnostics.HealthChecks;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using Migration.Abstraction.Configuration;
 using Migration.Abstraction.Interfaces;
 using Migration.Abstraction.Interfaces.Services;
 using Migration.Abstraction.Interfaces.Wrappers;
@@ -311,6 +312,7 @@ namespace Alfresco.App
 
 
                     services.Configure<MigrationOptions>(context.Configuration.GetSection("Migration"));
+                    services.Configure<FolderNodeTypeMappingConfig>(context.Configuration.GetSection("Migration:FolderNodeTypeMapping"));
                    // services.Configure<WorkerSetting>(context.Configuration.GetSection("WorkerSetting"));
 
                     //services.AddScoped<IUnitOfWork>(sp => new OracleUnitOfWork(sp.GetRequiredService<OracleOptions>().ConnectionString));

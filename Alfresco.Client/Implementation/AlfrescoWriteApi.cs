@@ -67,6 +67,11 @@ namespace Alfresco.Client.Implementation
 
         public async Task<string> CreateFolderAsync(string parentFolderId, string newFolderName, Dictionary<string, object>? properties, CancellationToken ct = default)
         {
+            return await CreateFolderAsync(parentFolderId, newFolderName, properties, null, ct).ConfigureAwait(false);
+        }
+
+        public async Task<string> CreateFolderAsync(string parentFolderId, string newFolderName, Dictionary<string, object>? properties, string? customNodeType, CancellationToken ct = default)
+        {
             var jsonSerializerSettings = new JsonSerializerSettings
             {
                 NullValueHandling = NullValueHandling.Ignore,
@@ -77,18 +82,33 @@ namespace Alfresco.Client.Implementation
             if (properties != null && properties.Count > 0)
             {
                 _fileLogger.LogDebug(
-                    "Attempting to create folder '{FolderName}' with {PropertyCount} properties under parent '{ParentId}'",
-                    newFolderName, properties.Count, parentFolderId);
+                    "Attempting to create folder '{FolderName}' with {PropertyCount} properties under parent '{ParentId}' (NodeType: {NodeType})",
+                    newFolderName, properties.Count, parentFolderId, customNodeType ?? "cm:folder");
 
                 try
                 {
-                    var folderId = await CreateFolderInternalAsync(parentFolderId, newFolderName, properties, jsonSerializerSettings, ct).ConfigureAwait(false);
+                    var folderId = await CreateFolderInternalAsync(parentFolderId, newFolderName, properties, customNodeType, jsonSerializerSettings, ct).ConfigureAwait(false);
 
                     _fileLogger.LogInformation(
-                        "Successfully created folder '{FolderName}' with properties. FolderId: {FolderId}",
-                        newFolderName, folderId);
+                        "Successfully created folder '{FolderName}' with properties. FolderId: {FolderId}, NodeType: {NodeType}",
+                        newFolderName, folderId, customNodeType ?? "cm:folder");
 
                     return folderId;
+                }
+                catch (AlfrescoNodeTypeException nodeTypeEx)
+                {
+                    _fileLogger.LogError(
+                        "NodeType '{NodeType}' is not defined in Alfresco content model when creating folder '{FolderName}': {ErrorKey} - {BriefSummary} (LogId: {LogId}). " +
+                        "Falling back to default 'cm:folder'.",
+                        nodeTypeEx.AttemptedNodeType, newFolderName, nodeTypeEx.ErrorKey, nodeTypeEx.BriefSummary, nodeTypeEx.LogId);
+
+                    _dbLogger.LogError(
+                        "CRITICAL: Invalid nodeType '{NodeType}' configured for folder '{FolderName}'. Check appsettings.json 'Migration:FolderNodeTypeMapping'. " +
+                        "Error: {BriefSummary}",
+                        nodeTypeEx.AttemptedNodeType, newFolderName, nodeTypeEx.BriefSummary);
+
+                    // Fallback: Retry with default cm:folder nodeType
+                    return await CreateFolderInternalAsync(parentFolderId, newFolderName, properties, "cm:folder", jsonSerializerSettings, ct).ConfigureAwait(false);
                 }
                 catch (AlfrescoPropertyException propEx)
                 {
@@ -98,7 +118,7 @@ namespace Alfresco.Client.Implementation
                         newFolderName, propEx.ErrorKey, propEx.BriefSummary, propEx.LogId);
 
                     // Fallback: Retry without properties
-                    return await CreateFolderInternalAsync(parentFolderId, newFolderName, null, jsonSerializerSettings, ct).ConfigureAwait(false);
+                    return await CreateFolderInternalAsync(parentFolderId, newFolderName, null, customNodeType, jsonSerializerSettings, ct).ConfigureAwait(false);
                 }
                 catch (Exception ex)
                 {
@@ -109,17 +129,35 @@ namespace Alfresco.Client.Implementation
                         newFolderName);
 
                     // Fallback: Retry without properties
-                    return await CreateFolderInternalAsync(parentFolderId, newFolderName, null, jsonSerializerSettings, ct).ConfigureAwait(false);
+                    return await CreateFolderInternalAsync(parentFolderId, newFolderName, null, customNodeType, jsonSerializerSettings, ct).ConfigureAwait(false);
                 }
             }
             else
             {
                 // No properties, create normally
                 _fileLogger.LogDebug(
-                    "Creating folder '{FolderName}' without properties under parent '{ParentId}'",
-                    newFolderName, parentFolderId);
+                    "Creating folder '{FolderName}' without properties under parent '{ParentId}' (NodeType: {NodeType})",
+                    newFolderName, parentFolderId, customNodeType ?? "cm:folder");
 
-                return await CreateFolderInternalAsync(parentFolderId, newFolderName, null, jsonSerializerSettings, ct).ConfigureAwait(false);
+                try
+                {
+                    return await CreateFolderInternalAsync(parentFolderId, newFolderName, null, customNodeType, jsonSerializerSettings, ct).ConfigureAwait(false);
+                }
+                catch (AlfrescoNodeTypeException nodeTypeEx)
+                {
+                    _fileLogger.LogError(
+                        "NodeType '{NodeType}' is not defined in Alfresco content model when creating folder '{FolderName}': {ErrorKey} - {BriefSummary} (LogId: {LogId}). " +
+                        "Falling back to default 'cm:folder'.",
+                        nodeTypeEx.AttemptedNodeType, newFolderName, nodeTypeEx.ErrorKey, nodeTypeEx.BriefSummary, nodeTypeEx.LogId);
+
+                    _dbLogger.LogError(
+                        "CRITICAL: Invalid nodeType '{NodeType}' configured for folder '{FolderName}'. Check appsettings.json 'Migration:FolderNodeTypeMapping'. " +
+                        "Error: {BriefSummary}",
+                        nodeTypeEx.AttemptedNodeType, newFolderName, nodeTypeEx.BriefSummary);
+
+                    // Fallback: Retry with default cm:folder nodeType
+                    return await CreateFolderInternalAsync(parentFolderId, newFolderName, null, "cm:folder", jsonSerializerSettings, ct).ConfigureAwait(false);
+                }
             }
         }
 
@@ -130,13 +168,14 @@ namespace Alfresco.Client.Implementation
             string parentFolderId,
             string newFolderName,
             Dictionary<string, object>? properties,
+            string? customNodeType,
             JsonSerializerSettings jsonSerializerSettings,
             CancellationToken ct)
         {
             // Build body with optional properties
             dynamic body = new System.Dynamic.ExpandoObject();
             body.name = newFolderName;
-            body.nodeType = "cm:folder";
+            body.nodeType = customNodeType ?? "cm:folder";  // Use custom nodeType if provided, otherwise default to cm:folder
 
             // Add custom properties if provided
             if (properties != null && properties.Count > 0)
@@ -174,18 +213,34 @@ namespace Alfresco.Client.Implementation
                                 errorResponse.Error.LogId);
                         }
 
+                        // Check if it's a nodeType-related error
+                        if (IsNodeTypeError(errorResponse))
+                        {
+                            throw new AlfrescoNodeTypeException(
+                                $"NodeType error when creating folder '{newFolderName}': {errorResponse.Error.BriefSummary}",
+                                errorResponse.Error.ErrorKey,
+                                errorResponse.Error.BriefSummary,
+                                errorResponse.Error.LogId,
+                                customNodeType);
+                        }
+
                         // Other Alfresco error
                         throw new HttpRequestException(
                             $"Alfresco API error (Status: {response.StatusCode}): {errorResponse.Error.BriefSummary} " +
                             $"(ErrorKey: {errorResponse.Error.ErrorKey}, LogId: {errorResponse.Error.LogId})");
                     }
                 }
-                catch (AlfrescoPropertyException ex)
+                catch (AlfrescoPropertyException ex )
                 {
                     // Re-throw property exceptions
                     throw;
                 }
-                catch (JsonException)
+                catch (AlfrescoNodeTypeException ex )
+                {
+                    // Re-throw nodeType exceptions
+                    throw;
+                }
+                catch (JsonException xex)
                 {
                     // Could not parse error response, throw generic error
                     _fileLogger.LogWarning(
@@ -429,6 +484,31 @@ namespace Alfresco.Client.Implementation
                    briefSummary.Contains("invalid property");
         }
 
+        /// <summary>
+        /// Checks if the error is related to unknown/invalid nodeType
+        /// </summary>
+        private bool IsNodeTypeError(AlfrescoErrorResponse? errorResponse)
+        {
+            if (errorResponse?.Error == null)
+                return false;
+
+            var errorKey = errorResponse.Error.ErrorKey?.ToLowerInvariant() ?? string.Empty;
+            var briefSummary = errorResponse.Error.BriefSummary?.ToLowerInvariant() ?? string.Empty;
+            var stackTrace = errorResponse.Error.StackTrace?.ToLowerInvariant() ?? string.Empty;
+
+            // Check for nodeType-related errors
+            // Examples: "Unknown type", "Invalid type", "Type not found", "d:ecm:clientFolder"
+            return errorKey.Contains("unknown type") ||
+                   errorKey.Contains("invalid type") ||
+                   errorKey.Contains("type not found") ||
+                   briefSummary.Contains("unknown type") ||
+                   briefSummary.Contains("invalid type") ||
+                   briefSummary.Contains("type not found") ||
+                   briefSummary.Contains("nodetype") ||
+                   stackTrace.Contains("unknown type") ||
+                   stackTrace.Contains("invalid type");
+        }
+
         #endregion
 
         #region DTOs
@@ -479,6 +559,26 @@ namespace Alfresco.Client.Implementation
                 ErrorKey = errorKey;
                 BriefSummary = briefSummary;
                 LogId = logId;
+            }
+        }
+
+        /// <summary>
+        /// Custom exception for Alfresco nodeType errors (unknown or invalid nodeType)
+        /// </summary>
+        public class AlfrescoNodeTypeException : Exception
+        {
+            public string? ErrorKey { get; }
+            public string? BriefSummary { get; }
+            public string? LogId { get; }
+            public string? AttemptedNodeType { get; }
+
+            public AlfrescoNodeTypeException(string message, string? errorKey, string? briefSummary, string? logId, string? attemptedNodeType)
+                : base(message)
+            {
+                ErrorKey = errorKey;
+                BriefSummary = briefSummary;
+                LogId = logId;
+                AttemptedNodeType = attemptedNodeType;
             }
         }
 
