@@ -1,6 +1,7 @@
 ﻿using Alfresco.Abstraction.Interfaces;
 using Alfresco.Contracts.Mapper;
 using Alfresco.Contracts.Models;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Migration.Abstraction.Configuration;
@@ -44,7 +45,7 @@ namespace Migration.Infrastructure.Implementation.Document
             IAlfrescoWriteApi write,
             IFolderManager folderManager,
             IClientApi clientApi,
-            ILoggerFactory logger,
+            IServiceProvider serviceProvider,
             IOptions<FolderNodeTypeMappingConfig> nodeTypeMapping)
         {
             _doc = doc;
@@ -52,8 +53,10 @@ namespace Migration.Infrastructure.Implementation.Document
             _write = write;
             _folderManager = folderManager ?? throw new ArgumentNullException(nameof(folderManager));
             _clientApi = clientApi ?? throw new ArgumentNullException(nameof(clientApi));
-            _fileLogger = logger.CreateLogger("FileLogger");
-            _dbLogger = logger.CreateLogger("DbLogger");
+
+            var loggerFactory = serviceProvider.GetRequiredService<ILoggerFactory>();
+            _fileLogger = loggerFactory.CreateLogger("FileLogger");
+            _dbLogger = loggerFactory.CreateLogger("DbLogger");
             _nodeTypeMapping = nodeTypeMapping?.Value ?? new FolderNodeTypeMappingConfig();
         }
         /// <summary>

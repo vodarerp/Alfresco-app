@@ -1,4 +1,5 @@
 using Alfresco.Contracts.Options;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Migration.Abstraction.Interfaces;
@@ -23,11 +24,13 @@ namespace Migration.Infrastructure.Implementation
         public FolderManager(
             IFolderPathService pathService,
             IOptions<MigrationOptions> options,
-            ILoggerFactory logger)
+            IServiceProvider serviceProvider)
         {
             _pathService = pathService ?? throw new ArgumentNullException(nameof(pathService));
-            _fileLogger = logger.CreateLogger("FileLogger");
-            _dbLogger = logger.CreateLogger("DbLogger");
+
+            var loggerFactory = serviceProvider.GetRequiredService<ILoggerFactory>();
+            _fileLogger = loggerFactory.CreateLogger("FileLogger");
+            _dbLogger = loggerFactory.CreateLogger("DbLogger");
             _options = options?.Value ?? throw new ArgumentNullException(nameof(options));
 
             if (string.IsNullOrWhiteSpace(_options.RootDocumentPath))

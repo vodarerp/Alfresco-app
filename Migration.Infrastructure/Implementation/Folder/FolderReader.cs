@@ -1,6 +1,7 @@
 ﻿using Alfresco.Abstraction.Interfaces;
 using Alfresco.Contracts.Models;
 using Alfresco.Contracts.Request;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Migration.Abstraction.Interfaces;
 using Migration.Abstraction.Models;
@@ -20,12 +21,14 @@ namespace Migration.Infrastructure.Implementation.Folder
         private readonly ILogger _fileLogger;
         private readonly ILogger _dbLogger;
 
-        public FolderReader(IAlfrescoReadApi read, ILoggerFactory logger, IAlfrescoDbReader? dbReader = null)
+        public FolderReader(IAlfrescoReadApi read, IServiceProvider serviceProvider, IAlfrescoDbReader? dbReader = null)
         {
             _read = read;
             _dbReader = dbReader;
-            _fileLogger = logger.CreateLogger("FileLogger");
-            _dbLogger = logger.CreateLogger("DbLogger");
+
+            var loggerFactory = serviceProvider.GetRequiredService<ILoggerFactory>();
+            _fileLogger = loggerFactory.CreateLogger("FileLogger");
+            _dbLogger = loggerFactory.CreateLogger("DbLogger");
         }
 
         //public sealed record FolderReaderRequest(string RootId, string NameFilter, int Skip, int Take);

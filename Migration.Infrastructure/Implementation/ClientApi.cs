@@ -1,4 +1,5 @@
 using Microsoft.Extensions.Caching.Memory;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Migration.Abstraction.Interfaces;
@@ -32,12 +33,14 @@ namespace Migration.Infrastructure.Implementation
         public ClientApi(
             HttpClient httpClient,
             IOptions<ClientApiOptions> options,
-            ILoggerFactory logger,
+            IServiceProvider serviceProvider,
             IMemoryCache cache)
         {
             _httpClient = httpClient ?? throw new ArgumentNullException(nameof(httpClient));
-            _fileLogger = logger.CreateLogger("FileLogger");
-            _dbLogger = logger.CreateLogger("DbLogger");
+
+            var loggerFactory = serviceProvider.GetRequiredService<ILoggerFactory>();
+            _fileLogger = loggerFactory.CreateLogger("FileLogger");
+            _dbLogger = loggerFactory.CreateLogger("DbLogger");
             _options = options?.Value ?? throw new ArgumentNullException(nameof(options));
             _cache = cache ?? throw new ArgumentNullException(nameof(cache));
         }

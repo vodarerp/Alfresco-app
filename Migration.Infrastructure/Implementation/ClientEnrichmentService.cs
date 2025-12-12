@@ -1,5 +1,6 @@
 using Alfresco.Abstraction.Interfaces;
 using Alfresco.Contracts.Oracle.Models;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Migration.Abstraction.Interfaces;
 using Migration.Abstraction.Models;
@@ -21,13 +22,15 @@ namespace Migration.Infrastructure.Implementation
 
         public ClientEnrichmentService(
             IClientApi clientApi,
-            ILoggerFactory logger,
+            IServiceProvider serviceProvider,
             IAlfrescoReadApi? alfrescoReadApi = null,
             IAlfrescoWriteApi? alfrescoWriteApi = null)
         {
             _clientApi = clientApi ?? throw new ArgumentNullException(nameof(clientApi));
-            _fileLogger = logger.CreateLogger("FileLogger");
-            _dbLogger = logger.CreateLogger("DbLogger");
+
+            var loggerFactory = serviceProvider.GetRequiredService<ILoggerFactory>();
+            _fileLogger = loggerFactory.CreateLogger("FileLogger");
+            _dbLogger = loggerFactory.CreateLogger("DbLogger");
             _alfrescoReadApi = alfrescoReadApi;
             _alfrescoWriteApi = alfrescoWriteApi;
         }

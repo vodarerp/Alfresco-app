@@ -1,4 +1,5 @@
 ﻿using Alfresco.Abstraction.Interfaces;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Migration.Abstraction.Interfaces;
 using Migration.Abstraction.Models;
@@ -19,12 +20,14 @@ namespace Migration.Infrastructure.Implementation.Move
         private readonly ILogger _fileLogger;
         private readonly ILogger _dbLogger;
 
-        public MoveExecutor(IDocStagingRepository doc, IAlfrescoWriteApi wirte, ILoggerFactory logger)
+        public MoveExecutor(IDocStagingRepository doc, IAlfrescoWriteApi wirte, IServiceProvider serviceProvider)
         {
             _docRepo = doc;
             _write = wirte;
-            _fileLogger = logger.CreateLogger("FileLogger");
-            _dbLogger = logger.CreateLogger("DbLogger");
+
+            var loggerFactory = serviceProvider.GetRequiredService<ILoggerFactory>();
+            _fileLogger = loggerFactory.CreateLogger("FileLogger");
+            _dbLogger = loggerFactory.CreateLogger("DbLogger");
         }
 
         public async Task<bool> MoveAsync(string DocumentId, string DestFolderId, CancellationToken ct)

@@ -128,7 +128,7 @@ namespace Migration.Infrastructure.Implementation.Services
             var currentType = folderTypes[_currentFolderTypeIndex];
             var currentFolderId = _dossierFolders[currentType];
 
-            _fileLogger.LogDebug("Processing DOSSIER-{Type} folder, SkipCount: {Skip}", currentType, _currentSkipCount);
+            _fileLogger.LogInformation("Processing DOSSIER-{Type} folder, SkipCount: {Skip}", currentType, _currentSkipCount);
 
             // Search documents by ecm:docType
             var searchResult = await SearchDocumentsByTypeAsync(currentFolderId, docTypes, _currentSkipCount, batchSize, ct)
@@ -152,7 +152,7 @@ namespace Migration.Infrastructure.Implementation.Services
                 // IMPORTANT: Even if filtered results are empty, continue pagination if Alfresco has more results
                 if (searchResult.HasMore)
                 {
-                    _fileLogger.LogDebug(
+                    _fileLogger.LogInformation(
                         "No matching documents found in current batch for DOSSIER-{Type} (filter: {Pattern}), but more results available. " +
                         "Continuing pagination (SkipCount: {Skip} -> {NextSkip})",
                         currentType, regex.ToString(), _currentSkipCount, _currentSkipCount + batchSize);
@@ -307,7 +307,7 @@ namespace Migration.Infrastructure.Implementation.Services
 
                 try
                 {
-                    _fileLogger.LogDebug("Starting batch {BatchCounter}", _batchCounter + 1);
+                    _fileLogger.LogInformation("Starting batch {BatchCounter}", _batchCounter + 1);
 
                     var result = await RunBatchAsync(ct).ConfigureAwait(false);
 
@@ -327,7 +327,7 @@ namespace Migration.Infrastructure.Implementation.Services
                     if (result.DocumentsFound == 0)
                     {
                         emptyResultCounter++;
-                        _fileLogger.LogDebug("Empty result ({Counter}/{Max})", emptyResultCounter, maxEmptyResults);
+                        _fileLogger.LogInformation("Empty result ({Counter}/{Max})", emptyResultCounter, maxEmptyResults);
 
                         if (emptyResultCounter >= maxEmptyResults)
                         {
@@ -396,7 +396,7 @@ namespace Migration.Infrastructure.Implementation.Services
             var rootId = _options.Value.RootDiscoveryFolderId;
             var folderTypes = _options.Value.DocumentTypeDiscovery.FolderTypes;
 
-            _fileLogger.LogDebug("Finding DOSSIER subfolders in root {RootId}", rootId);
+            _fileLogger.LogInformation("Finding DOSSIER subfolders in root {RootId}", rootId);
 
             var result = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
             var skipCount = 0;
@@ -449,7 +449,7 @@ namespace Migration.Infrastructure.Implementation.Services
 
                     var folderId = $"workspace://SpacesStore/{folder.Entry?.Id}";
                     result[type] = folderId;
-                    _fileLogger.LogDebug("Added DOSSIER-{Type} folder: {FolderId}", type, folderId);
+                    _fileLogger.LogInformation("Added DOSSIER-{Type} folder: {FolderId}", type, folderId);
                 }
 
                 if (folders.Count < pageSize)
@@ -473,7 +473,7 @@ namespace Migration.Infrastructure.Implementation.Services
         {
             var query = BuildDocumentSearchQuery(ancestorId, docTypes);
 
-            _fileLogger.LogDebug("AFTS Query: {Query}, Skip: {Skip}, Max: {Max}", query, skipCount, maxItems);
+            _fileLogger.LogInformation("AFTS Query: {Query}, Skip: {Skip}, Max: {Max}", query, skipCount, maxItems);
 
             var req = new PostSearchRequest
             {
@@ -681,7 +681,7 @@ namespace Migration.Infrastructure.Implementation.Services
         {
             if (_clientApi == null)
             {
-                _fileLogger.LogDebug("ClientAPI not configured, skipping folder enrichment");
+                _fileLogger.LogInformation("ClientAPI not configured, skipping folder enrichment");
                 return;
             }
 
@@ -967,7 +967,7 @@ namespace Migration.Infrastructure.Implementation.Services
 
                     await uow.CommitAsync(ct).ConfigureAwait(false);
 
-                    _fileLogger.LogDebug("Checkpoint progress saved: {TotalProcessed} documents processed, skip count: {Skip}",
+                    _fileLogger.LogInformation("Checkpoint progress saved: {TotalProcessed} documents processed, skip count: {Skip}",
                         _totalDocumentsProcessed, _currentSkipCount);
                 }
                 catch
