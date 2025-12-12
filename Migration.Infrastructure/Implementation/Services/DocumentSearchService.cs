@@ -149,7 +149,25 @@ namespace Migration.Infrastructure.Implementation.Services
 
             if (finalDocuments.Count == 0)
             {
-                _fileLogger.LogInformation("No documents found in DOSSIER-{Type}, moving to next folder", currentType);
+                // IMPORTANT: Even if filtered results are empty, continue pagination if Alfresco has more results
+                if (searchResult.HasMore)
+                {
+                    _fileLogger.LogDebug(
+                        "No matching documents found in current batch for DOSSIER-{Type} (filter: {Pattern}), but more results available. " +
+                        "Continuing pagination (SkipCount: {Skip} -> {NextSkip})",
+                        currentType, regex.ToString(), _currentSkipCount, _currentSkipCount + batchSize);
+
+                    // Continue pagination - increment skipCount and try next batch
+                    _currentSkipCount += batchSize;
+
+                    // Recursively process next batch from same folder
+                    return await RunBatchAsync(ct).ConfigureAwait(false);
+                }
+
+                // No more results in Alfresco AND no matching documents - move to next folder type
+                _fileLogger.LogInformation(
+                    "No matching documents found in DOSSIER-{Type} after processing all pages. Moving to next folder type.",
+                    currentType);
 
                 // Move to next folder type
                 _currentFolderTypeIndex++;

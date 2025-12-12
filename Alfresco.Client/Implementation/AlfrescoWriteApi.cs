@@ -264,61 +264,108 @@ namespace Alfresco.Client.Implementation
 
         public async Task<bool> MoveDocumentAsync(string nodeId, string targetFolderId, string? newName, CancellationToken ct = default)
         {
-            try
+            const int MAX_RETRY_ATTEMPTS = 100;
+            int attemptNumber = 0;
+            string? currentName = newName;
+
+            while (attemptNumber < MAX_RETRY_ATTEMPTS)
             {
-                _fileLogger.LogDebug("Moving node {NodeId} to folder {TargetFolderId}", nodeId, targetFolderId);
-
-                var jsonSerializerSettings = new JsonSerializerSettings
-                {
-                    NullValueHandling = NullValueHandling.Ignore,
-                    ContractResolver = new Newtonsoft.Json.Serialization.CamelCasePropertyNamesContractResolver()
-                };
-                var body = new
-                {
-                    targetParentId = targetFolderId
-                };
-                var json = JsonConvert.SerializeObject(body, jsonSerializerSettings);
-
-                using var content = new StringContent(json, Encoding.UTF8, "application/json");
-                using var res = await _client.PostAsync($"/alfresco/api/-default-/public/alfresco/versions/1/nodes/{nodeId}/move", content, ct).ConfigureAwait(false);
-
-                if (res.IsSuccessStatusCode)
-                {
-                    _fileLogger.LogDebug("Successfully moved node {NodeId} to folder {TargetFolderId}", nodeId, targetFolderId);
-                    return true;
-                }
-
-                // Handle error response
-                var errorContent = await res.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
-
-                _fileLogger.LogWarning(
-                    "Failed to move node {NodeId} to folder {TargetFolderId}: {StatusCode} - {Error}",
-                    nodeId, targetFolderId, res.StatusCode, errorContent);
-
-                // Try to parse error response for better error details
                 try
                 {
-                    var errorResponse = JsonConvert.DeserializeObject<AlfrescoErrorResponse>(errorContent);
+                    _fileLogger.LogDebug(
+                        "Moving node {NodeId} to folder {TargetFolderId} (Attempt {Attempt}/{Max}, Name: {Name})",
+                        nodeId, targetFolderId, attemptNumber + 1, MAX_RETRY_ATTEMPTS, currentName ?? "original");
 
-                    if (errorResponse?.Error != null)
+                    var jsonSerializerSettings = new JsonSerializerSettings
                     {
-                        _fileLogger.LogError(
-                            "Alfresco move error for node {NodeId}: {ErrorKey} - {BriefSummary} (LogId: {LogId})",
-                            nodeId, errorResponse.Error.ErrorKey, errorResponse.Error.BriefSummary, errorResponse.Error.LogId);
-                    }
-                }
-                catch (JsonException)
-                {
-                    _fileLogger.LogWarning("Could not parse error response for move operation on node {NodeId}", nodeId);
-                }
+                        NullValueHandling = NullValueHandling.Ignore,
+                        ContractResolver = new Newtonsoft.Json.Serialization.CamelCasePropertyNamesContractResolver()
+                    };
 
-                return false;
+                    // Build request body with optional name
+                    dynamic body = new System.Dynamic.ExpandoObject();
+                    body.targetParentId = targetFolderId;
+                    if (!string.IsNullOrEmpty(currentName))
+                    {
+                        body.name = currentName;
+                    }
+
+                    var json = JsonConvert.SerializeObject(body, jsonSerializerSettings);
+                    using var content = new StringContent(json, Encoding.UTF8, "application/json");
+                    using var res = await _client.PostAsync(
+                        $"/alfresco/api/-default-/public/alfresco/versions/1/nodes/{nodeId}/move",
+                        content,
+                        ct).ConfigureAwait(false);
+
+                    if (res.IsSuccessStatusCode)
+                    {
+                        if (attemptNumber > 0)
+                        {
+                            _fileLogger.LogInformation(
+                                "Successfully moved node {NodeId} to folder {TargetFolderId} with renamed file: {NewName} (after {Attempts} attempts)",
+                                nodeId, targetFolderId, currentName, attemptNumber + 1);
+                        }
+                        else
+                        {
+                            _fileLogger.LogDebug("Successfully moved node {NodeId} to folder {TargetFolderId}", nodeId, targetFolderId);
+                        }
+                        return true;
+                    }
+
+                    // Handle error response
+                    var errorContent = await res.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
+
+                    // Try to parse error response
+                    try
+                    {
+                        var errorResponse = JsonConvert.DeserializeObject<AlfrescoErrorResponse>(errorContent, jsonSerializerSettings);
+
+                        if (errorResponse?.Error != null)
+                        {
+                            // Check if it's a "Name already exists" conflict (409)
+                            if (res.StatusCode == System.Net.HttpStatusCode.Conflict &&
+                                (errorResponse.Error.ErrorKey?.Contains("Name already exists") == true ||
+                                 errorResponse.Error.BriefSummary?.Contains("Name already exists") == true))
+                            {
+                                _fileLogger.LogWarning(
+                                    "Document name conflict for node {NodeId} in folder {TargetFolderId} (Attempt {Attempt}): {BriefSummary}. Retrying with incremented name...",
+                                    nodeId, targetFolderId, attemptNumber + 1, errorResponse.Error.BriefSummary);
+
+                                // Generate new name with suffix
+                                attemptNumber++;
+                                currentName = await GenerateNewNameWithSuffixAsync(nodeId, currentName, attemptNumber, ct).ConfigureAwait(false);
+                                continue; // Retry with new name
+                            }
+
+                            // Other error - log and return false
+                            _fileLogger.LogError(
+                                "Alfresco move error for node {NodeId}: {ErrorKey} - {BriefSummary} (LogId: {LogId})",
+                                nodeId, errorResponse.Error.ErrorKey, errorResponse.Error.BriefSummary, errorResponse.Error.LogId);
+                        }
+                    }
+                    catch (JsonException)
+                    {
+                        _fileLogger.LogWarning("Could not parse error response for move operation on node {NodeId}", nodeId);
+                    }
+
+                    _fileLogger.LogWarning(
+                        "Failed to move node {NodeId} to folder {TargetFolderId}: {StatusCode} - {Error}",
+                        nodeId, targetFolderId, res.StatusCode, errorContent);
+
+                    return false;
+                }
+                catch (Exception ex)
+                {
+                    _fileLogger.LogError(ex, "Error moving node {NodeId} to folder {TargetFolderId}", nodeId, targetFolderId);
+                    throw;
+                }
             }
-            catch (Exception ex)
-            {
-                _fileLogger.LogError(ex, "Error moving node {NodeId} to folder {TargetFolderId}", nodeId, targetFolderId);
-                throw;
-            }
+
+            // Max retries exceeded
+            _fileLogger.LogError(
+                "Failed to move node {NodeId} to folder {TargetFolderId} after {MaxAttempts} attempts due to name conflicts",
+                nodeId, targetFolderId, MAX_RETRY_ATTEMPTS);
+            return false;
         }
 
         public async Task<bool> CopyDocumentAsync(string nodeId, string targetFolderId, string? newName, CancellationToken ct = default)
@@ -482,6 +529,68 @@ namespace Alfresco.Client.Implementation
                    errorKey.Contains("invalid property") ||
                    briefSummary.Contains("unknown property") ||
                    briefSummary.Contains("invalid property");
+        }
+
+        /// <summary>
+        /// Generates a new file name with a numeric suffix to avoid conflicts.
+        /// If originalName is null, fetches the current document name from Alfresco.
+        /// Format: "document.pdf" -> "document (1).pdf" -> "document (2).pdf"
+        /// </summary>
+        private async Task<string> GenerateNewNameWithSuffixAsync(string nodeId, string? originalName, int attemptNumber, CancellationToken ct)
+        {
+            // If originalName is null, fetch it from Alfresco
+            if (string.IsNullOrEmpty(originalName))
+            {
+                try
+                {
+                    using var response = await _client.GetAsync(
+                        $"/alfresco/api/-default-/public/alfresco/versions/1/nodes/{nodeId}",
+                        ct).ConfigureAwait(false);
+
+                    if (response.IsSuccessStatusCode)
+                    {
+                        var content = await response.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
+                        var jsonSerializerSettings = new JsonSerializerSettings
+                        {
+                            NullValueHandling = NullValueHandling.Ignore,
+                            ContractResolver = new Newtonsoft.Json.Serialization.CamelCasePropertyNamesContractResolver()
+                        };
+                        var nodeResponse = JsonConvert.DeserializeObject<NodeResponse>(content, jsonSerializerSettings);
+                        originalName = nodeResponse?.Entry?.Name ?? $"document_{nodeId}";
+                    }
+                    else
+                    {
+                        _fileLogger.LogWarning("Failed to fetch node name for {NodeId}, using fallback name", nodeId);
+                        originalName = $"document_{nodeId}";
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _fileLogger.LogWarning(ex, "Error fetching node name for {NodeId}, using fallback name", nodeId);
+                    originalName = $"document_{nodeId}";
+                }
+            }
+
+            // Split name and extension
+            var extension = System.IO.Path.GetExtension(originalName);
+            var nameWithoutExtension = System.IO.Path.GetFileNameWithoutExtension(originalName);
+
+            // Remove any existing suffix like " (1)", " (2)", etc.
+            var suffixPattern = System.Text.RegularExpressions.Regex.Match(nameWithoutExtension, @"^(.*?)\s*\((\d+)\)$");
+            if (suffixPattern.Success)
+            {
+                // Already has a suffix, use the base name
+                nameWithoutExtension = suffixPattern.Groups[1].Value.Trim();
+            }
+
+            // Generate new name with suffix
+            var newName = $"{nameWithoutExtension} ({attemptNumber}){extension}";
+
+            _fileLogger.LogDebug(
+                "Generated new name for node {NodeId}: {OriginalName} -> {NewName}",
+                nodeId, originalName, newName);
+
+            return newName;
         }
 
         /// <summary>
