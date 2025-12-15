@@ -17,7 +17,9 @@ namespace Alfresco.Contracts.Models
         public bool IsActive { get; init; }
 
         /// <summary>
-        /// Alfresco status string: "validiran" ili "poništen"
+        /// Status dokumenta kao string:
+        /// "1" = Aktivan dokument
+        /// "2" = Poništen dokument
         /// </summary>
         public string Status { get; init; } = string.Empty;
 

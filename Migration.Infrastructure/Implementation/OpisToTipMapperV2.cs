@@ -26,13 +26,7 @@ namespace Migration.Infrastructure.Implementation
             _scopeFactory = scopeFactory ?? throw new ArgumentNullException(nameof(scopeFactory));
         }
 
-        /// <summary>
-        /// Gets the document type code (ecm:tipDokumenta) from document description (ecm:opisDokumenta).
-        /// NOVA LOGIKA: Koristi DocumentMappingService za mapiranje iz SQL tabele.
-        /// </summary>
-        /// <param name="opisDokumenta">Document description from Alfresco (ecm:docDesc)</param>
-        /// <param name="ct">Cancellation token</param>
-        /// <returns>Document type code (SifraDocMigracija) or "UNKNOWN" if not found</returns>
+       
         public async Task<string> GetTipDokumentaAsync(string opisDokumenta, CancellationToken ct = default)
         {
             if (string.IsNullOrWhiteSpace(opisDokumenta))
@@ -82,13 +76,7 @@ namespace Migration.Infrastructure.Implementation
             }
         }
 
-        /// <summary>
-        /// Checks if the given document description has a known mapping.
-        /// NOVA LOGIKA: Koristi DocumentMappingService za proveru.
-        /// </summary>
-        /// <param name="opisDokumenta">Document description from Alfresco</param>
-        /// <param name="ct">Cancellation token</param>
-        /// <returns>True if mapping exists, false otherwise</returns>
+       
         public async Task<bool> IsKnownOpisAsync(string opisDokumenta, CancellationToken ct = default)
         {
             if (string.IsNullOrWhiteSpace(opisDokumenta))
@@ -98,11 +86,7 @@ namespace Migration.Infrastructure.Implementation
             return tipDokumenta != "UNKNOWN";
         }
 
-        /// <summary>
-        /// Gets all registered mappings from DocumentMappingService (for debugging/testing purposes).
-        /// </summary>
-        /// <param name="ct">Cancellation token</param>
-        /// <returns>Dictionary of all mappings (Naziv/NazivDokumenta → SifraDokumentaMigracija)</returns>
+        
         public async Task<IReadOnlyDictionary<string, string>> GetAllMappingsAsync(CancellationToken ct = default)
         {
             await using var scope = _scopeFactory.CreateAsyncScope();
@@ -149,12 +133,7 @@ namespace Migration.Infrastructure.Implementation
             }
         }
 
-        /// <summary>
-        /// Gets the full mapping info from DocumentMappingService for given document description.
-        /// </summary>
-        /// <param name="opisDokumenta">Document description from Alfresco</param>
-        /// <param name="ct">Cancellation token</param>
-        /// <returns>Full mapping or null if not found</returns>
+        
         public async Task<DocumentMapping?> GetFullMappingAsync(string opisDokumenta,string docCode, CancellationToken ct = default)
         {
             if (string.IsNullOrWhiteSpace(opisDokumenta))

@@ -100,5 +100,23 @@ namespace Alfresco.Contracts.Oracle.Models
         [Column("PolitikaCuvanja")]
         [MaxLength(100)]
         public string? PolitikaCuvanja { get; set; }
+
+        /// <summary>
+        /// Oznaka kategorije dokumenta (popunjava se iz CategoryMapping tabele)
+        /// Koristi se za ecm:docCategory property
+        /// NAPOMENA: Ovo polje NIJE mapirano na kolonu u DocumentMappings tabeli.
+        /// Popunjava se runtime iz CategoryMapping.OznakaKategorije preko SifraDokumentaMigracija.
+        /// </summary>
+        [NotMapped]
+        public string? OznakaKategorije { get; set; }
+
+        /// <summary>
+        /// Naziv kategorije dokumenta (popunjava se iz CategoryMapping tabele)
+        /// Koristi se za ecm:docCategoryName property
+        /// NAPOMENA: Ovo polje NIJE mapirano na kolonu u DocumentMappings tabeli.
+        /// Popunjava se runtime iz CategoryMapping.NazivKategorije preko SifraDokumentaMigracija.
+        /// </summary>
+        [NotMapped]
+        public string? NazivKategorije { get; set; }
     }
 }

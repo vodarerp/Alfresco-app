@@ -291,10 +291,11 @@ namespace Alfresco.App
                     // Phase-based checkpoint repository (NEW - for refactoring)
                     services.AddTransient<SqlServer.Abstraction.Interfaces.IPhaseCheckpointRepository, SqlServer.Infrastructure.Implementation.PhaseCheckpointRepository>();
 
-                    // Memory Cache for DocumentMappingRepository (caching individual query results)
+                    // Memory Cache for DocumentMappingRepository (caching individual query results + category mappings)
                     services.AddMemoryCache();
 
                     // DocumentMappings - Database-driven mapping service (replaces HeimdallDocumentMapper)
+                    // Automatically enriches DocumentMapping with CategoryMapping data
                     services.AddScoped<SqlServer.Abstraction.Interfaces.IDocumentMappingRepository, SqlServer.Infrastructure.Implementation.DocumentMappingRepository>();
                     services.AddScoped<Migration.Abstraction.Interfaces.IDocumentMappingService, Migration.Infrastructure.Implementation.DocumentMappingService>();
 

@@ -14,11 +14,13 @@ namespace SqlServer.Infrastructure.Implementation
     /// Repository za pristup DocumentMappings tabeli.
     /// Koristi direktne SQL upite sa indeksima za optimalne performanse sa 70,000+ zapisa.
     /// Keširaju se SAMO pojedinačni rezultati pretrage, NE cela tabela.
+    /// Automatski obogaćuje svaki DocumentMapping sa kategorijama iz CategoryMapping tabele.
     /// </summary>
     public class DocumentMappingRepository : SqlServerRepository<DocumentMapping, int>, IDocumentMappingRepository
     {
         private readonly IMemoryCache _cache;
-        private static readonly TimeSpan CacheDuration = TimeSpan.FromMinutes(30); // Kraće keširanje za pojedinačne upite
+        private static readonly TimeSpan DocumentCacheDuration = TimeSpan.FromMinutes(30); // Keširanje DocumentMapping zapisa
+        private static readonly TimeSpan CategoryCacheDuration = TimeSpan.FromHours(2); // Duže keširanje za CategoryMapping (retko se menja)
 
         public DocumentMappingRepository(IUnitOfWork uow, IMemoryCache cache) : base(uow)
         {
@@ -68,6 +70,8 @@ namespace SqlServer.Infrastructure.Implementation
 
             if (_cache.TryGetValue(cacheKey, out DocumentMapping? cached))
             {
+                // Obogati sa kategorijom (CategoryMappingRepository ima svoj cache)
+                await EnrichWithCategoryAsync(cached, ct).ConfigureAwait(false);
                 return cached;
             }
 
@@ -98,7 +102,9 @@ namespace SqlServer.Infrastructure.Implementation
 
             if (result != null)
             {
-                _cache.Set(cacheKey, result, CacheDuration);
+                // Obogati sa kategorijom PRE keširanja
+                await EnrichWithCategoryAsync(result, ct).ConfigureAwait(false);
+                _cache.Set(cacheKey, result, DocumentCacheDuration);
             }
 
             return result;
@@ -117,6 +123,8 @@ namespace SqlServer.Infrastructure.Implementation
 
             if (_cache.TryGetValue(cacheKey, out DocumentMapping? cached))
             {
+                // Obogati sa kategorijom (CategoryMappingRepository ima svoj cache)
+                await EnrichWithCategoryAsync(cached, ct).ConfigureAwait(false);
                 return cached;
             }
 
@@ -146,7 +154,9 @@ namespace SqlServer.Infrastructure.Implementation
 
             if (result != null)
             {
-                _cache.Set(cacheKey, result, CacheDuration);
+                // Obogati sa kategorijom PRE keširanja
+                await EnrichWithCategoryAsync(result, ct).ConfigureAwait(false);
+                _cache.Set(cacheKey, result, DocumentCacheDuration);
             }
 
             return result;
@@ -165,6 +175,8 @@ namespace SqlServer.Infrastructure.Implementation
 
             if (_cache.TryGetValue(cacheKey, out DocumentMapping? cached))
             {
+                // Obogati sa kategorijom (CategoryMappingRepository ima svoj cache)
+                await EnrichWithCategoryAsync(cached, ct).ConfigureAwait(false);
                 return cached;
             }
 
@@ -194,7 +206,9 @@ namespace SqlServer.Infrastructure.Implementation
 
             if (result != null)
             {
-                _cache.Set(cacheKey, result, CacheDuration);
+                // Obogati sa kategorijom PRE keširanja
+                await EnrichWithCategoryAsync(result, ct).ConfigureAwait(false);
+                _cache.Set(cacheKey, result, DocumentCacheDuration);
             }
 
             return result;
@@ -213,6 +227,8 @@ namespace SqlServer.Infrastructure.Implementation
 
             if (_cache.TryGetValue(cacheKey, out DocumentMapping? cached))
             {
+                // Obogati sa kategorijom (CategoryMappingRepository ima svoj cache)
+                await EnrichWithCategoryAsync(cached, ct).ConfigureAwait(false);
                 return cached;
             }
 
@@ -242,7 +258,9 @@ namespace SqlServer.Infrastructure.Implementation
 
             if (result != null)
             {
-                _cache.Set(cacheKey, result, CacheDuration);
+                // Obogati sa kategorijom PRE keširanja
+                await EnrichWithCategoryAsync(result, ct).ConfigureAwait(false);
+                _cache.Set(cacheKey, result, DocumentCacheDuration);
             }
 
             return result;
@@ -311,6 +329,91 @@ namespace SqlServer.Infrastructure.Implementation
             var items = await multi.ReadAsync<DocumentMapping>().ConfigureAwait(false);
 
             return (items.AsList().AsReadOnly(), totalCount);
+        }
+
+        /// <summary>
+        /// Obogaćuje DocumentMapping sa kategorijama iz CategoryMapping tabele.
+        /// Popunjava OznakaKategorije i NazivKategorije properties.
+        ///
+        /// Koristi lazy loading sa MemoryCache - svaka OznakaTipa se učitava samo jednom iz baze.
+        /// Cache TTL: 2 sata (kategorije se retko menjaju).
+        /// </summary>
+        /// <param name="mapping">DocumentMapping objekat za obogaćivanje</param>
+        /// <param name="ct">Cancellation token</param>
+        private async Task EnrichWithCategoryAsync(DocumentMapping mapping, CancellationToken ct = default)
+        {
+            if (mapping == null || string.IsNullOrWhiteSpace(mapping.SifraDokumentaMigracija))
+                return;
+
+            var cacheKey = $"CategoryMapping_{mapping.SifraDokumentaMigracija.Trim().ToUpperInvariant()}";
+
+            // 1. Proveri cache prvo
+            if (_cache.TryGetValue(cacheKey, out CategoryMapping? cachedCategory))
+            {
+                // Cache HIT - nema SQL poziva
+                if (cachedCategory != null)
+                {
+                    mapping.OznakaKategorije = cachedCategory.OznakaKategorije;
+                    mapping.NazivKategorije = cachedCategory.NazivKategorije;
+                }
+                return;
+            }
+
+            // 2. Cache MISS → poziv ka CategoryMapping tabeli
+            var category = await FindCategoryByOznakaTipaAsync(mapping.SifraDokumentaMigracija, ct).ConfigureAwait(false);
+
+            // 3. Keširaj rezultat (i null da izbegneš uzastopne SQL pozive)
+            if (category != null)
+            {
+                _cache.Set(cacheKey, category, CategoryCacheDuration);
+                mapping.OznakaKategorije = category.OznakaKategorije;
+                mapping.NazivKategorije = category.NazivKategorije;
+            }
+            else
+            {
+                // Keširaj i null rezultat na kraće vreme (10 min)
+                _cache.Set(cacheKey, (CategoryMapping?)null, TimeSpan.FromMinutes(10));
+            }
+        }
+
+        /// <summary>
+        /// Direktan SQL poziv ka CategoryMapping tabeli.
+        /// PRIVATNA metoda - koristi se samo iz EnrichWithCategoryAsync().
+        /// Povezuje se preko OznakaTipa = SifraDokumentaMigracija.
+        /// </summary>
+        /// <param name="oznakaTipa">Oznaka tipa dokumenta (SifraDokumentaMigracija)</param>
+        /// <param name="ct">Cancellation token</param>
+        /// <returns>CategoryMapping objekat ili null</returns>
+        private async Task<CategoryMapping?> FindCategoryByOznakaTipaAsync(string oznakaTipa, CancellationToken ct = default)
+        {
+            if (string.IsNullOrWhiteSpace(oznakaTipa))
+                return null;
+
+            var sql = @"
+                SELECT TOP 1
+                    OznakaTipa,
+                    NazivTipa,
+                    OznakaKategorije,
+                    NazivKategorije,
+                    PolitikaCuvanja,
+                    DatumIstekaObavezan,
+                    PeriodIstekaMeseci,
+                    PeriodObnoveMeseci,
+                    PeriodCuvanjaMeseci,
+                    Kreator,
+                    DatumKreiranja,
+                    DatumIzmene,
+                    Aktivan
+                FROM CategoryMapping WITH (NOLOCK)
+                WHERE UPPER(OznakaTipa) = UPPER(@oznakaTipa)";
+
+            var cmd = new CommandDefinition(
+                sql,
+                new { oznakaTipa = oznakaTipa.Trim() },
+                transaction: Tx,
+                cancellationToken: ct);
+
+            return await Conn.QueryFirstOrDefaultAsync<CategoryMapping>(cmd).ConfigureAwait(false);
         }
     }
 }

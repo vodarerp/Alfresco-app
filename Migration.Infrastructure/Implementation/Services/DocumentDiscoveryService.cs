@@ -467,13 +467,6 @@ namespace Migration.Infrastructure.Implementation.Services
                 doc.AccountNumbers = accountNumbers;                 // ecm:docAccountNumbers
                 doc.OriginalCreatedAt = docCreationDate ?? alfrescoEntry.CreatedAt.DateTime;
 
-                // Category fields - Not populated (no category properties in old documents)
-                doc.CategoryCode = null;
-                doc.CategoryName = null;
-
-                // Use folder's TipDosijea if document doesn't have it, otherwise use document's value
-                //doc.TipDosijea = docDossierType ?? folder.TipDosijea;
-
                 // Use coreId from document if available, otherwise use folder's CoreId
                 doc.CoreId = coreIdFromDoc ?? folder.CoreId;
 
@@ -509,6 +502,21 @@ namespace Migration.Infrastructure.Implementation.Services
                 // Use mapped value if available, otherwise keep existing
                 doc.DocumentType = mappedDocType ?? existingDocType;
                 doc.NewDocumentName = mappedDocName ?? "";
+
+                // ========================================
+                // Populate Category fields from DocumentMapping (enriched with CategoryMapping data)
+                // These are automatically populated by DocumentMappingRepository from CategoryMapping table
+                // ========================================
+                doc.CategoryCode = fullMapping?.OznakaKategorije;
+                doc.CategoryName = fullMapping?.NazivKategorije;
+
+                if (fullMapping != null && !string.IsNullOrWhiteSpace(fullMapping.OznakaKategorije))
+                {
+                    _fileLogger.LogTrace(
+                        "Category assigned: Code='{CategoryCode}', Name='{CategoryName}' for document type '{DocType}'",
+                        fullMapping.OznakaKategorije, fullMapping.NazivKategorije, fullMapping.SifraDokumentaMigracija);
+                }
+
                 // ========================================
                 // Step 3: Determine document status using NEW V3 logic (with priorities and PolitikaCuvanja)
                 // ========================================
@@ -633,13 +641,15 @@ namespace Migration.Infrastructure.Implementation.Services
                 doc.DocDescription = null;
                 doc.DocumentType = null;
                 doc.IsActive = false; // Safe default - inactive
-                doc.NewAlfrescoStatus = "poništen";
+                doc.NewAlfrescoStatus = "2"; // "2" = poništen
                 doc.Source = "Heimdall";
                 doc.TipDosijea = folder.TipDosijea;
                 doc.TargetDossierType = (int)DossierType.Unknown;
                 doc.ClientSegment = folder.ClientSegment ?? folder.Segment;
                 doc.CoreId = folder.CoreId;
                 doc.DossierDestFolderId = folder.Name?.Replace("-", "");
+                doc.CategoryCode = null;
+                doc.CategoryName = null;
             }
         }
 

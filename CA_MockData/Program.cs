@@ -29,6 +29,7 @@ public static class Program
         await uow.BeginAsync(); // IMPORTANT: Open connection before using repository
 
         // Create repository and service
+        // DocumentMappingRepository automatically handles CategoryMapping enrichment internally
         var repository = new DocumentMappingRepository(uow, cache);
         var documentMappingService = new DocumentMappingService(repository);
 
@@ -37,8 +38,8 @@ public static class Program
             BaseUrl = "http://localhost:8080/",
             Username =  "admin",
             Password = "admin",
-            RootParentId = "ca532006-e136-403e-9320-06e136e03e4c",
-            FolderCount = 100,
+            RootParentId = "3a7397c1-8c99-4a15-b397-c18c990a150b",
+            FolderCount = 10,
             DocsPerFolder = 3,
             DegreeOfParallelism = 8,
             MaxRetries = 5,

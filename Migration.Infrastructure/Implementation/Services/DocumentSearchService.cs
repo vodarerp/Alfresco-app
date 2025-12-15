@@ -839,6 +839,8 @@ namespace Migration.Infrastructure.Implementation.Services
                 doc.IsActive = statusInfo.IsActive;
                 doc.NewAlfrescoStatus = statusInfo.Status;
                 doc.NewDocumentCode = statusInfo.MappingCode;
+                doc.CategoryCode = fullMapping?.OznakaKategorije;
+                doc.CategoryName = fullMapping?.NazivKategorije;
                 if (string.IsNullOrWhiteSpace(doc.OriginalDocumentCode))
                     doc.OriginalDocumentCode = statusInfo.OriginalCode;
 
@@ -899,7 +901,7 @@ namespace Migration.Infrastructure.Implementation.Services
 
                 // Set safe defaults
                 doc.IsActive = false;
-                doc.NewAlfrescoStatus = "poništen";
+                doc.NewAlfrescoStatus = "2";
                 doc.Source = "Heimdall";
                 doc.TipDosijea = folder.TipDosijea;
                 doc.TargetDossierType = (int)DossierType.Unknown;

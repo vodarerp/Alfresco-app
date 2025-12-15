@@ -9,12 +9,16 @@ namespace Migration.Infrastructure.Implementation
     /// Određuje status dokumenta nakon migracije.
     /// VERZIJA 3.0: Nova logika sa prioritetima i PolitikaCuvanja kolonom.
     ///
+    /// STATUS VREDNOSTI:
+    /// - Status = "1" → AKTIVAN dokument (ecm:active=true)
+    /// - Status = "2" → PONIŠTEN dokument (ecm:active=false)
+    ///
     /// PRIORITETI (od najvišeg ka najnižem):
-    /// 1. Ako SifraDokumentaMigracija = "00824" → AKTIVAN (ecm:status='validiran', ecm:active=true)
-    /// 2. Ako PolitikaCuvanja = "Nova verzija" ili "Novi dokument" → NEAKTIVAN (ecm:status='poništen', ecm:active=false)
+    /// 1. Ako SifraDokumentaMigracija = "00824" → AKTIVAN (Status="1")
+    /// 2. Ako PolitikaCuvanja = "Nova verzija" ili "Novi dokument" → NEAKTIVAN (Status="2")
     /// 3. Ako PolitikaCuvanja je prazna/null, proverava se NazivDokumentaMigracija:
-    ///    - Ako ima sufiks '- migracija' → NEAKTIVAN (ecm:status='poništen', ecm:active=false)
-    ///    - Ako nema sufiks '- migracija' → AKTIVAN (ecm:status='validiran', ecm:active=true)
+    ///    - Ako ima sufiks '- migracija' → NEAKTIVAN (Status="2")
+    ///    - Ako nema sufiks '- migracija' → AKTIVAN (Status="1")
     /// </summary>
     public static class DocumentStatusDetectorV3
     {
@@ -35,7 +39,7 @@ namespace Migration.Infrastructure.Implementation
                 return new DocumentStatusInfo
                 {
                     IsActive = true,
-                    Status = "validiran",
+                    Status = "1",
                     DeterminationReason = "Nema mapiranja - default aktivan",
                     Priority = 0
                 };
@@ -48,7 +52,7 @@ namespace Migration.Infrastructure.Implementation
                 return new DocumentStatusInfo
                 {
                     IsActive = true,
-                    Status = "validiran",
+                    Status = "1",
                     DeterminationReason = "Prioritet 1: SifraDokumentaMigracija = '00824'",
                     Priority = 1,
                     MappingCode = mapping.SifraDokumentaMigracija,
@@ -68,7 +72,7 @@ namespace Migration.Infrastructure.Implementation
                     return new DocumentStatusInfo
                     {
                         IsActive = false,
-                        Status = "poništen",
+                        Status = "2",
                         DeterminationReason = $"Prioritet 2: PolitikaCuvanja = '{politikaTrimmed}'",
                         Priority = 2,
                         MappingCode = mapping.SifraDokumentaMigracija,
@@ -91,7 +95,7 @@ namespace Migration.Infrastructure.Implementation
                     return new DocumentStatusInfo
                     {
                         IsActive = false,
-                        Status = "poništen",
+                        Status = "2",
                         DeterminationReason = "Prioritet 3: NazivDokumentaMigracija ima sufiks '- migracija'",
                         Priority = 3,
                         MappingCode = mapping.SifraDokumentaMigracija,
@@ -105,7 +109,7 @@ namespace Migration.Infrastructure.Implementation
                     return new DocumentStatusInfo
                     {
                         IsActive = true,
-                        Status = "validiran",
+                        Status = "1",
                         DeterminationReason = "Prioritet 3: NazivDokumentaMigracija NEMA sufiks '- migracija'",
                         Priority = 3,
                         MappingCode = mapping.SifraDokumentaMigracija,
@@ -121,7 +125,7 @@ namespace Migration.Infrastructure.Implementation
             {
 
                 IsActive = true,
-                Status = "validiran",
+                Status = "1",
                 DeterminationReason = "Default: Aktivan (ne postoji NazivDokumentaMigracija)",
                 Priority = 4,
                 MappingCode = mapping.SifraDokumentaMigracija,
@@ -142,7 +146,7 @@ namespace Migration.Infrastructure.Implementation
         {
             // Stara logika - samo provera sufiks u opisu
             var isActive = !HasMigrationSuffixInOpis(opisDokumenta);
-            var status = isActive ? "validiran" : "poništen";
+            var status = isActive ? "1" : "2";
 
             var hasMigrationSuffix = HasMigrationSuffixInOpis(opisDokumenta);
 
