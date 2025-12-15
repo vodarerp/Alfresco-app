@@ -25,6 +25,7 @@ namespace Alfresco.App.Windows
         private int _totalCount = 0;
         private string _currentSearchText = "";
         private CancellationTokenSource? _searchCts;
+        private bool _isLoading = false;
 
         public List<string> SelectedDocDescriptions { get; private set; } = new();
 
@@ -40,6 +41,8 @@ namespace Alfresco.App.Windows
         {
             try
             {
+                // Set ItemsSource once
+                lstDocuments.ItemsSource = _displayedDocuments;
                 await LoadDocumentsAsync(resetPage: true);
             }
             catch (Exception ex)
@@ -52,8 +55,13 @@ namespace Alfresco.App.Windows
 
         private async Task LoadDocumentsAsync(bool resetPage = false)
         {
+            // Prevent overlapping database operations
+            if (_isLoading) return;
+
             try
             {
+                _isLoading = true;
+
                 if (resetPage)
                 {
                     _currentPage = 1;
@@ -89,16 +97,21 @@ namespace Alfresco.App.Windows
                     });
                 }
 
-                lstDocuments.ItemsSource = _displayedDocuments;
-
                 UpdatePagingInfo();
                 UpdateSelectionCount();
             }
             catch (Exception ex)
             {
-                await _unitOfWork.RollbackAsync();
+                try
+                {
+                    await _unitOfWork.RollbackAsync();
+                }
+                catch { /* Ignore rollback errors */ }
                 MessageBox.Show($"Failed to load documents from database: {ex.Message}", "Error", MessageBoxButton.OK, MessageBoxImage.Error);
             }
+            
+                _isLoading = false;
+            
         }
 
         private async void txtSearch_TextChanged(object sender, TextChangedEventArgs e)

@@ -289,10 +289,7 @@ namespace SqlServer.Infrastructure.Implementation
                 SELECT COUNT(*) AS TotalCount
                 FROM DocumentMappings WITH (NOLOCK)
                 WHERE (@hasSearch = 0 OR
-                       NAZIV LIKE @searchPattern OR
-                       NazivDokumenta LIKE @searchPattern OR
-                       sifraDokumenta LIKE @searchPattern OR
-                       TipDosijea LIKE @searchPattern);
+                       NAZIV LIKE @searchPattern);
 
                 -- Get paged data
                 SELECT
@@ -310,10 +307,7 @@ namespace SqlServer.Infrastructure.Implementation
                     PolitikaCuvanja
                 FROM DocumentMappings WITH (NOLOCK)
                 WHERE (@hasSearch = 0 OR
-                       NAZIV LIKE @searchPattern OR
-                       NazivDokumenta LIKE @searchPattern OR
-                       sifraDokumenta LIKE @searchPattern OR
-                       TipDosijea LIKE @searchPattern)
+                       NAZIV LIKE @searchPattern)
                 ORDER BY NAZIV
                 OFFSET @offset ROWS
                 FETCH NEXT @pageSize ROWS ONLY;";
@@ -322,6 +316,7 @@ namespace SqlServer.Infrastructure.Implementation
                 sql,
                 new { hasSearch = hasSearch ? 1 : 0, searchPattern, offset, pageSize },
                 transaction: Tx,
+                commandTimeout: 60, // 60 seconds timeout
                 cancellationToken: ct);
 
             using var multi = await Conn.QueryMultipleAsync(cmd).ConfigureAwait(false);
