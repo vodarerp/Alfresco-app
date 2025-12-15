@@ -6,11 +6,11 @@ using System.Threading.Tasks;
 namespace Migration.Abstraction.Interfaces.Wrappers
 {
     /// <summary>
-    /// Service for discovering documents directly by ecm:docType (MigrationByDocument mode).
+    /// Service for discovering documents directly by ecm:docDesc (MigrationByDocument mode).
     /// This is an alternative to FolderDiscovery + DocumentDiscovery flow.
     ///
     /// Flow:
-    /// 1. Search documents by ecm:docType using AFTS query
+    /// 1. Search documents by ecm:docDesc using AFTS query
     /// 2. Extract parent folders from document path
     /// 3. Insert unique folders into FolderStaging (ignore duplicates)
     /// 4. Apply document mapping and insert into DocStaging
@@ -18,16 +18,16 @@ namespace Migration.Abstraction.Interfaces.Wrappers
     public interface IDocumentSearchService
     {
         /// <summary>
-        /// Sets the document types to search for (overrides appsettings configuration)
+        /// Sets the document descriptions to search for (overrides appsettings configuration)
         /// </summary>
-        /// <param name="docTypes">List of document type codes (ecm:docType values)</param>
-        void SetDocTypes(List<string> docTypes);
+        /// <param name="docDescriptions">List of document descriptions (ecm:docDesc values)</param>
+        void SetDocDescriptions(List<string> docDescriptions);
 
         /// <summary>
-        /// Gets the current document types (either from override or appsettings)
+        /// Gets the current document descriptions (either from override or appsettings)
         /// </summary>
-        /// <returns>List of document type codes</returns>
-        List<string> GetCurrentDocTypes();
+        /// <returns>List of document descriptions</returns>
+        List<string> GetCurrentDocDescriptions();
 
         /// <summary>
         /// Runs a single batch of document search and processing

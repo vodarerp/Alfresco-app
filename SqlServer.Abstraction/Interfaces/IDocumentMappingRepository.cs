@@ -36,5 +36,19 @@ namespace SqlServer.Abstraction.Interfaces
         /// Vraća sva mapiranja iz tabele (keširano)
         /// </summary>
         Task<IReadOnlyList<DocumentMapping>> GetAllMappingsAsync(CancellationToken ct = default);
+
+        /// <summary>
+        /// Vraća straničeni rezultat sa pretrakom
+        /// </summary>
+        /// <param name="searchText">Tekst za pretragu (NAZIV, NazivDokumenta, sifraDokumenta, TipDosijea)</param>
+        /// <param name="pageNumber">Broj stranice (počinje od 1)</param>
+        /// <param name="pageSize">Broj zapisa po stranici</param>
+        /// <param name="ct">Cancellation token</param>
+        /// <returns>Lista dokumenata i ukupan broj zapisa</returns>
+        Task<(IReadOnlyList<DocumentMapping> Items, int TotalCount)> SearchWithPagingAsync(
+            string? searchText,
+            int pageNumber,
+            int pageSize,
+            CancellationToken ct = default);
     }
 }

@@ -62,11 +62,11 @@ namespace Alfresco.App.UserControls
             set { _phases = value; NotifyPropertyChanged(); }
         }
 
-        private string _docTypes = "";
-        public string DocTypes
+        private string _docDescriptions = "";
+        public string DocDescriptions
         {
-            get => _docTypes;
-            set { _docTypes = value; NotifyPropertyChanged(); }
+            get => _docDescriptions;
+            set { _docDescriptions = value; NotifyPropertyChanged(); }
         }
 
         #region -IsMigrationByDocument- property
@@ -103,10 +103,12 @@ namespace Alfresco.App.UserControls
                 IsMigrationByDocument = true;
                 _documentSearchService = App.AppHost.Services.GetService<IDocumentSearchService>();
 
-                // Initialize DocTypes from appsettings
+                // Initialize DocDescriptions from appsettings (if configured)
                 if (_migrationOptions.DocumentTypeDiscovery.DocTypes.Any())
                 {
-                    DocTypes = string.Join(", ", _migrationOptions.DocumentTypeDiscovery.DocTypes);
+                    // Note: Now we expect DocDescriptions instead of DocTypes
+                    // This can be initialized from settings or left empty for user to select
+                    DocDescriptions = string.Join(", ", _migrationOptions.DocumentTypeDiscovery.DocTypes);
                 }
             }
 
@@ -224,33 +226,33 @@ namespace Alfresco.App.UserControls
             try
             {
                 btnStart.IsEnabled = false;
-                // If MigrationByDocument mode, validate and apply DocTypes from UI
+                // If MigrationByDocument mode, validate and apply DocDescriptions from UI
                 if (_migrationOptions.MigrationByDocument && _documentSearchService != null)
                 {
-                    if (string.IsNullOrWhiteSpace(DocTypes))
+                    if (string.IsNullOrWhiteSpace(DocDescriptions))
                     {
-                        MessageBox.Show("Please enter at least one document type (ecm:docType) to search for.",
+                        MessageBox.Show("Please enter at least one document description (ecm:docDesc) to search for, or click 'Select...' to choose from database.",
                             "Validation Error", MessageBoxButton.OK, MessageBoxImage.Warning);
                         return;
                     }
 
-                    // Parse DocTypes from UI (comma-separated)
-                    var docTypesList = DocTypes
+                    // Parse DocDescriptions from UI (comma-separated)
+                    var docDescList = DocDescriptions
                         .Split(new[] { ',', ';' }, StringSplitOptions.RemoveEmptyEntries)
                         .Select(dt => dt.Trim())
                         .Where(dt => !string.IsNullOrWhiteSpace(dt))
                         .ToList();
 
-                    if (!docTypesList.Any())
+                    if (!docDescList.Any())
                     {
-                        MessageBox.Show("Please enter valid document types separated by comma.",
+                        MessageBox.Show("Please enter valid document descriptions separated by comma.",
                             "Validation Error", MessageBoxButton.OK, MessageBoxImage.Warning);
                         return;
                     }
 
-                    // Apply DocTypes override to DocumentSearchService
-                    _documentSearchService.SetDocTypes(docTypesList);
-                    StatusMessage = $"DocTypes set: {string.Join(", ", docTypesList)}";
+                    // Apply DocDescriptions override to DocumentSearchService
+                    _documentSearchService.SetDocDescriptions(docDescList);
+                    StatusMessage = $"DocDescriptions set: {string.Join(", ", docDescList)}";
                 }
 
                 btnStart.IsEnabled = false;
@@ -272,7 +274,7 @@ namespace Alfresco.App.UserControls
                             StatusMessage = "Migration completed successfully!";
                             btnStart.IsEnabled = true;
                             btnStop.IsEnabled = false;
-                            MessageBox.Show($"Migration of docType {DocTypes} finished!");
+                            MessageBox.Show($"Migration of documents with docDesc '{DocDescriptions}' finished!");
 
                         });
                     }
@@ -340,6 +342,28 @@ namespace Alfresco.App.UserControls
             catch (Exception ex)
             {
                 MessageBox.Show($"Failed to reset migration: {ex.Message}", "Error", MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+        }
+
+        private void btnSelectDocuments_Click(object sender, RoutedEventArgs e)
+        {
+            try
+            {
+                var window = new Windows.DocumentSelectionWindow
+                {
+                    Owner = Window.GetWindow(this)
+                };
+
+                if (window.ShowDialog() == true)
+                {
+                    // Update the DocDescriptions textbox with selected values
+                    DocDescriptions = string.Join(", ", window.SelectedDocDescriptions);
+                    StatusMessage = $"Selected {window.SelectedDocDescriptions.Count} document(s) for migration";
+                }
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Failed to open document selection window: {ex.Message}", "Error", MessageBoxButton.OK, MessageBoxImage.Error);
             }
         }
 

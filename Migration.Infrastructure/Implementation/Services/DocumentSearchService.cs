@@ -45,8 +45,8 @@ namespace Migration.Infrastructure.Implementation.Services
         // Cache for processed folders (to avoid duplicate API calls within session)
         private readonly ConcurrentDictionary<string, FolderStaging> _folderCache = new();
 
-        // Runtime override for DocTypes (takes precedence over appsettings)
-        private List<string>? _docTypesOverride = null;
+        // Runtime override for DocDescriptions (takes precedence over appsettings)
+        private List<string>? _docDescriptionsOverride = null;
 
         private const string ServiceName = "DocumentSearch";
 
@@ -69,20 +69,20 @@ namespace Migration.Infrastructure.Implementation.Services
             _uiLogger = logger.CreateLogger("UiLogger");
         }
 
-        public void SetDocTypes(List<string> docTypes)
+        public void SetDocDescriptions(List<string> docDescriptions)
         {
-            _docTypesOverride = docTypes;
-            _fileLogger.LogInformation("DocTypes override set: {DocTypes}", string.Join(", ", docTypes));
+            _docDescriptionsOverride = docDescriptions;
+            _fileLogger.LogInformation("DocDescriptions override set: {DocDescriptions}", string.Join(", ", docDescriptions));
 
-            // Reset folder iteration when docTypes change - start from beginning
+            // Reset folder iteration when docDescriptions change - start from beginning
             _currentFolderTypeIndex = 0;
             _currentSkipCount = 0;
             _fileLogger.LogInformation("Reset folder iteration - starting from folder index 0");
         }
 
-        public List<string> GetCurrentDocTypes()
+        public List<string> GetCurrentDocDescriptions()
         {
-            return _docTypesOverride ?? _options.Value.DocumentTypeDiscovery.DocTypes;
+            return _docDescriptionsOverride ?? _options.Value.DocumentTypeDiscovery.DocTypes;
         }
 
         public async Task<DocumentSearchBatchResult> RunBatchAsync(CancellationToken ct)
@@ -97,10 +97,10 @@ namespace Migration.Infrastructure.Implementation.Services
             });
 
             var batchSize = _options.Value.DocumentTypeDiscovery.BatchSize;
-            var docTypes = _docTypesOverride ?? _options.Value.DocumentTypeDiscovery.DocTypes;
+            var docDescriptions = _docDescriptionsOverride ?? _options.Value.DocumentTypeDiscovery.DocTypes;
 
-            _fileLogger.LogInformation("DocumentSearch batch started - BatchSize: {BatchSize}, DocTypes: {DocTypes}",
-                batchSize, string.Join(", ", docTypes));
+            _fileLogger.LogInformation("DocumentSearch batch started - BatchSize: {BatchSize}, DocDescriptions: {DocDescriptions}",
+                batchSize, string.Join(", ", docDescriptions));
 
             // Initialize DOSSIER folders if not done yet
             if (_dossierFolders == null)
@@ -130,8 +130,8 @@ namespace Migration.Infrastructure.Implementation.Services
 
             _fileLogger.LogInformation("Processing DOSSIER-{Type} folder, SkipCount: {Skip}", currentType, _currentSkipCount);
 
-            // Search documents by ecm:docType
-            var searchResult = await SearchDocumentsByTypeAsync(currentFolderId, docTypes, _currentSkipCount, batchSize, ct)
+            // Search documents by ecm:docDesc
+            var searchResult = await SearchDocumentsByDescriptionAsync(currentFolderId, docDescriptions, _currentSkipCount, batchSize, ct)
                 .ConfigureAwait(false);
 
             if (currentType == "D") currentType = "DE";
@@ -279,7 +279,7 @@ namespace Migration.Infrastructure.Implementation.Services
             _fileLogger.LogInformation("DocumentSearch service started - IdleDelay: {IdleDelay}ms, MaxEmptyResults: {MaxEmptyResults}",
                 delay, maxEmptyResults);
             _dbLogger.LogInformation("DocumentSearch service started");
-            _uiLogger.LogInformation("Document Search (by docType) started");
+            _uiLogger.LogInformation("Document Search (by docDesc) started");
 
             // Load checkpoint to resume from last position
             await LoadCheckpointAsync(ct).ConfigureAwait(false);
@@ -294,7 +294,7 @@ namespace Migration.Infrastructure.Implementation.Services
                 ProcessedItems = _totalDocumentsProcessed,
                 BatchSize = batchSize,
                 CurrentBatch = 0,
-                Message = "Starting document search by ecm:docType..."
+                Message = "Starting document search by ecm:docDesc..."
             };
             progressCallback?.Invoke(progress);
 
@@ -462,16 +462,16 @@ namespace Migration.Infrastructure.Implementation.Services
         }
 
         /// <summary>
-        /// Searches documents by ecm:docType within a DOSSIER folder
+        /// Searches documents by ecm:docDesc within a DOSSIER folder
         /// </summary>
-        private async Task<(List<ListEntry> Documents, bool HasMore)> SearchDocumentsByTypeAsync(
+        private async Task<(List<ListEntry> Documents, bool HasMore)> SearchDocumentsByDescriptionAsync(
             string ancestorId,
-            List<string> docTypes,
+            List<string> docDescriptions,
             int skipCount,
             int maxItems,
             CancellationToken ct)
         {
-            var query = BuildDocumentSearchQuery(ancestorId, docTypes);
+            var query = BuildDocumentSearchQuery(ancestorId, docDescriptions);
 
             _fileLogger.LogInformation("AFTS Query: {Query}, Skip: {Skip}, Max: {Max}", query, skipCount, maxItems);
 
@@ -503,15 +503,15 @@ namespace Migration.Infrastructure.Implementation.Services
         }
 
         /// <summary>
-        /// Builds AFTS query for searching documents by ecm:docType
+        /// Builds AFTS query for searching documents by ecm:docDesc
         /// </summary>
-        private string BuildDocumentSearchQuery(string ancestorId, List<string> docTypes)
+        private string BuildDocumentSearchQuery(string ancestorId, List<string> docDescriptions)
         {
-            // Build: (=ecm\:docType:"00099" OR =ecm\:docType:"00824")
-            var docTypeConditions = string.Join(" OR ",
-                docTypes.Select(t => $"=ecm\\:docType:\"{t}\""));
+            // Build: (=ecm\:docDesc:"Personal Notice" OR =ecm\:docDesc:"KYC Questionnaire")
+            var docDescConditions = string.Join(" OR ",
+                docDescriptions.Select(t => $"=ecm\\:docDesc:\"{t}\""));
 
-            var query = $"({docTypeConditions}) " +
+            var query = $"({docDescConditions}) " +
                         $"AND ANCESTOR:\"{ancestorId}\" " +
                         $"AND TYPE:\"cm:content\"";
 

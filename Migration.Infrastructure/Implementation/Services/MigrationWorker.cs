@@ -76,15 +76,15 @@ namespace Migration.Infrastructure.Implementation.Services
                             "Please register DocumentSearchService in DI container.");
                     }
 
-                    // Check if DocTypes have changed and reset checkpoint if needed
-                    await ValidateAndResetDocTypesCheckpointAsync(ct);
+                    // Check if DocDescriptions have changed and reset checkpoint if needed
+                    await ValidateAndResetDocDescriptionsCheckpointAsync(ct);
 
                     // ====================================================================
-                    // FAZA 1: DocumentSearch (searches by ecm:docType, populates both tables)
+                    // FAZA 1: DocumentSearch (searches by ecm:docDesc, populates both tables)
                     // ====================================================================
                     await ExecutePhaseAsync(
                         MigrationPhase.FolderDiscovery,
-                        "FAZA 1: DocumentSearch (by ecm:docType)",
+                        "FAZA 1: DocumentSearch (by ecm:docDesc)",
                         async (token) => await _documentSearch.RunLoopAsync(token),
                         ct);
 
@@ -467,21 +467,21 @@ namespace Migration.Infrastructure.Implementation.Services
         }
 
         /// <summary>
-        /// Validates DocTypes for MigrationByDocument mode and resets checkpoint if they changed
+        /// Validates DocDescriptions for MigrationByDocument mode and resets checkpoint if they changed
         /// </summary>
-        private async Task ValidateAndResetDocTypesCheckpointAsync(CancellationToken ct)
+        private async Task ValidateAndResetDocDescriptionsCheckpointAsync(CancellationToken ct)
         {
             try
             {
-                // Get current DocTypes from DocumentSearchService (includes UI overrides)
-                var currentDocTypes = _documentSearch?.GetCurrentDocTypes();
-                if (currentDocTypes == null || !currentDocTypes.Any())
+                // Get current DocDescriptions from DocumentSearchService (includes UI overrides)
+                var currentDocDescriptions = _documentSearch?.GetCurrentDocDescriptions();
+                if (currentDocDescriptions == null || !currentDocDescriptions.Any())
                 {
-                    _logger.LogWarning("No DocTypes configured for MigrationByDocument mode");
+                    _logger.LogWarning("No DocDescriptions configured for MigrationByDocument mode");
                     return;
                 }
 
-                var currentDocTypesStr = string.Join(",", currentDocTypes.OrderBy(dt => dt));
+                var currentDocDescriptionsStr = string.Join(",", currentDocDescriptions.OrderBy(dt => dt));
 
                 // Get checkpoint for FolderDiscovery phase (reused for DocumentSearch)
                 var checkpoint = await ExecuteCheckpointOperationAsync(async (conn, tran) =>
@@ -497,11 +497,11 @@ namespace Migration.Infrastructure.Implementation.Services
                     return;
                 }
 
-                // Compare DocTypes
+                // Compare DocDescriptions (stored in DocTypes column for compatibility)
                 if (string.IsNullOrEmpty(checkpoint.DocTypes))
                 {
-                    // First run with DocTypes - save them
-                    _logger.LogInformation("Saving DocTypes to checkpoint: {DocTypes}", currentDocTypesStr);
+                    // First run with DocDescriptions - save them
+                    _logger.LogInformation("Saving DocDescriptions to checkpoint: {DocDescriptions}", currentDocDescriptionsStr);
                     await ExecuteCheckpointOperationAsync(async (conn, tran) =>
                     {
                         var sql = @"UPDATE PhaseCheckpoints
@@ -510,7 +510,7 @@ namespace Migration.Infrastructure.Implementation.Services
                         var cmd = new CommandDefinition(sql, new
                         {
                             phase = (int)MigrationPhase.FolderDiscovery,
-                            docTypes = currentDocTypesStr,
+                            docTypes = currentDocDescriptionsStr,
                             updatedAt = DateTime.UtcNow
                         }, transaction: tran, cancellationToken: ct);
                         await conn.ExecuteAsync(cmd);
@@ -519,15 +519,15 @@ namespace Migration.Infrastructure.Implementation.Services
                 else
                 {
                     // Normalize both strings for comparison (sort and compare)
-                    var storedDocTypesNormalized = string.Join(",", checkpoint.DocTypes.Split(',').Select(dt => dt.Trim()).OrderBy(dt => dt));
+                    var storedDocDescriptionsNormalized = string.Join(",", checkpoint.DocTypes.Split(',').Select(dt => dt.Trim()).OrderBy(dt => dt));
 
-                    if (storedDocTypesNormalized != currentDocTypesStr)
+                    if (storedDocDescriptionsNormalized != currentDocDescriptionsStr)
                     {
                         _logger.LogWarning(
-                            "DocTypes changed! Old: [{OldDocTypes}], New: [{NewDocTypes}]. Resetting checkpoint...",
-                            checkpoint.DocTypes, currentDocTypesStr);
+                            "DocDescriptions changed! Old: [{OldDocDescriptions}], New: [{NewDocDescriptions}]. Resetting checkpoint...",
+                            checkpoint.DocTypes, currentDocDescriptionsStr);
 
-                        // Reset the checkpoint and update DocTypes
+                        // Reset the checkpoint and update DocDescriptions
                         await ExecuteCheckpointOperationAsync(async (conn, tran) =>
                         {
                             var sql = @"UPDATE PhaseCheckpoints
@@ -545,7 +545,7 @@ namespace Migration.Infrastructure.Implementation.Services
                             {
                                 phase = (int)MigrationPhase.FolderDiscovery,
                                 status = (int)PhaseStatus.NotStarted,
-                                docTypes = currentDocTypesStr,
+                                docTypes = currentDocDescriptionsStr,
                                 updatedAt = DateTime.UtcNow
                             }, transaction: tran, cancellationToken: ct);
                             await conn.ExecuteAsync(cmd);
@@ -575,17 +575,17 @@ namespace Migration.Infrastructure.Implementation.Services
                             await conn.ExecuteAsync(cmd);
                         }, ct);
 
-                        _logger.LogInformation("✅ Checkpoint reset due to DocTypes change");
+                        _logger.LogInformation("✅ Checkpoint reset due to DocDescriptions change");
                     }
                     else
                     {
-                        _logger.LogInformation("DocTypes unchanged, continuing from checkpoint: {DocTypes}", currentDocTypesStr);
+                        _logger.LogInformation("DocDescriptions unchanged, continuing from checkpoint: {DocDescriptions}", currentDocDescriptionsStr);
                     }
                 }
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Error validating DocTypes checkpoint");
+                _logger.LogError(ex, "Error validating DocDescriptions checkpoint");
                 throw;
             }
         }

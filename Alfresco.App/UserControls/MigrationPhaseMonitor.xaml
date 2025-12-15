@@ -49,25 +49,35 @@
         <!-- Overall Status -->
         <Border Grid.Row="1" Background="#ECF0F1" Padding="10" Margin="0,0,0,10">
             <StackPanel>
-                <!-- Document Type Search Input (MigrationByDocument mode only) -->
+                <!-- Document Description Search Input (MigrationByDocument mode only) -->
                 <Border Background="#3498DB" Padding="10" Margin="0,0,0,10"
                         Visibility="{Binding IsMigrationByDocument, Converter={StaticResource BoolToVisibilityConverter}}">
                     <StackPanel>
-                        <TextBlock Text="Document Type Search (ecm:docType)"
+                        <TextBlock Text="Document Description Search (ecm:docDesc)"
                                    Foreground="White" FontSize="12" FontWeight="SemiBold" Margin="0,0,0,5"/>
                         <Grid>
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="Auto"/>
                                 <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="Auto"/>
                             </Grid.ColumnDefinitions>
-                            <TextBlock Grid.Column="0" Text="Doc Types:"
+                            <TextBlock Grid.Column="0" Text="Doc Descriptions:"
                                        Foreground="White" FontSize="11" VerticalAlignment="Center" Margin="0,0,10,0"/>
                             <TextBox Grid.Column="1"
-                                     Text="{Binding DocTypes, UpdateSourceTrigger=PropertyChanged}"
+                                     x:Name="txtDocDescriptions"
+                                     Text="{Binding DocDescriptions, UpdateSourceTrigger=PropertyChanged}"
                                      FontSize="11" Padding="5"
-                                     ToolTip="Enter document type (e.g., 00756, 00824, 00125)"/>
+                                     ToolTip="Enter document descriptions (e.g., Personal Notice, KYC Questionnaire)"/>
+                            <Button Grid.Column="2"
+                                    x:Name="btnSelectDocuments"
+                                    Content="📋 Select..."
+                                    Click="btnSelectDocuments_Click"
+                                    Margin="10,0,0,0" Padding="10,5"
+                                    Background="#27AE60" Foreground="White"
+                                    BorderThickness="0"
+                                    ToolTip="Open document selection window"/>
                         </Grid>
-                        <TextBlock Text="Enter document type(e.g., 00756, 00824 etc)"
+                        <TextBlock Text="Enter document descriptions (e.g., Personal Notice, KYC Questionnaire) or click 'Select...' to choose from database"
                                    Foreground="#ECF0F1" FontSize="10" FontStyle="Italic" Margin="0,5,0,0"/>
                     </StackPanel>
                 </Border>

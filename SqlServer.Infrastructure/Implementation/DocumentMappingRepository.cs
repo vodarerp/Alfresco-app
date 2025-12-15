@@ -247,5 +247,70 @@ namespace SqlServer.Infrastructure.Implementation
 
             return result;
         }
+
+        /// <summary>
+        /// Vraća straničeni rezultat sa pretrakom po NAZIV, NazivDokumenta, sifraDokumenta, TipDosijea
+        /// </summary>
+        public async Task<(IReadOnlyList<DocumentMapping> Items, int TotalCount)> SearchWithPagingAsync(
+            string? searchText,
+            int pageNumber,
+            int pageSize,
+            CancellationToken ct = default)
+        {
+            if (pageNumber < 1) pageNumber = 1;
+            if (pageSize < 1) pageSize = 50;
+            if (pageSize > 500) pageSize = 500; // Max limit
+
+            var offset = (pageNumber - 1) * pageSize;
+            var hasSearch = !string.IsNullOrWhiteSpace(searchText);
+            var searchPattern = hasSearch ? $"%{searchText!.Trim()}%" : null;
+
+            // Combined query to avoid MultipleActiveResultSets issue
+            var sql = @"
+                -- Get total count
+                SELECT COUNT(*) AS TotalCount
+                FROM DocumentMappings WITH (NOLOCK)
+                WHERE (@hasSearch = 0 OR
+                       NAZIV LIKE @searchPattern OR
+                       NazivDokumenta LIKE @searchPattern OR
+                       sifraDokumenta LIKE @searchPattern OR
+                       TipDosijea LIKE @searchPattern);
+
+                -- Get paged data
+                SELECT
+                    ID,
+                    NAZIV,
+                    BROJ_DOKUMENATA,
+                    sifraDokumenta,
+                    NazivDokumenta,
+                    TipDosijea,
+                    TipProizvoda,
+                    SifraDokumentaMigracija,
+                    NazivDokumentaMigracija,
+                    ExcelFileName,
+                    ExcelFileSheet,
+                    PolitikaCuvanja
+                FROM DocumentMappings WITH (NOLOCK)
+                WHERE (@hasSearch = 0 OR
+                       NAZIV LIKE @searchPattern OR
+                       NazivDokumenta LIKE @searchPattern OR
+                       sifraDokumenta LIKE @searchPattern OR
+                       TipDosijea LIKE @searchPattern)
+                ORDER BY NAZIV
+                OFFSET @offset ROWS
+                FETCH NEXT @pageSize ROWS ONLY;";
+
+            var cmd = new CommandDefinition(
+                sql,
+                new { hasSearch = hasSearch ? 1 : 0, searchPattern, offset, pageSize },
+                transaction: Tx,
+                cancellationToken: ct);
+
+            using var multi = await Conn.QueryMultipleAsync(cmd).ConfigureAwait(false);
+            var totalCount = await multi.ReadFirstAsync<int>().ConfigureAwait(false);
+            var items = await multi.ReadAsync<DocumentMapping>().ConfigureAwait(false);
+
+            return (items.AsList().AsReadOnly(), totalCount);
+        }
     }
 }
