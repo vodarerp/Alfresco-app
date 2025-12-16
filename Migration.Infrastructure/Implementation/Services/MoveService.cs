@@ -556,15 +556,15 @@ namespace Migration.Infrastructure.Implementation.Services
                 // Update ecm:naziv if we have mapping
                 if (!string.IsNullOrWhiteSpace(migratedNaziv))
                 {
-                    propertiesToUpdate["ecm:naziv"] = migratedNaziv;
+                    //propertiesToUpdate["ecm:naziv"] = migratedNaziv;
                     propertiesToUpdate["ecm:docTypeName"] = migratedNaziv;
                     _fileLogger.LogDebug("Will update ecm:naziv to '{Naziv}' for document {DocId}", migratedNaziv, doc.Id);
                 }
-                else if (!string.IsNullOrWhiteSpace(doc.DocDescription))
-                {
-                    propertiesToUpdate["ecm:naziv"] = doc.DocDescription;
-                    _fileLogger.LogDebug("Will update ecm:naziv to '{Naziv}' (from DocStaging fallback) for document {DocId}", doc.DocDescription, doc.Id);
-                }
+                //else if (!string.IsNullOrWhiteSpace(doc.DocDescription))
+                //{
+                //    //propertiesToUpdate["ecm:naziv"] = doc.DocDescription;
+                //    _fileLogger.LogDebug("Will update ecm:naziv to '{Naziv}' (from DocStaging fallback) for document {DocId}", doc.DocDescription, doc.Id);
+                //}
 
                 if (!string.IsNullOrWhiteSpace(doc.Status))
                 {
@@ -584,8 +584,8 @@ namespace Migration.Infrastructure.Implementation.Services
                     _fileLogger.LogDebug("Will update ecm:status to '{Status}' for document {DocId}", doc.Status, doc.Id);
                 }
 
-                propertiesToUpdate["ecm:active"] = doc.IsActive;
-                _fileLogger.LogDebug("Will update ecm:active to '{Active}' for document {DocId}", doc.IsActive.ToString(), doc.Id);
+                //propertiesToUpdate["ecm:active"] = doc.IsActive;
+                //_fileLogger.LogDebug("Will update ecm:active to '{Active}' for document {DocId}", doc.IsActive.ToString(), doc.Id);
 
                 // Only update if we have properties to change
                 if (propertiesToUpdate.Count > 0)

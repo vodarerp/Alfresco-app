@@ -39,27 +39,27 @@ namespace Migration.Infrastructure.Implementation
                 return new DocumentStatusInfo
                 {
                     IsActive = true,
-                    Status = "1",
+                    Status = "2",
                     DeterminationReason = "Nema mapiranja - default aktivan",
                     Priority = 0
                 };
             }
 
             // PRIORITET 1: Provera šifre 00824
-            if (!string.IsNullOrWhiteSpace(mapping.SifraDokumentaMigracija) &&
-                mapping.SifraDokumentaMigracija.Trim().Equals("00824", StringComparison.OrdinalIgnoreCase))
-            {
-                return new DocumentStatusInfo
-                {
-                    IsActive = true,
-                    Status = "1",
-                    DeterminationReason = "Prioritet 1: SifraDokumentaMigracija = '00824'",
-                    Priority = 1,
-                    MappingCode = mapping.SifraDokumentaMigracija,
-                    MappingName = mapping.NazivDokumentaMigracija,
-                    OriginalCode = mapping.SifraDokumenta
-                };
-            }
+            //if (!string.IsNullOrWhiteSpace(mapping.SifraDokumentaMigracija) &&
+            //    mapping.SifraDokumentaMigracija.Trim().Equals("00824", StringComparison.OrdinalIgnoreCase))
+            //{
+            //    return new DocumentStatusInfo
+            //    {
+            //        IsActive = true,
+            //        Status = "1",
+            //        DeterminationReason = "Prioritet 1: SifraDokumentaMigracija = '00824'",
+            //        Priority = 1,
+            //        MappingCode = mapping.SifraDokumentaMigracija,
+            //        MappingName = mapping.NazivDokumentaMigracija,
+            //        OriginalCode = mapping.SifraDokumenta
+            //    };
+            //}
 
             // PRIORITET 2: Provera PolitikaCuvanja
             if (!string.IsNullOrWhiteSpace(mapping.PolitikaCuvanja)  & false)
@@ -125,7 +125,7 @@ namespace Migration.Infrastructure.Implementation
             {
 
                 IsActive = true,
-                Status = "1",
+                Status = "2",
                 DeterminationReason = "Default: Aktivan (ne postoji NazivDokumentaMigracija)",
                 Priority = 4,
                 MappingCode = mapping.SifraDokumentaMigracija,
