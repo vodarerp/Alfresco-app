@@ -351,12 +351,15 @@ namespace Alfresco.App.UserControls
 
             try
             {
+                var configuration = App.AppHost.Services.GetRequiredService<IConfiguration>();
+                var testEndpoint = configuration.GetSection("ClientApi:TestConnectionEndpoint").Value ?? "/api/Client/CheckDefaultCertificate";
+
                 using (var httpClient = new HttpClient())
                 {
                     httpClient.BaseAddress = new Uri(ClientApiBaseUrlTextBox.Text);
                     httpClient.Timeout = TimeSpan.FromSeconds(10);
 
-                    var response = await httpClient.GetAsync("/api/Client/GetClientDetailExtended/test");
+                    var response = await httpClient.GetAsync(testEndpoint);
 
                     if (response.IsSuccessStatusCode)
                     {
