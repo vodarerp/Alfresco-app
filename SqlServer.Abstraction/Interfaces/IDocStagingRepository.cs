@@ -19,10 +19,11 @@ namespace SqlServer.Abstraction.Interfaces
  
         Task<List<UniqueFolderInfo>> GetUniqueDestinationFoldersAsync(CancellationToken ct = default);
 
-      
+
         Task<int> UpdateDestinationFolderIdAsync(
             string dossierDestFolderId,
             string alfrescoFolderId,
+            bool isCreated,
             CancellationToken ct = default);
     }
 }

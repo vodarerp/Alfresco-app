@@ -169,11 +169,13 @@ namespace SqlServer.Infrastructure.Implementation
         public async Task<int> UpdateDestinationFolderIdAsync(
             string dossierDestFolderId,
             string alfrescoFolderId,
+            bool isCreated,
             CancellationToken ct = default)
         {
             var sql = @"
                 UPDATE DocStaging
                 SET DestinationFolderId = @AlfrescoFolderId,
+                    DossierDestFolderIsCreated = @IsCreated,
                     UpdatedAt = GETUTCDATE()
                 WHERE DossierDestFolderId = @DossierDestFolderId
                   AND DestinationFolderId IS NULL";  // Only update if not already set
@@ -181,6 +183,7 @@ namespace SqlServer.Infrastructure.Implementation
             var parameters = new DynamicParameters();
             parameters.Add("@DossierDestFolderId", dossierDestFolderId);
             parameters.Add("@AlfrescoFolderId", alfrescoFolderId);
+            parameters.Add("@IsCreated", isCreated);
 
             var cmd = new CommandDefinition(sql, parameters, Tx, cancellationToken: ct);
 

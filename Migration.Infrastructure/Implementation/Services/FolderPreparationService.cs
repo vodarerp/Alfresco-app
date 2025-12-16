@@ -314,6 +314,7 @@ namespace Migration.Infrastructure.Implementation.Services
 
                 // Create each level in hierarchy starting from the parent dossier folder
                 var currentParentId = parentDossierFolderId;
+                bool mainFolderIsCreated = false; // Track if main dossier folder was created
 
                 for (int i = 0; i < pathParts.Length; i++)
                 {
@@ -325,13 +326,19 @@ namespace Migration.Infrastructure.Implementation.Services
 
                     if (isMainDossierFolder)
                     {
-                        // Use new overload with UniqueFolderInfo for property enrichment
-                        currentParentId = await documentResolver.ResolveAsync(
+                        // Use ResolveWithStatusAsync to get both folderId and isCreated flag
+                        var (folderId, isCreated) = await documentResolver.ResolveWithStatusAsync(
                             currentParentId,
                             folderName,
                             folder.Properties, // May be null
-                            folder, // Pass UniqueFolderInfo for property building
                             ct).ConfigureAwait(false);
+
+                        currentParentId = folderId;
+                        mainFolderIsCreated = isCreated;
+
+                        _fileLogger.LogDebug(
+                            "Main dossier folder '{FolderName}' resolved: FolderId={FolderId}, IsCreated={IsCreated}",
+                            folderName, folderId, isCreated);
                     }
                     else
                     {
@@ -348,10 +355,11 @@ namespace Migration.Infrastructure.Implementation.Services
                     "Created folder hierarchy: {RootDestinationFolderId}/{ParentFolder}/{Path} → {FinalId}",
                     _rootDestinationFolderId, folder.DestinationRootId, folder.FolderPath, currentParentId);
 
-                // STEP 3: Update DocStaging.DestinationFolderId for all documents in this folder
+                // STEP 3: Update DocStaging.DestinationFolderId and DossierDestFolderIsCreated for all documents in this folder
                 await UpdateDocumentDestinationFolderIdAsync(
                     folder.FolderPath,
                     currentParentId,
+                    mainFolderIsCreated,
                     ct).ConfigureAwait(false);
 
                 return (currentParentId, true, null);
@@ -366,6 +374,7 @@ namespace Migration.Infrastructure.Implementation.Services
         private async Task UpdateDocumentDestinationFolderIdAsync(
             string dossierDestFolderId,
             string alfrescoFolderId,
+            bool isCreated,
             CancellationToken ct)
         {
             try
@@ -380,6 +389,7 @@ namespace Migration.Infrastructure.Implementation.Services
                     var rowsUpdated = await docRepo.UpdateDestinationFolderIdAsync(
                         dossierDestFolderId,
                         alfrescoFolderId,
+                        isCreated,
                         ct).ConfigureAwait(false);
 
                     await uow.CommitAsync(ct: ct).ConfigureAwait(false);
@@ -387,8 +397,8 @@ namespace Migration.Infrastructure.Implementation.Services
                     if (rowsUpdated > 0)
                     {
                         _fileLogger.LogDebug(
-                            "Updated {Count} documents with DestinationFolderId={FolderId} for DossierDestFolderId='{DossierId}'",
-                            rowsUpdated, alfrescoFolderId, dossierDestFolderId);
+                            "Updated {Count} documents with DestinationFolderId={FolderId}, IsCreated={IsCreated} for DossierDestFolderId='{DossierId}'",
+                            rowsUpdated, alfrescoFolderId, isCreated, dossierDestFolderId);
                     }
                 }
                 catch

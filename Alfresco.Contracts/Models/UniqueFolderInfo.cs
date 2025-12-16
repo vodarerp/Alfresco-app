@@ -55,5 +55,13 @@ namespace Alfresco.Contracts.Models
         /// Used to determine if folder needs special properties (e.g., deposits = 700)
         /// </summary>
         public int? TargetDossierType { get; set; }
+
+        /// <summary>
+        /// Flag indicating whether this folder was created during migration
+        /// TRUE = folder was created (didn't exist on Alfresco before)
+        /// FALSE = folder already existed on Alfresco
+        /// Populated after folder resolution
+        /// </summary>
+        public bool IsCreated { get; set; }
     }
 }

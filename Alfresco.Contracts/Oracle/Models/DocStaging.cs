@@ -171,6 +171,14 @@ namespace Alfresco.Contracts.Oracle.Models
         /// </summary>
         public string? DestinationFolderId { get; set; }
 
+        /// <summary>
+        /// Flag indicating whether the DossierDestFolder was created during this migration run
+        /// TRUE = folder was created (didn't exist on Alfresco before)
+        /// FALSE = folder already existed on Alfresco
+        /// Used for testing/verification purposes to identify newly created folders
+        /// </summary>
+        public bool DossierDestFolderIsCreated { get; set; }
+
     }
 }
 

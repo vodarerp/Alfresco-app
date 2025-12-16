@@ -31,9 +31,10 @@ namespace Migration.Infrastructure.Implementation.Document
         private readonly ILogger _dbLogger;
         private readonly FolderNodeTypeMappingConfig _nodeTypeMapping;
 
-        // Thread-safe cache: Key = "parentId_folderName", Value = folder ID
-        // Example: "abc-123_DOSSIERS-LE" -> "def-456-ghi-789"
-        private readonly ConcurrentDictionary<string, string> _folderCache = new();
+        // Thread-safe cache: Key = "parentId_folderName", Value = (folder ID, isCreated flag)
+        // Example: "abc-123_DOSSIERS-LE" -> ("def-456-ghi-789", true)
+        // isCreated = true means folder was created during migration, false means it already existed
+        private readonly ConcurrentDictionary<string, (string FolderId, bool IsCreated)> _folderCache = new();
 
         // Lock striping: Fixed 1024 locks instead of unlimited SemaphoreSlim instances
         // Prevents memory leak: 100 MB (1M locks) → 200 KB (1024 locks) = 99.8% reduction
@@ -117,11 +118,11 @@ namespace Migration.Infrastructure.Implementation.Document
             // ========================================
             var cacheKey = $"{destinationRootId}_{newFolderName}";
 
-            if (_folderCache.TryGetValue(cacheKey, out var cachedFolderId))
+            if (_folderCache.TryGetValue(cacheKey, out var cachedValue))
             {
-                _fileLogger.LogTrace("Cache HIT for folder '{FolderName}' under parent '{ParentId}' → FolderId: {FolderId}",
-                    newFolderName, destinationRootId, cachedFolderId);
-                return cachedFolderId;
+                _fileLogger.LogTrace("Cache HIT for folder '{FolderName}' under parent '{ParentId}' → FolderId: {FolderId}, IsCreated: {IsCreated}",
+                    newFolderName, destinationRootId, cachedValue.FolderId, cachedValue.IsCreated);
+                return cachedValue.FolderId;
             }
 
             _fileLogger.LogDebug("Cache MISS for folder '{FolderName}', acquiring lock...", newFolderName);
@@ -137,11 +138,11 @@ namespace Migration.Infrastructure.Implementation.Document
                 // ========================================
                 // Step 3: Double-check cache (another thread might have created folder while we were waiting)
                 // ========================================
-                if (_folderCache.TryGetValue(cacheKey, out cachedFolderId))
+                if (_folderCache.TryGetValue(cacheKey, out cachedValue))
                 {
-                    _fileLogger.LogTrace("Cache HIT after lock (folder created by another thread) for '{FolderName}' → FolderId: {FolderId}",
-                        newFolderName, cachedFolderId);
-                    return cachedFolderId;
+                    _fileLogger.LogTrace("Cache HIT after lock (folder created by another thread) for '{FolderName}' → FolderId: {FolderId}, IsCreated: {IsCreated}",
+                        newFolderName, cachedValue.FolderId, cachedValue.IsCreated);
+                    return cachedValue.FolderId;
                 }
 
                 // ========================================
@@ -157,8 +158,8 @@ namespace Migration.Infrastructure.Implementation.Document
                     _fileLogger.LogDebug("Folder '{FolderName}' already exists in Alfresco. FolderId: {FolderId}",
                         newFolderName, folderID);
 
-                    // Cache the existing folder ID
-                    _folderCache.TryAdd(cacheKey, folderID);
+                    // Cache the existing folder ID with IsCreated = FALSE (folder already existed)
+                    _folderCache.TryAdd(cacheKey, (folderID, false));
                     return folderID;
                 }
 
@@ -227,8 +228,8 @@ namespace Migration.Infrastructure.Implementation.Document
                                 "Folder '{FolderName}' was created by another thread during race condition. FolderId: {FolderId}",
                                 newFolderName, folderID);
 
-                            // Cache the folder ID and return
-                            _folderCache.TryAdd(cacheKey, folderID);
+                            // Cache the folder ID with IsCreated = TRUE (was just created by another thread)
+                            _folderCache.TryAdd(cacheKey, (folderID, true));
                             return folderID;
                         }
 
@@ -263,10 +264,10 @@ namespace Migration.Infrastructure.Implementation.Document
                 }
 
                 // ========================================
-                // Step 7: Cache the result
+                // Step 7: Cache the result with IsCreated = TRUE (folder was created in this migration)
                 // ========================================
-                _folderCache.TryAdd(cacheKey, folderID);
-                _fileLogger.LogTrace("Cached folder ID {FolderId} for key '{CacheKey}'", folderID, cacheKey);
+                _folderCache.TryAdd(cacheKey, (folderID, true));
+                _fileLogger.LogTrace("Cached folder ID {FolderId} with IsCreated=TRUE for key '{CacheKey}'", folderID, cacheKey);
 
                 return folderID;
             }
@@ -382,6 +383,39 @@ namespace Migration.Infrastructure.Implementation.Document
 
             // Call the standard ResolveAsync with enriched properties and custom nodeType
             return await ResolveAsync(destinationRootId, newFolderName, properties, customNodeType, true, ct).ConfigureAwait(false);
+        }
+
+        /// <summary>
+        /// Resolves folder and returns both FolderId and IsCreated status
+        /// </summary>
+        public async Task<(string FolderId, bool IsCreated)> ResolveWithStatusAsync(
+            string destinationRootId,
+            string newFolderName,
+            Dictionary<string, object>? properties,
+            CancellationToken ct)
+        {
+            // Check cache first
+            var cacheKey = $"{destinationRootId}_{newFolderName}";
+
+            if (_folderCache.TryGetValue(cacheKey, out var cachedValue))
+            {
+                _fileLogger.LogTrace("Cache HIT (ResolveWithStatus) for folder '{FolderName}' → FolderId: {FolderId}, IsCreated: {IsCreated}",
+                    newFolderName, cachedValue.FolderId, cachedValue.IsCreated);
+                return cachedValue;
+            }
+
+            // Call standard resolve (which will populate cache)
+            var folderId = await ResolveAsync(destinationRootId, newFolderName, properties, null, true, ct).ConfigureAwait(false);
+
+            // Retrieve from cache (should always hit now)
+            if (_folderCache.TryGetValue(cacheKey, out cachedValue))
+            {
+                return cachedValue;
+            }
+
+            // Fallback (should never happen, but safety)
+            _fileLogger.LogWarning("Cache miss after ResolveAsync for folder '{FolderName}', returning (folderId, false)", newFolderName);
+            return (folderId, false);
         }
 
         private Dictionary<string, object> BuildPropertiesClientData(ClientData clientData)

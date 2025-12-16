@@ -49,5 +49,19 @@ namespace Migration.Abstraction.Interfaces
             Dictionary<string, object>? properties,
             Alfresco.Contracts.Models.UniqueFolderInfo? folderInfo,
             CancellationToken ct);
+
+        /// <summary>
+        /// Resolves folder and returns both FolderId and IsCreated status
+        /// </summary>
+        /// <param name="destinationRootId">Parent folder ID</param>
+        /// <param name="newFolderName">Folder name to resolve</param>
+        /// <param name="properties">Optional properties for folder creation</param>
+        /// <param name="ct">Cancellation token</param>
+        /// <returns>Tuple with FolderId and IsCreated flag (true = created during migration, false = already existed)</returns>
+        Task<(string FolderId, bool IsCreated)> ResolveWithStatusAsync(
+            string destinationRootId,
+            string newFolderName,
+            Dictionary<string, object>? properties,
+            CancellationToken ct);
     }
 }
