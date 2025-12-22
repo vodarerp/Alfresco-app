@@ -291,6 +291,10 @@ namespace Alfresco.App
                     // Phase-based checkpoint repository (NEW - for refactoring)
                     services.AddTransient<SqlServer.Abstraction.Interfaces.IPhaseCheckpointRepository, SqlServer.Infrastructure.Implementation.PhaseCheckpointRepository>();
 
+                    // KDP Document Processing repositories
+                    services.AddTransient<SqlServer.Abstraction.Interfaces.IKdpDocumentStagingRepository, SqlServer.Infrastructure.Implementation.KdpDocumentStagingRepository>();
+                    services.AddTransient<SqlServer.Abstraction.Interfaces.IKdpExportResultRepository, SqlServer.Infrastructure.Implementation.KdpExportResultRepository>();
+
                     // Memory Cache for DocumentMappingRepository (caching individual query results + category mappings)
                     services.AddMemoryCache();
 
@@ -340,6 +344,9 @@ namespace Alfresco.App
 
                     // NEW: DocumentSearchService (MigrationByDocument mode - searches by ecm:docType)
                     services.AddSingleton<IDocumentSearchService, DocumentSearchService>();
+
+                    // KDP Document Processing Service
+                    services.AddSingleton<IKdpDocumentProcessingService, KdpDocumentProcessingService>();
 
                     services.AddTransient<IMoveReader, MoveReader>();
                     services.AddTransient<IMoveExecutor, MoveExecutor>();

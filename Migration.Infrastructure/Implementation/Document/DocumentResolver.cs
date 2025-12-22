@@ -59,32 +59,17 @@ namespace Migration.Infrastructure.Implementation.Document
             _fileLogger = loggerFactory.CreateLogger("FileLogger");
             _dbLogger = loggerFactory.CreateLogger("DbLogger");
             _nodeTypeMapping = nodeTypeMapping?.Value ?? new FolderNodeTypeMappingConfig();
-        }
-        /// <summary>
-        /// Resolves folder by name with backward compatibility (creates if missing)
-        /// </summary>
+        }       
         public async Task<string> ResolveAsync(string destinationRootId, string newFolderName, CancellationToken ct)
         {
             return await ResolveAsync(destinationRootId, newFolderName, null, null, true, ct).ConfigureAwait(false);
         }
-
-        /// <summary>
-        /// Resolves folder by name with properties (creates if missing)
-        /// </summary>
+       
         public async Task<string> ResolveAsync(string destinationRootId, string newFolderName, Dictionary<string, object>? properties, CancellationToken ct)
         {
             return await ResolveAsync(destinationRootId, newFolderName, properties, null, true, ct).ConfigureAwait(false);
         }
-
-        /// <summary>
-        /// Resolves folder with explicit control over creation behavior
-        /// </summary>
-        /// <param name="destinationRootId">Parent folder ID</param>
-        /// <param name="newFolderName">Folder name to resolve</param>
-        /// <param name="properties">Optional properties for folder creation</param>
-        /// <param name="createIfMissing">If true, creates folder if not found. If false, throws exception.</param>
-        /// <param name="ct">Cancellation token</param>
-        /// <returns>Folder ID (existing or newly created)</returns>
+        
         public async Task<string> ResolveAsync(
             string destinationRootId,
             string newFolderName,
@@ -94,17 +79,7 @@ namespace Migration.Infrastructure.Implementation.Document
         {
             return await ResolveAsync(destinationRootId, newFolderName, properties, null, createIfMissing, ct).ConfigureAwait(false);
         }
-
-        /// <summary>
-        /// Resolves folder with explicit nodeType and creation control
-        /// </summary>
-        /// <param name="destinationRootId">Parent folder ID</param>
-        /// <param name="newFolderName">Folder name to resolve</param>
-        /// <param name="properties">Optional properties for folder creation</param>
-        /// <param name="customNodeType">Custom Alfresco nodeType (e.g., "ecm:clientFolder"). If null, uses default "cm:folder"</param>
-        /// <param name="createIfMissing">If true, creates folder if not found. If false, throws exception.</param>
-        /// <param name="ct">Cancellation token</param>
-        /// <returns>Folder ID (existing or newly created)</returns>
+       
         public async Task<string> ResolveAsync(
             string destinationRootId,
             string newFolderName,

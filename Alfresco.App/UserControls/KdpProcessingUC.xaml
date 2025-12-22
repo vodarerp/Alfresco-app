@@ -1,0 +1,133 @@
+<UserControl x:Class="Alfresco.App.UserControls.KdpProcessingUC"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             mc:Ignorable="d"
+             d:DesignHeight="600" d:DesignWidth="900">
+    <Grid Margin="15">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+        </Grid.RowDefinitions>
+
+        <!-- Title Section -->
+        <TextBlock Grid.Row="0" Text="KDP Document Processing"
+                   FontSize="20" FontWeight="Bold" Margin="0,0,0,15"/>
+
+        <!-- Statistics Section -->
+        <GroupBox Grid.Row="1" Header="Statistika" Margin="0,0,0,10" Padding="10">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="*"/>
+                </Grid.ColumnDefinitions>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="Auto"/>
+                </Grid.RowDefinitions>
+
+                <!-- Row 1 -->
+                <StackPanel Grid.Row="0" Grid.Column="0" Margin="5">
+                    <TextBlock Text="Dokumenti u Staging:" FontWeight="SemiBold"/>
+                    <TextBlock x:Name="TxtStagingCount" Text="0" FontSize="18" Foreground="DodgerBlue"/>
+                </StackPanel>
+
+                <StackPanel Grid.Row="0" Grid.Column="1" Margin="5">
+                    <TextBlock Text="Kandidat Folderi:" FontWeight="SemiBold"/>
+                    <TextBlock x:Name="TxtCandidateFolders" Text="0" FontSize="18" Foreground="Green"/>
+                </StackPanel>
+
+                <StackPanel Grid.Row="0" Grid.Column="2" Margin="5">
+                    <TextBlock Text="Ukupno KDP Dokumenata:" FontWeight="SemiBold"/>
+                    <TextBlock x:Name="TxtTotalDocuments" Text="0" FontSize="18" Foreground="DarkOrange"/>
+                </StackPanel>
+
+                <!-- Row 2 -->
+                <StackPanel Grid.Row="1" Grid.Column="0" Margin="5">
+                    <TextBlock Text="Neaktivni (Status=2):" FontWeight="SemiBold"/>
+                    <TextBlock x:Name="TxtInactiveCount" Text="0" FontSize="16" Foreground="Gray"/>
+                </StackPanel>
+
+                <StackPanel Grid.Row="1" Grid.Column="1" Margin="5">
+                    <TextBlock Text="Aktivni (Status=1):" FontWeight="SemiBold"/>
+                    <TextBlock x:Name="TxtActiveCount" Text="0" FontSize="16" Foreground="Gray"/>
+                </StackPanel>
+
+                <StackPanel Grid.Row="1" Grid.Column="2" Margin="5">
+                    <TextBlock Text="Status:" FontWeight="SemiBold"/>
+                    <TextBlock x:Name="TxtStatus" Text="Spremno" FontSize="16" Foreground="Black"/>
+                </StackPanel>
+
+                <!-- Row 3 - Document types -->
+                <StackPanel Grid.Row="2" Grid.Column="0" Margin="5">
+                    <TextBlock Text="Tip 00824:" FontWeight="SemiBold"/>
+                    <TextBlock x:Name="TxtType00824Count" Text="0" FontSize="14" Foreground="Gray"/>
+                </StackPanel>
+
+                <StackPanel Grid.Row="2" Grid.Column="1" Margin="5">
+                    <TextBlock Text="Tip 00099:" FontWeight="SemiBold"/>
+                    <TextBlock x:Name="TxtType00099Count" Text="0" FontSize="14" Foreground="Gray"/>
+                </StackPanel>
+            </Grid>
+        </GroupBox>
+
+        <!-- Action Buttons Section -->
+        <GroupBox Grid.Row="2" Header="Akcije" Margin="0,0,0,10" Padding="10">
+            <StackPanel>
+                <!-- Process Section -->
+                <WrapPanel Margin="0,0,0,10">
+                    <Button x:Name="BtnLoadDocuments"
+                            Content="1. Učitaj KDP Dokumente"
+                            Click="BtnLoadDocuments_Click"
+                            Width="200" Height="35" Margin="5"
+                            Background="LightSkyBlue"/>
+
+                    <Button x:Name="BtnRunProcess"
+                            Content="2. Pokreni Obradu (sp_ProcessKdpDocuments)"
+                            Click="BtnRunProcess_Click"
+                            Width="280" Height="35" Margin="5"
+                            Background="LightGreen"/>
+
+                    <Button x:Name="BtnRefreshStats"
+                            Content="Osveži Statistiku"
+                            Click="BtnRefreshStats_Click"
+                            Width="150" Height="35" Margin="5"/>
+                </WrapPanel>
+
+                <!-- Export Section -->
+                <WrapPanel>
+                    <Button x:Name="BtnExportExcel"
+                            Content="Eksportuj u Excel"
+                            Click="BtnExportExcel_Click"
+                            Width="200" Height="35" Margin="5"
+                            IsEnabled="False"
+                            ToolTip="Excel export će biti implementiran kasnije"/>
+
+                    <Button x:Name="BtnClearStaging"
+                            Content="Očisti Staging Tabelu"
+                            Click="BtnClearStaging_Click"
+                            Width="180" Height="35" Margin="5"
+                            Background="LightCoral"/>
+                </WrapPanel>
+            </StackPanel>
+        </GroupBox>
+
+        <!-- Log Output Section -->
+        <GroupBox Grid.Row="3" Header="Log Output" Padding="10">
+            <ScrollViewer VerticalScrollBarVisibility="Auto">
+                <TextBox x:Name="TxtLog"
+                         IsReadOnly="True"
+                         TextWrapping="Wrap"
+                         FontFamily="Consolas"
+                         FontSize="11"
+                         BorderThickness="0"
+                         VerticalScrollBarVisibility="Auto"/>
+            </ScrollViewer>
+        </GroupBox>
+    </Grid>
+</UserControl>

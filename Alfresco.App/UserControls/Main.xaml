@@ -79,6 +79,11 @@
                 <local:MigrationPhaseMonitor/>
             </TabItem>
 
+            <!-- NEW: KDP Document Processing Tab -->
+            <TabItem Header="KDP Processing">
+                <local:KdpProcessingUC/>
+            </TabItem>
+
             <TabItem x:Name="LiveLoggerTab">
                 <TabItem.Header>
                     <Grid>
