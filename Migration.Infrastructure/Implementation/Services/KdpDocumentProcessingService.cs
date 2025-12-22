@@ -1,8 +1,11 @@
 using Alfresco.Abstraction.Interfaces;
 using Alfresco.Contracts.Models;
 using Alfresco.Contracts.Oracle.Models;
+using Alfresco.Contracts.Options;
 using Alfresco.Contracts.Request;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 using Migration.Abstraction.Interfaces;
 using SqlServer.Abstraction.Interfaces;
 using System;
@@ -20,22 +23,19 @@ namespace Migration.Infrastructure.Implementation.Services
     public class KdpDocumentProcessingService : IKdpDocumentProcessingService
     {
         private readonly IAlfrescoReadApi _alfrescoReadApi;
-        private readonly IKdpDocumentStagingRepository _kdpStagingRepo;
-        private readonly IKdpExportResultRepository _kdpExportRepo;
-        private readonly IUnitOfWork _unitOfWork;
+        private readonly IServiceScopeFactory _scopeFactory;
+        private readonly IOptions<MigrationOptions> _options;
         private readonly ILogger<KdpDocumentProcessingService> _logger;
 
         public KdpDocumentProcessingService(
             IAlfrescoReadApi alfrescoReadApi,
-            IKdpDocumentStagingRepository kdpStagingRepo,
-            IKdpExportResultRepository kdpExportRepo,
-            IUnitOfWork unitOfWork,
+            IServiceScopeFactory scopeFactory,
+            IOptions<MigrationOptions> options,
             ILogger<KdpDocumentProcessingService> logger)
         {
             _alfrescoReadApi = alfrescoReadApi ?? throw new ArgumentNullException(nameof(alfrescoReadApi));
-            _kdpStagingRepo = kdpStagingRepo ?? throw new ArgumentNullException(nameof(kdpStagingRepo));
-            _kdpExportRepo = kdpExportRepo ?? throw new ArgumentNullException(nameof(kdpExportRepo));
-            _unitOfWork = unitOfWork ?? throw new ArgumentNullException(nameof(unitOfWork));
+            _scopeFactory = scopeFactory ?? throw new ArgumentNullException(nameof(scopeFactory));
+            _options = options ?? throw new ArgumentNullException(nameof(options));
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         }
 
@@ -66,13 +66,25 @@ namespace Migration.Infrastructure.Implementation.Services
                 var stagingDocuments = allKdpDocs.Select(MapToKdpDocumentStaging).ToList();
 
                 // Bulk insert u staging tabelu (koristi InsertManyAsync iz base repository-a)
-                var insertedCount = await _kdpStagingRepo.InsertManyAsync(stagingDocuments, ct);
+                await using var scope = _scopeFactory.CreateAsyncScope();
+                var uow = scope.ServiceProvider.GetRequiredService<IUnitOfWork>();
+                var kdpStagingRepo = scope.ServiceProvider.GetRequiredService<IKdpDocumentStagingRepository>();
 
-                await _unitOfWork.CommitAsync(ct);
+                await uow.BeginAsync(ct: ct).ConfigureAwait(false);
+                try
+                {
+                    var insertedCount = await kdpStagingRepo.InsertManyAsync(stagingDocuments, ct);
+                    await uow.CommitAsync(ct: ct).ConfigureAwait(false);
 
-                _logger.LogInformation("Uspešno upisano {Count} dokumenata u staging tabelu", insertedCount);
+                    _logger.LogInformation("Uspešno upisano {Count} dokumenata u staging tabelu", insertedCount);
 
-                return insertedCount;
+                    return insertedCount;
+                }
+                catch
+                {
+                    await uow.RollbackAsync(ct: ct).ConfigureAwait(false);
+                    throw;
+                }
             }
             catch (Exception ex)
             {
@@ -90,16 +102,28 @@ namespace Migration.Infrastructure.Implementation.Services
 
             try
             {
-                var result = await _kdpExportRepo.ProcessKdpDocumentsAsync(ct);
+                await using var scope = _scopeFactory.CreateAsyncScope();
+                var uow = scope.ServiceProvider.GetRequiredService<IUnitOfWork>();
+                var kdpExportRepo = scope.ServiceProvider.GetRequiredService<IKdpExportResultRepository>();
 
-                await _unitOfWork.CommitAsync(ct);
+                await uow.BeginAsync(ct: ct).ConfigureAwait(false);
+                try
+                {
+                    var result = await kdpExportRepo.ProcessKdpDocumentsAsync(ct);
+                    await uow.CommitAsync(ct: ct).ConfigureAwait(false);
 
-                _logger.LogInformation(
-                    "Obrada završena: {Candidates} kandidata, {Documents} dokumenata",
-                    result.totalCandidates,
-                    result.totalDocuments);
+                    _logger.LogInformation(
+                        "Obrada završena: {Candidates} kandidata, {Documents} dokumenata",
+                        result.totalCandidates,
+                        result.totalDocuments);
 
-                return result;
+                    return result;
+                }
+                catch
+                {
+                    await uow.RollbackAsync(ct: ct).ConfigureAwait(false);
+                    throw;
+                }
             }
             catch (Exception ex)
             {
@@ -126,10 +150,23 @@ namespace Migration.Infrastructure.Implementation.Services
         {
             _logger.LogInformation("Čišćenje staging tabele...");
 
-            await _kdpStagingRepo.ClearStagingAsync(ct);
-            await _unitOfWork.CommitAsync(ct);
+            await using var scope = _scopeFactory.CreateAsyncScope();
+            var uow = scope.ServiceProvider.GetRequiredService<IUnitOfWork>();
+            var kdpStagingRepo = scope.ServiceProvider.GetRequiredService<IKdpDocumentStagingRepository>();
 
-            _logger.LogInformation("Staging tabela očišćena");
+            await uow.BeginAsync(ct: ct).ConfigureAwait(false);
+            try
+            {
+                await kdpStagingRepo.ClearStagingAsync(ct);
+                await uow.CommitAsync(ct: ct).ConfigureAwait(false);
+
+                _logger.LogInformation("Staging tabela očišćena");
+            }
+            catch
+            {
+                await uow.RollbackAsync(ct: ct).ConfigureAwait(false);
+                throw;
+            }
         }
 
         /// <summary>
@@ -139,24 +176,40 @@ namespace Migration.Infrastructure.Implementation.Services
         {
             _logger.LogInformation("Učitavanje statistike...");
 
-            var stagingCount = await _kdpStagingRepo.CountAsync(ct);
-            var exportCount = await _kdpExportRepo.CountAsync(ct);
+            await using var scope = _scopeFactory.CreateAsyncScope();
+            var uow = scope.ServiceProvider.GetRequiredService<IUnitOfWork>();
+            var kdpStagingRepo = scope.ServiceProvider.GetRequiredService<IKdpDocumentStagingRepository>();
+            var kdpExportRepo = scope.ServiceProvider.GetRequiredService<IKdpExportResultRepository>();
 
-            // TODO: Dodati detaljnije statistike ako je potrebno
-            // (npr. COUNT po statusu, COUNT po tipu, MIN/MAX datum, itd.)
-
-            return new KdpProcessingStatistics
+            await uow.BeginAsync(ct: ct).ConfigureAwait(false);
+            try
             {
-                TotalDocumentsInStaging = stagingCount,
-                TotalCandidateFolders = exportCount,
-                TotalDocumentsInCandidateFolders = 0, // Može se izvući iz stored procedure rezultata
-                OldestDocumentDate = null,
-                NewestDocumentDate = null,
-                InactiveDocumentsCount = 0,
-                ActiveDocumentsCount = 0,
-                Type00824Count = 0,
-                Type00099Count = 0
-            };
+                var stagingCount = await kdpStagingRepo.CountAsync(ct);
+                var exportCount = await kdpExportRepo.CountAsync(ct);
+
+                await uow.CommitAsync(ct: ct).ConfigureAwait(false);
+
+                // TODO: Dodati detaljnije statistike ako je potrebno
+                // (npr. COUNT po statusu, COUNT po tipu, MIN/MAX datum, itd.)
+
+                return new KdpProcessingStatistics
+                {
+                    TotalDocumentsInStaging = stagingCount,
+                    TotalCandidateFolders = exportCount,
+                    TotalDocumentsInCandidateFolders = 0, // Može se izvući iz stored procedure rezultata
+                    OldestDocumentDate = null,
+                    NewestDocumentDate = null,
+                    InactiveDocumentsCount = 0,
+                    ActiveDocumentsCount = 0,
+                    Type00824Count = 0,
+                    Type00099Count = 0
+                };
+            }
+            catch
+            {
+                await uow.RollbackAsync(ct: ct).ConfigureAwait(false);
+                throw;
+            }
         }
 
         // ============================================
@@ -168,13 +221,33 @@ namespace Migration.Infrastructure.Implementation.Services
         /// </summary>
         private async Task<List<Entry>> LoadAllKdpDocumentsFromAlfrescoAsync(CancellationToken ct)
         {
-            // AFTS query za KDP dokumente (tipovi 00824 i 00099)
-            var query = "(=ecm\\:docType:\"00824\" OR =ecm\\:docType:\"00099\") AND TYPE:\"cm:content\"";
+            var kdpOptions = _options.Value.KdpProcessing;
+            var batchSize = kdpOptions.BatchSize;
+            var docTypes = kdpOptions.DocTypes ?? new List<string> { "00824", "00099" };
+
+            // Build AFTS query for KDP documents
+            var docTypeConditions = string.Join(" OR ", docTypes.Select(t => $"=ecm\\:docType:\"{t}\""));
+            var query = $"({docTypeConditions}) AND TYPE:\"cm:content\"";
+
+            // Add ANCESTOR condition if configured
+            if (!string.IsNullOrWhiteSpace(kdpOptions.AncestorFolderId))
+            {
+                var ancestorId = kdpOptions.AncestorFolderId;
+
+                // Ensure the ancestor ID is in the correct format (workspace://SpacesStore/xxx)
+                if (!ancestorId.StartsWith("workspace://", StringComparison.OrdinalIgnoreCase))
+                {
+                    ancestorId = $"workspace://SpacesStore/{ancestorId}";
+                }
+
+                query += $" AND ANCESTOR:\"{ancestorId}\"";
+                _logger.LogInformation("Using ANCESTOR filter: {AncestorId}", ancestorId);
+            }
+
             var allDocs = new List<Entry>();
             int skipCount = 0;
-            const int maxItems = 1000;
 
-            _logger.LogInformation("Početak AFTS query-ja za KDP dokumente...");
+            _logger.LogInformation("Početak AFTS query-ja za KDP dokumente: {Query}", query);
 
             while (true)
             {
@@ -190,7 +263,7 @@ namespace Migration.Infrastructure.Implementation.Services
                     Include = new[] { "properties", "path" },
                     Paging = new PagingRequest
                     {
-                        MaxItems = maxItems,
+                        MaxItems = batchSize,
                         SkipCount = skipCount
                     }
                 };
@@ -205,11 +278,11 @@ namespace Migration.Infrastructure.Implementation.Services
                     batch.Count,
                     allDocs.Count);
 
-                // Ako je broj vraćenih dokumenata manji od maxItems, stigli smo do kraja
-                if (batch.Count < maxItems)
+                // Ako je broj vraćenih dokumenata manji od batchSize, stigli smo do kraja
+                if (batch.Count < batchSize)
                     break;
 
-                skipCount += maxItems;
+                skipCount += batchSize;
             }
 
             _logger.LogInformation("AFTS query završen - ukupno učitano {Count} dokumenata", allDocs.Count);
@@ -226,6 +299,11 @@ namespace Migration.Infrastructure.Implementation.Services
             var accFolderName = ExtractAccFolderFromPath(documentPath);
             var coreId = ExtractCoreId(accFolderName);
 
+            // Extract CreatedDate from ecm:docCreationDate property
+            var createdDate = GetDateTimePropertyValue(entry, "ecm:docCreationDate")
+                              ?? GetDateTimePropertyValue(entry, "ecm:docCreatedDate")
+                              ?? entry.CreatedAt.DateTime;
+
             return new KdpDocumentStaging
             {
                 NodeId = entry.Id,
@@ -235,7 +313,7 @@ namespace Migration.Infrastructure.Implementation.Services
                 ParentFolderName = ExtractParentFolderName(documentPath),
                 DocumentType = GetPropertyValue(entry, "ecm:docType"),
                 DocumentStatus = GetPropertyValue(entry, "ecm:docStatus"),
-                CreatedDate = null,//entry.CreatedAt,
+                CreatedDate = createdDate,
                 AccountNumbers = GetPropertyValue(entry, "ecm:bnkAccountNumber"),
                 AccFolderName = accFolderName,
                 CoreId = coreId,
@@ -254,6 +332,26 @@ namespace Migration.Infrastructure.Implementation.Services
             if (entry.Properties.TryGetValue(propertyName, out var value))
             {
                 return value?.ToString();
+            }
+
+            return null;
+        }
+
+        /// <summary>
+        /// Ekstrahuje DateTime vrednost property-ja iz Entry objekta
+        /// </summary>
+        private DateTime? GetDateTimePropertyValue(Entry entry, string propertyName)
+        {
+            if (entry.Properties == null)
+                return null;
+
+            if (entry.Properties.TryGetValue(propertyName, out var value))
+            {
+                if (value is DateTime dt)
+                    return dt;
+
+                if (DateTime.TryParse(value?.ToString(), out var parsedDate))
+                    return parsedDate;
             }
 
             return null;

@@ -57,6 +57,17 @@ namespace Alfresco.Contracts.Options
         /// </summary>
         public DocumentSearchOptions DocumentTypeDiscovery { get; set; } = new();
 
+        /// <summary>
+        /// Configuration for KDP Document Processing Service
+        /// </summary>
+        public KdpProcessingOptions KdpProcessing { get; set; } = new();
+
+        /// <summary>
+        /// Mapping of folder node types to Alfresco content model types
+        /// Used when creating new folders in Alfresco
+        /// </summary>
+        public Dictionary<string, string> FolderNodeTypeMapping { get; set; } = new();
+
     }
 
     public class ServiceOptions
