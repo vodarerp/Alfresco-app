@@ -367,6 +367,7 @@ namespace Migration.Infrastructure.Implementation.Document
             string destinationRootId,
             string newFolderName,
             Dictionary<string, object>? properties,
+            UniqueFolderInfo? folderInfo,
             CancellationToken ct)
         {
             // Check cache first
@@ -378,9 +379,10 @@ namespace Migration.Infrastructure.Implementation.Document
                     newFolderName, cachedValue.FolderId, cachedValue.IsCreated);
                 return cachedValue;
             }
+            string customNodeType = _nodeTypeMapping.GetNodeType(folderInfo.TargetDossierType.Value);
 
             // Call standard resolve (which will populate cache)
-            var folderId = await ResolveAsync(destinationRootId, newFolderName, properties, null, true, ct).ConfigureAwait(false);
+            var folderId = await ResolveAsync(destinationRootId, newFolderName, properties, customNodeType, true, ct).ConfigureAwait(false);
 
             // Retrieve from cache (should always hit now)
             if (_folderCache.TryGetValue(cacheKey, out cachedValue))

@@ -37,6 +37,7 @@ namespace Migration.Infrastructure.Implementation.Services
         private long _totalProcessed = 0;
         private long _totalFailed = 0;
         private int _batchCounter = 0;
+        private long _totalDocumentsProcessed = 0;
 
         private const string ServiceName = "DocumentDiscovery";
 
@@ -179,6 +180,26 @@ namespace Migration.Infrastructure.Implementation.Services
 
             while (!ct.IsCancellationRequested)
             {
+                // Check if we've reached the maximum number of documents to process
+                var maxDocs = _options.Value.MaxDocumentsToProcess;
+                if (maxDocs > 0 && _totalDocumentsProcessed >= maxDocs)
+                {
+                    _fileLogger.LogInformation(
+                        "Reached maximum documents limit: {MaxDocs}. Total documents processed: {TotalDocuments}",
+                        maxDocs, _totalDocumentsProcessed);
+                    _dbLogger.LogInformation(
+                        "Migration stopped - reached max documents limit: {MaxDocs}",
+                        maxDocs);
+                    _uiLogger.LogInformation(
+                        "Reached max documents limit: {MaxDocs} documents processed",
+                        maxDocs);
+
+                    progress.Message = $"Completed: Reached limit of {maxDocs} documents ({_totalProcessed} folders processed)";
+                    progressCallback?.Invoke(progress);
+                    completedSuccessfully = true;
+                    break;
+                }
+
                 using var batchScope = _fileLogger.BeginScope(new Dictionary<string, object>
                 {
                     ["BatchCounter"] = batchCounter
@@ -584,15 +605,27 @@ namespace Migration.Infrastructure.Implementation.Services
                 // Step 7: Format destination dossier ID
                 // IMPORTANT: For ACC dosijee, convert PI/LE → ACC prefix
                 // Example: PI-102206 → ACC102206 (if targetType = AccountPackage)
+                // For Deposit dosijee, use ecm:docClientType to determine productType (00008/00010)
                 // ========================================
                 if (!string.IsNullOrWhiteSpace(folder.Name))
                 {
+                    // For deposit dossiers, determine productType from doc.ClientSegment (ecm:docClientType)
+                    // This ensures we use "00008" for PI and "00010" for LE
+                    string? productTypeToUse = folder.ProductType;
+                    if (destinationType == DossierType.Deposit)
+                    {
+                        productTypeToUse = DossierIdFormatter.MapClientSegmentToProductType(doc.ClientSegment);
+                        _fileLogger.LogTrace(
+                            "Deposit dossier: Mapped ClientSegment '{ClientSegment}' → ProductType '{ProductType}'",
+                            doc.ClientSegment, productTypeToUse);
+                    }
+
                     // Use new method that changes prefix based on target dossier type
                     doc.DossierDestFolderId = DossierIdFormatter.ConvertForTargetType(
                         folder.Name,
                         doc.TargetDossierType ?? (int)DossierType.Unknown,
                         folder.ContractNumber,
-                        folder.ProductType,
+                        productTypeToUse,
                         folder.CoreId);
 
                     _fileLogger.LogTrace(
@@ -870,10 +903,35 @@ namespace Migration.Infrastructure.Implementation.Services
                 _fileLogger.LogInformation("Found {Count} documents in page (skipCount={SkipCount}) for folder {FolderId}",
                     result.Documents.Count, skipCount, folder.Id);
 
-                // Process documents from current page
-                var docsToInsert = new List<DocStaging>(result.Documents.Count);
+                // Check if we need to limit the number of documents to process
+                var maxDocs = _options.Value.MaxDocumentsToProcess;
+                var documentsToProcess = result.Documents;
 
-                foreach (var d in result.Documents)
+                if (maxDocs > 0)
+                {
+                    var remainingDocs = maxDocs - _totalDocumentsProcessed;
+                    if (remainingDocs <= 0)
+                    {
+                        _fileLogger.LogInformation(
+                            "Max documents limit reached while processing folder {FolderId}, stopping document processing",
+                            folder.Id);
+                        break;
+                    }
+
+                    if (result.Documents.Count > remainingDocs)
+                    {
+                        documentsToProcess = result.Documents.Take((int)remainingDocs).ToList();
+                        _fileLogger.LogInformation(
+                            "Limiting documents to process from {Total} to {Remaining} for folder {FolderId} " +
+                            "(max limit: {MaxDocs}, already processed: {Processed})",
+                            result.Documents.Count, remainingDocs, folder.Id, maxDocs, _totalDocumentsProcessed);
+                    }
+                }
+
+                // Process documents from current page
+                var docsToInsert = new List<DocStaging>(documentsToProcess.Count);
+
+                foreach (var d in documentsToProcess)
                 {
                     var item = d.Entry.ToDocStagingInsert();
                     // ToPath will be determined by MoveService based on document properties
@@ -949,6 +1007,10 @@ namespace Migration.Infrastructure.Implementation.Services
                     inserted, docsToInsert.Count, folderId);
 
                 await uow.CommitAsync().ConfigureAwait(false);
+
+                // Track total documents processed
+                Interlocked.Add(ref _totalDocumentsProcessed, inserted);
+
                 _fileLogger.LogDebug("Transaction committed for folder {FolderId}", folderId);
             }
             catch (Exception ex)

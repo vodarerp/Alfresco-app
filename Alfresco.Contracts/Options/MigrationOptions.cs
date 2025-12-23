@@ -22,6 +22,14 @@ namespace Alfresco.Contracts.Options
         public int StuckItemsTimeoutMinutes { get; set; } = 10;
 
         /// <summary>
+        /// Maximum number of documents to process during migration.
+        /// If 0, all documents will be processed (no limit).
+        /// If greater than 0, only this many documents will be processed.
+        /// Useful for testing on production with a limited number of documents.
+        /// </summary>
+        public int MaxDocumentsToProcess { get; set; } = 0;
+
+        /// <summary>
         /// Root folder ID in Alfresco for destination (migration target)
         /// </summary>
         public string RootDestinationFolderId { get; set; }

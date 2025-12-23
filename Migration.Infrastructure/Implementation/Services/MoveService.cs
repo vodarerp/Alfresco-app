@@ -533,10 +533,10 @@ namespace Migration.Infrastructure.Implementation.Services
                 _fileLogger.LogDebug("Updating properties for document {DocId} (NodeId: {NodeId})", doc.Id, doc.NodeId);
 
                 // Read current document properties from Alfresco
-                var existingNode = await _read.GetNodeByIdAsync(doc.NodeId, ct).ConfigureAwait(false);
-                var existingProperties = existingNode?.Entry?.Properties ?? new Dictionary<string, object>();
+                //var existingNode = await _read.GetNodeByIdAsync(doc.NodeId, ct).ConfigureAwait(false);
+                //var existingProperties = existingNode?.Entry?.Properties ?? new Dictionary<string, object>();
 
-                _fileLogger.LogDebug("Document {DocId} has {Count} existing properties", doc.Id, existingProperties.Count);
+                //_fileLogger.LogDebug("Document {DocId} has {Count} existing properties", doc.Id, existingProperties.Count);
 
                 // Prepare properties to update - only ecm:docType and ecm:naziv
                 var propertiesToUpdate = new Dictionary<string, object>();
@@ -560,11 +560,11 @@ namespace Migration.Infrastructure.Implementation.Services
                     propertiesToUpdate["ecm:docTypeName"] = migratedNaziv;
                     _fileLogger.LogDebug("Will update ecm:naziv to '{Naziv}' for document {DocId}", migratedNaziv, doc.Id);
                 }
-                //else if (!string.IsNullOrWhiteSpace(doc.DocDescription))
-                //{
-                //    //propertiesToUpdate["ecm:naziv"] = doc.DocDescription;
-                //    _fileLogger.LogDebug("Will update ecm:naziv to '{Naziv}' (from DocStaging fallback) for document {DocId}", doc.DocDescription, doc.Id);
-                //}
+                 if (!string.IsNullOrWhiteSpace(doc.DocDescription))
+                {
+                    propertiesToUpdate["ecm:naziv"] = doc.DocDescription;
+                    _fileLogger.LogDebug("Will update ecm:naziv to '{Naziv}' (from DocStaging fallback) for document {DocId}", doc.DocDescription, doc.Id);
+                }
 
                 if (!string.IsNullOrWhiteSpace(doc.Status))
                 {
@@ -581,7 +581,14 @@ namespace Migration.Infrastructure.Implementation.Services
                 if (!string.IsNullOrWhiteSpace(doc.CategoryName))
                 {
                     propertiesToUpdate["ecm:docCategoryName"] = doc.CategoryName;
-                    _fileLogger.LogDebug("Will update ecm:status to '{Status}' for document {DocId}", doc.Status, doc.Id);
+                    _fileLogger.LogDebug("Will update ecm:docCategoryName to '{Status}' for document {DocId}", doc.Status, doc.Id);
+                }
+                if (!string.IsNullOrWhiteSpace(doc.DestinationFolderId))
+                {
+                    propertiesToUpdate["ecm:docDossierId"] = doc.DestinationFolderId;
+                    propertiesToUpdate["ecm:folderId"] = doc.DestinationFolderId;
+
+                    _fileLogger.LogDebug("Will update ecm:docDossierId and ecm:folderId to '{DestinationFolderId}' for document {DocId}", doc.DestinationFolderId, doc.Id);
                 }
 
                 //propertiesToUpdate["ecm:active"] = doc.IsActive;

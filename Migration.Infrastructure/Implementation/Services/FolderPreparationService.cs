@@ -331,6 +331,7 @@ namespace Migration.Infrastructure.Implementation.Services
                             currentParentId,
                             folderName,
                             folder.Properties, // May be null
+                            folder,
                             ct).ConfigureAwait(false);
 
                         currentParentId = folderId;

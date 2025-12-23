@@ -62,6 +62,7 @@ namespace Migration.Abstraction.Interfaces
             string destinationRootId,
             string newFolderName,
             Dictionary<string, object>? properties,
+            Alfresco.Contracts.Models.UniqueFolderInfo? folderInfo,
             CancellationToken ct);
     }
 }

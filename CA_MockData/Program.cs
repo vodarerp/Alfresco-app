@@ -38,17 +38,23 @@ public static class Program
             BaseUrl = "http://localhost:8080/",
             Username =  "admin",
             Password = "admin",
-            RootParentId = "32f14d10-59e6-4783-b14d-1059e64783f4",
-            FolderCount = 10,
+            RootParentId = "4fadce9b-718f-4a2f-adce-9b718f8a2ff0",
+            FolderCount = 50,
             DocsPerFolder = 3,
             DegreeOfParallelism = 8,
             MaxRetries = 5,
             RetryBaseDelayMs = 100,
             UseNewFolderStructure = true,           // Enable new folder structure
-            ClientTypes = new[] { "PI", "LE","D" },  // NOTE: ACC dossiers are created DURING migration, not as old dossiers
+            ClientTypes = new[] { "PI", "LE", "D" },  // NOTE: ACC dossiers are created DURING migration, not as old dossiers
             StartingCoreId = 102206,                // Start from realistic CoreId
             AddFolderProperties = true,             // Set to true after deploying bankContentModel.xml
-            DocumentMappingService = documentMappingService  // Inject document mapping service
+            DocumentMappingService = documentMappingService,  // Inject document mapping service
+
+            // KDP document generation settings
+            // To generate ~5000 KDP documents: Set FolderCount=500 and KdpDocumentsPerFolder=10
+            // Or: Set FolderCount=250 and KdpDocumentsPerFolder=20
+            GenerateOnlyKdpDocuments = false,       // Set to true to generate only KDP documents
+            KdpDocumentsPerFolder = 10              // Number of KDP documents per folder
         };
 
 
@@ -62,7 +68,9 @@ public static class Program
         var failed = 0;
 
         var start = DateTime.UtcNow;
-        var totalDocs = (long)cfg.FolderCount * cfg.DocsPerFolder;
+        var totalDocs = cfg.GenerateOnlyKdpDocuments
+            ? (long)cfg.FolderCount * cfg.KdpDocumentsPerFolder
+            : (long)cfg.FolderCount * cfg.DocsPerFolder;
         using var http = CreateHttpClient(cfg);
         using var cts = new CancellationTokenSource();
         Console.CancelKeyPress += (_, e) => { e.Cancel = true; cts.Cancel(); };
@@ -165,8 +173,18 @@ public static class Program
                             var clientType = cfg.ClientTypes[i % cfg.ClientTypes.Length];
                             var coreId = cfg.StartingCoreId + i;
 
-                            // Generate test case documents based on requirements
-                            var testDocs = await GenerateTestCaseDocumentsAsync(cfg, clientType, coreId, i, cts.Token);
+                            // Generate documents based on mode
+                            List<TestDocument> testDocs;
+                            if (cfg.GenerateOnlyKdpDocuments)
+                            {
+                                // Generate only KDP documents with decreasing dates
+                                testDocs = await GenerateKdpDocumentsAsync(cfg, clientType, coreId, i, cts.Token);
+                            }
+                            else
+                            {
+                                // Generate test case documents based on requirements
+                                testDocs = await GenerateTestCaseDocumentsAsync(cfg, clientType, coreId, i, cts.Token);
+                            }
 
                             for (var x = 0; x < testDocs.Count; x++)
                             {
@@ -190,7 +208,8 @@ public static class Program
                             }
 
                             // Create separate Deposit Dossier folders for deposit documents (every 5th folder)
-                            if (cfg.UseNewFolderStructure && i % 5 == 0)
+                            // Skip deposit folder creation when in KDP-only mode
+                            if (cfg.UseNewFolderStructure && i % 5 == 0 && !cfg.GenerateOnlyKdpDocuments)
                             {
                                 // Generate contract number as YYYYMMDD format
                                 var contractDate = DateTime.UtcNow.AddDays(-new Random(coreId).Next(1, 365));
@@ -827,6 +846,88 @@ public static class Program
 
             // TC 15: Add exclusion document (should NOT be migrated)
             //await AddDocumentAsync("Ovlašćenje licima za donošenje instrumenata PP-a u Banku"); // 00702
+        }
+
+        return documents;
+    }
+
+    /// <summary>
+    /// Generates only KDP documents (docDesc "Specimen card", docType "00099")
+    /// Each document has a docCreatedDate that is one day earlier than the previous one
+    /// First document has today's date
+    /// </summary>
+    private static async Task<List<TestDocument>> GenerateKdpDocumentsAsync(Config cfg, string clientType, int coreId, int folderIndex, CancellationToken ct)
+    {
+        var documents = new List<TestDocument>();
+        var random = new Random(coreId);
+        var usedFileNames = new HashSet<string>();
+
+        // Static KDP document properties
+        const string kdpDocDesc = "Specimen card";
+        const string kdpDocType = "00099";
+
+        // Starting date (today)
+        var currentDate = DateTime.UtcNow.Date;
+
+        for (int i = 0; i < cfg.KdpDocumentsPerFolder; i++)
+        {
+            // Calculate date: first document has today's date, each subsequent is one day earlier
+            var docCreatedDate = currentDate.AddDays(-i);
+
+            // Generate unique filename
+            var fileName = $"Specimen_card_{coreId}_{i + 1}.pdf";
+
+            // Ensure filename is unique
+            int counter = 1;
+            while (usedFileNames.Contains(fileName))
+            {
+                fileName = $"Specimen_card_{coreId}_{i + 1}_{counter}.pdf";
+                counter++;
+            }
+            usedFileNames.Add(fileName);
+
+            // Create document properties
+            var props = new Dictionary<string, object>();
+
+            // Standard properties
+            props["cm:title"] = kdpDocDesc;
+            props["cm:description"] = $"KDP document {kdpDocDesc} for {clientType} client {coreId}";
+
+            // CRITICAL: ecm:docDesc - key for migration mapping
+            props["ecm:docDesc"] = kdpDocDesc;
+
+            // Core ID
+            props["ecm:coreId"] = coreId.ToString();
+
+            // Document status - all KDP documents are "validiran"
+            props["ecm:docStatus"] = "validiran";
+
+            // Document type - KDP type
+            props["ecm:docType"] = kdpDocType;
+
+            // Dossier type - based on client type
+            string tipDosiea = clientType == "PI" ? "Dosije klijenta FL" : "Dosije klijenta PL";
+            props["ecm:docDossierType"] = tipDosiea;
+
+            // Client segment
+            props["ecm:docClientType"] = clientType;
+
+            // Source
+            props["ecm:source"] = "Heimdall";
+
+            // NOTE: cm:created cannot be modified as it's a read-only system property
+            // If ecm:docCreatedDate exists in your content model, uncomment the line below:
+            // props["ecm:docCreatedDate"] = docCreatedDate.ToString("o");
+
+            // Add version label
+            props["ecm:versionLabel"] = "1.0";
+            props["ecm:versionType"] = "Initial";
+
+            documents.Add(new TestDocument
+            {
+                Name = fileName,
+                Properties = props
+            });
         }
 
         return documents;

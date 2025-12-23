@@ -184,8 +184,30 @@ namespace Migration.Infrastructure.Implementation.Services
 
             _fileLogger.LogInformation("Found {Count} documents in DOSSIER-{Type}", finalDocuments.Count, currentType);
 
+            // Check if we need to limit the number of documents to process
+            var maxDocs = _options.Value.MaxDocumentsToProcess;
+            var documentsToProcess = finalDocuments;
+
+            if (maxDocs > 0)
+            {
+                var remainingDocs = maxDocs - _totalDocumentsProcessed;
+                if (remainingDocs <= 0)
+                {
+                    _fileLogger.LogInformation("Max documents limit reached, skipping document processing");
+                    return result;
+                }
+
+                if (finalDocuments.Count > remainingDocs)
+                {
+                    documentsToProcess = finalDocuments.Take((int)remainingDocs).ToList();
+                    _fileLogger.LogInformation(
+                        "Limiting documents to process from {Total} to {Remaining} (max limit: {MaxDocs}, already processed: {Processed})",
+                        finalDocuments.Count, remainingDocs, maxDocs, _totalDocumentsProcessed);
+                }
+            }
+
             // Extract unique parent folders from documents
-            var uniqueFolders = ExtractUniqueFolders(finalDocuments, currentType);
+            var uniqueFolders = ExtractUniqueFolders(documentsToProcess, currentType);
             result.FoldersFound = uniqueFolders.Count;
 
             _fileLogger.LogInformation("Extracted {Count} unique folders from batch", uniqueFolders.Count);
@@ -197,7 +219,7 @@ namespace Migration.Infrastructure.Implementation.Services
 
             // Process documents - apply mapping and insert
             var docsToInsert = new List<DocStaging>();
-            foreach (var doc in finalDocuments)
+            foreach (var doc in documentsToProcess)
             {
                 var parentFolderId = GetParentFolderIdFromPath(doc.Entry);
                 if (string.IsNullOrEmpty(parentFolderId))
@@ -300,6 +322,26 @@ namespace Migration.Infrastructure.Implementation.Services
 
             while (!ct.IsCancellationRequested)
             {
+                // Check if we've reached the maximum number of documents to process
+                var maxDocs = _options.Value.MaxDocumentsToProcess;
+                if (maxDocs > 0 && _totalDocumentsProcessed >= maxDocs)
+                {
+                    _fileLogger.LogInformation(
+                        "Reached maximum documents limit: {MaxDocs}. Total processed: {TotalProcessed}",
+                        maxDocs, _totalDocumentsProcessed);
+                    _dbLogger.LogInformation(
+                        "Migration stopped - reached max documents limit: {MaxDocs}",
+                        maxDocs);
+                    _uiLogger.LogInformation(
+                        "Reached max documents limit: {MaxDocs} documents processed",
+                        maxDocs);
+
+                    progress.Message = $"Completed: Reached limit of {maxDocs} documents";
+                    progressCallback?.Invoke(progress);
+                    completedSuccessfully = true;
+                    break;
+                }
+
                 using var batchScope = _fileLogger.BeginScope(new Dictionary<string, object>
                 {
                     ["BatchCounter"] = _batchCounter + 1
@@ -871,13 +913,25 @@ namespace Migration.Infrastructure.Implementation.Services
                 doc.Source = sourceFromDoc ?? SourceDetector.GetSource(destinationType);
 
                 // Format destination dossier ID
+                // For Deposit dosijee, use ecm:docClientType to determine productType (00008/00010)
                 if (!string.IsNullOrWhiteSpace(folder.Name))
                 {
+                    // For deposit dossiers, determine productType from doc.ClientSegment (ecm:docClientType)
+                    // This ensures we use "00008" for PI and "00010" for LE
+                    string? productTypeToUse = folder.ProductType;
+                    if (destinationType == DossierType.Deposit)
+                    {
+                        productTypeToUse = DossierIdFormatter.MapClientSegmentToProductType(doc.ClientSegment);
+                        _fileLogger.LogTrace(
+                            "Deposit dossier: Mapped ClientSegment '{ClientSegment}' → ProductType '{ProductType}'",
+                            doc.ClientSegment, productTypeToUse);
+                    }
+
                     doc.DossierDestFolderId = DossierIdFormatter.ConvertForTargetType(
                         folder.Name,
                         doc.TargetDossierType ?? (int)DossierType.Unknown,
                         folder.ContractNumber,
-                        folder.ProductType,
+                        productTypeToUse,
                         folder.CoreId);
                 }
 

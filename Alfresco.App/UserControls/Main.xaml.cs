@@ -3,6 +3,7 @@ using Alfresco.Contracts.Models;
 using Alfresco.Contracts.Oracle.Models;
 using Alfresco.Contracts.Request;
 using Mapper;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 //using Oracle.Abstraction.Interfaces;
 using SqlServer.Abstraction.Interfaces;
@@ -32,6 +33,22 @@ namespace Alfresco.App.UserControls
                 if (_UnreadErrors != value)
                 {
                     _UnreadErrors = value;
+                    NotifyPropertyChanged();
+                }
+            }
+        }
+        #endregion
+
+        #region -IsKdpProcessingTabVisible- property
+        private bool _IsKdpProcessingTabVisible = false;
+        public bool IsKdpProcessingTabVisible
+        {
+            get { return _IsKdpProcessingTabVisible; }
+            set
+            {
+                if (_IsKdpProcessingTabVisible != value)
+                {
+                    _IsKdpProcessingTabVisible = value;
                     NotifyPropertyChanged();
                 }
             }
@@ -114,6 +131,10 @@ namespace Alfresco.App.UserControls
             _docStagingRepository = App.AppHost.Services.GetRequiredService<IDocStagingRepository>();
             _folderStagingRepository = App.AppHost.Services.GetRequiredService<IFolderStagingRepository>();
             _isLiveLoggerActive = false;
+
+            // Load KDP Processing tab visibility setting
+            var configuration = App.AppHost.Services.GetRequiredService<IConfiguration>();
+            IsKdpProcessingTabVisible = configuration.GetValue<bool>("EnableKdpProcessingTab", false);
 
             // Add LogViewer programmatically to avoid XAML binding thread issues
             // This ensures LogViewer is created and bound on the same UI thread

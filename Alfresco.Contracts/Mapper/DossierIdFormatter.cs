@@ -74,11 +74,47 @@ namespace Alfresco.Contracts.Mapper
 
             return dossierId.Contains("-");
         }
-       
-        public static string CreateDepositDossierId(string coreId, string productType, string contractNumber)
+
+        /// <summary>
+        /// Maps client segment (PI/LE) to product type code (00008/00010)
+        /// Used for deposit dossiers
+        /// </summary>
+        /// <param name="clientSegment">Client segment from ecm:docClientType ("PI", "LE", "FL", "PL")</param>
+        /// <returns>Product type code: "00008" for PI/FL, "00010" for LE/PL</returns>
+        public static string MapClientSegmentToProductType(string? clientSegment)
         {
-            
-            if (string.IsNullOrWhiteSpace(productType)) productType = "000001";
+            if (string.IsNullOrWhiteSpace(clientSegment))
+                return "00008"; // Default to PI
+
+            return clientSegment.ToUpperInvariant() switch
+            {
+                "PI" => "00008",  // Fizička lica - Depozitni proizvodi
+                "FL" => "00008",  // Fizička lica - alternative
+                "LE" => "00010",  // SB - Depozitni proizvodi (Pravna lica)
+                "PL" => "00010",  // Pravna lica - alternative
+                _ => "00008"      // Default to PI
+            };
+        }
+       
+        public static string CreateDepositDossierId(string coreId, string? productType, string? contractNumber, string? folderName = null)
+        {
+            // Determine productType from folderName if not provided
+            // PI/FL folders → 00008 (Fizička lica - Depozitni proizvodi)
+            // LE/PL folders → 00010 (SB - Depozitni proizvodi / Pravna lica)
+            if (string.IsNullOrWhiteSpace(productType) && !string.IsNullOrWhiteSpace(folderName))
+            {
+                var prefix = ExtractPrefix(folderName);
+                productType = prefix.ToUpperInvariant() switch
+                {
+                    "PI" => "00008",  // Fizička lica - Depozitni proizvodi
+                    "FL" => "00008",  // Fizička lica - alternative prefix
+                    "LE" => "00010",  // SB - Depozitni proizvodi (Pravna lica)
+                    "PL" => "00010",  // Pravna lica - alternative prefix
+                    _ => "00008"      // Default to PI if unknown (was 000001 before)
+                };
+            }
+
+            if (string.IsNullOrWhiteSpace(productType)) productType = "00008"; // Default to PI
             if (string.IsNullOrWhiteSpace(contractNumber)) contractNumber = "20250102";
 
             return $"DE-{coreId}-{productType}_{contractNumber}";
@@ -175,13 +211,13 @@ namespace Alfresco.Contracts.Mapper
             };
 
             string toRet = targetDossierType switch
-            {                 
-                700 => CreateDepositDossierId(coreId,productType,contracNumber),   // Deposit dossier
+            {
+                700 => CreateDepositDossierId(coreId, productType, contracNumber, folderName),   // Deposit dossier - pass folderName to determine productType
                 _ => CreateNewDossierId(newPrefix, coreId)//ExtractPrefix(oldDossierId) // Keep original prefix for unknown types
             };
 
 
-            return toRet; 
+            return toRet;
             //return CreateNewDossierId(newPrefix, coreId);
         }
 

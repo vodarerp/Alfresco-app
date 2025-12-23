@@ -48,5 +48,16 @@ namespace CA_MockData
         /// If true, adds custom properties/metadata to folders
         /// </summary>
         public bool AddFolderProperties { get; set; } = false;
+
+        /// <summary>
+        /// If true, generates only KDP documents (docDesc "Specimen card", docType "00099")
+        /// KDP documents will have decreasing docCreatedDate (first has today's date, each subsequent is one day earlier)
+        /// </summary>
+        public bool GenerateOnlyKdpDocuments { get; set; } = false;
+
+        /// <summary>
+        /// Number of KDP documents to generate per folder (used when GenerateOnlyKdpDocuments = true)
+        /// </summary>
+        public int KdpDocumentsPerFolder { get; set; } = 10;
     }
 }
