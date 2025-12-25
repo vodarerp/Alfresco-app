@@ -171,6 +171,7 @@ namespace Migration.Infrastructure.Implementation.Services
                         _fileLogger.LogError(ex,
                             "Failed to create folder: {RootId}/{Path}",
                             folder.DestinationRootId, folder.FolderPath);
+                        _uiLogger.LogWarning("Folder creation error: {Path}", folder.FolderPath);
                         _errors.Add($"{folder.DestinationRootId}/{folder.FolderPath}: {ex.Message}");
 
                         // Track failed result
@@ -220,6 +221,7 @@ namespace Migration.Infrastructure.Implementation.Services
             catch (Exception ex)
             {
                 _fileLogger.LogError(ex, "❌ Fatal error in folder preparation");
+                _uiLogger.LogError("Critical error in folder preparation: {Error}", ex.Message);
                 throw;
             }
         }
@@ -279,6 +281,7 @@ namespace Migration.Infrastructure.Implementation.Services
             catch (Exception ex)
             {
                 _fileLogger.LogError(ex, "Error getting unique folders from DocStaging");
+                _uiLogger.LogError("Database error while getting folders");
                 throw;
             }
         }
@@ -367,6 +370,7 @@ namespace Migration.Infrastructure.Implementation.Services
             catch (Exception ex)
             {
                 _fileLogger.LogError(ex, "Error creating folder: {Path}", folder.FolderPath);
+                _uiLogger.LogWarning("Failed to create folder {Path}", folder.FolderPath);
                 return (null, false, ex.Message);
             }
         }
@@ -412,6 +416,7 @@ namespace Migration.Infrastructure.Implementation.Services
                 _fileLogger.LogError(ex,
                     "Failed to update DestinationFolderId for DossierDestFolderId='{DossierId}'. Folder ID: {FolderId}",
                     dossierDestFolderId, alfrescoFolderId);
+                _uiLogger.LogWarning("Could not update destination folder ID for {DossierId}", dossierDestFolderId);
                 // Don't throw - this is not critical for folder creation
                 // MoveService will fail gracefully if DestinationFolderId is null
             }
@@ -650,6 +655,7 @@ namespace Migration.Infrastructure.Implementation.Services
             {
                 _fileLogger.LogError(ex, "Failed to insert folders into FolderStaging");
                 _dbLogger.LogError(ex, "Failed to insert folders into FolderStaging");
+                _uiLogger.LogWarning("Could not save folder tracking data");
                 // Don't throw - this is not critical, we can continue without FolderStaging tracking
             }
         }
@@ -715,6 +721,7 @@ namespace Migration.Infrastructure.Implementation.Services
             {
                 _fileLogger.LogWarning(ex, "Failed to batch update FolderStaging");
                 _dbLogger.LogError(ex, "Failed to batch update FolderStaging");
+                _uiLogger.LogInformation("Could not update folder status tracking");
                 // Don't throw - this is not critical
             }
         }

@@ -112,6 +112,7 @@ namespace Migration.Infrastructure.Implementation.Services
                         folder.Id, folder.Name, ex.Message);
                     _dbLogger.LogError(ex, "Failed to process folder {FolderId} ({Name})",
                            folder.Id, folder.Name);
+                    _uiLogger.LogError("Folder {Name} processing error: {Error}", folder.Name, ex.Message);
                     errors.Add((folder.Id, ex));
                 }
             });
@@ -669,6 +670,7 @@ namespace Migration.Infrastructure.Implementation.Services
                 _fileLogger.LogError(ex,
                     "Error applying document mapping for document {Name} in folder {FolderName}",
                     alfrescoEntry.Name, folder.Name);
+                _uiLogger.LogWarning("Document {Name} mapping failed, using defaults", alfrescoEntry.Name);
 
                 // Set safe defaults on error
                 doc.DocDescription = null;
@@ -733,6 +735,7 @@ namespace Migration.Infrastructure.Implementation.Services
             {
                 _fileLogger.LogWarning("Failed to reset stuck folders: {Error}", ex.Message);
                 _dbLogger.LogError(ex, "Failed to reset stuck folders");
+                _uiLogger.LogWarning("Could not reset stuck folders");
             }
         }
 
@@ -778,6 +781,7 @@ namespace Migration.Infrastructure.Implementation.Services
             {
                 _fileLogger.LogWarning(ex, "Failed to load checkpoint, starting fresh");
                 _dbLogger.LogError(ex, "Failed to load checkpoint, starting fresh");
+                _uiLogger.LogInformation("Starting fresh document discovery");
                 _totalProcessed = 0;
                 _totalFailed = 0;
                 _batchCounter = 0;
@@ -818,6 +822,7 @@ namespace Migration.Infrastructure.Implementation.Services
             catch (Exception ex)
             {
                 _dbLogger.LogWarning(ex, "Failed to save checkpoint");
+                _uiLogger.LogWarning("Could not save discovery checkpoint");
             }
         }
 
@@ -858,6 +863,7 @@ namespace Migration.Infrastructure.Implementation.Services
             {
                 _fileLogger.LogError("Failed to acquire folders: {Error}", ex.Message);
                 _dbLogger.LogError(ex, "Failed to acquire folders for processing");
+                _uiLogger.LogError("Database error acquiring folders");
 
                 await uow.RollbackAsync(ct).ConfigureAwait(false);
                 throw;
@@ -1019,6 +1025,7 @@ namespace Migration.Infrastructure.Implementation.Services
                     "Failed to insert documents for folder {FolderId}. " +
                     "Attempted to insert {Count} documents. Rolling back transaction.",
                     folderId, docsToInsert.Count);
+                _uiLogger.LogError("Database error inserting documents for folder {FolderId}", folderId);
 
                 await uow.RollbackAsync().ConfigureAwait(false);
                 throw;
@@ -1083,6 +1090,7 @@ namespace Migration.Infrastructure.Implementation.Services
             catch (Exception ex)
             {
                 _dbLogger.LogError(ex, "Failed to mark folders as failed");
+                _uiLogger.LogWarning("Could not update failed folder statuses");
                 await uow.RollbackAsync(ct: ct).ConfigureAwait(false);
             }
         }

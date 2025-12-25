@@ -626,6 +626,7 @@ namespace Migration.Infrastructure.Implementation.Services
             catch (Exception ex)
             {
                 _dbLogger.LogWarning(ex, "Failed to load checkpoint, starting fresh");
+                _uiLogger.LogInformation("Starting fresh folder discovery");
             }
         }
 
@@ -670,6 +671,7 @@ namespace Migration.Infrastructure.Implementation.Services
             catch (Exception ex)
             {
                 _dbLogger.LogWarning(ex, "Failed to save checkpoint");
+                _uiLogger.LogWarning("Could not save discovery checkpoint");
             }
         }
 
@@ -702,6 +704,7 @@ namespace Migration.Infrastructure.Implementation.Services
             {
                 _fileLogger.LogError("Failed to insert {Count} folders: {Error}", folders.Count, ex.Message);
                 _dbLogger.LogError(ex, "Failed to insert {Count} folders", folders.Count);
+                _uiLogger.LogError("Database error inserting folders");
 
                 await uow.RollbackAsync(ct: ct).ConfigureAwait(false);
                 throw;
@@ -770,6 +773,7 @@ namespace Migration.Infrastructure.Implementation.Services
                     _fileLogger.LogWarning(ex,
                         "Failed to enrich folder {Name} with ClientAPI data for CoreId: {CoreId}",
                         entry.Name, coreId);
+                    _uiLogger.LogInformation("Could not enrich folder {Name}", entry.Name);
                     // Continue processing other folders even if one fails
                 }
             }

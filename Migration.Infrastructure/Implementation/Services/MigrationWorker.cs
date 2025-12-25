@@ -31,7 +31,8 @@ namespace Migration.Infrastructure.Implementation.Services
         private readonly IMoveService _moveService;
         private readonly IPhaseCheckpointRepository _phaseCheckpointRepo;
         private readonly ILogger _logger;
-       
+        private readonly ILogger _uiLogger;
+
         private readonly string _connectionString;
         private readonly MigrationOptions _migrationOptions;
 
@@ -53,6 +54,7 @@ namespace Migration.Infrastructure.Implementation.Services
             _moveService = moveService ?? throw new ArgumentNullException(nameof(moveService));
             _phaseCheckpointRepo = phaseCheckpointRepo ?? throw new ArgumentNullException(nameof(phaseCheckpointRepo));
             _logger = logger.CreateLogger("FileLogger");
+            _uiLogger = logger.CreateLogger("UiLogger");
             _connectionString = sqlOptions?.Value?.ConnectionString ?? throw new ArgumentNullException(nameof(sqlOptions));
             _migrationOptions = migrationOptions?.Value ?? throw new ArgumentNullException(nameof(migrationOptions));
         }
@@ -71,6 +73,7 @@ namespace Migration.Infrastructure.Implementation.Services
                     // Validate that DocumentSearchService is available
                     if (_documentSearch == null)
                     {
+                        _uiLogger.LogError("DocumentSearchService not configured");
                         throw new InvalidOperationException(
                             "MigrationByDocument is enabled but IDocumentSearchService is not registered. " +
                             "Please register DocumentSearchService in DI container.");
@@ -133,10 +136,12 @@ namespace Migration.Infrastructure.Implementation.Services
                     ct);
 
                 _logger.LogInformation("Migration pipeline completed successfully!");
+                _uiLogger.LogInformation("Migration completed successfully!");
             }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Migration pipeline failed");
+                _uiLogger.LogError("Migration stopped - critical error: {Error}", ex.Message);
                 throw;
             }
         }
@@ -208,6 +213,7 @@ namespace Migration.Infrastructure.Implementation.Services
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Error getting migration status");
+                _uiLogger.LogError("Cannot get migration status");
                 throw;
             }
         }
@@ -237,6 +243,7 @@ namespace Migration.Infrastructure.Implementation.Services
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Error resetting migration");
+                _uiLogger.LogError("Cannot reset migration");
                 throw;
             }
         }
@@ -268,6 +275,7 @@ namespace Migration.Infrastructure.Implementation.Services
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Error resetting phase {Phase}", phase);
+                _uiLogger.LogError("Cannot reset phase {Phase}", phase);
                 throw;
             }
         }
@@ -353,6 +361,7 @@ namespace Migration.Infrastructure.Implementation.Services
             catch (Exception ex)
             {
                 _logger.LogError(ex, "❌ {PhaseDisplayName} failed", phaseDisplayName);
+                _uiLogger.LogError("{PhaseDisplayName} failed: {Error}", phaseDisplayName, ex.Message);
 
                 // Mark phase as failed
                 try
@@ -376,6 +385,7 @@ namespace Migration.Infrastructure.Implementation.Services
                 catch (Exception checkpointEx)
                 {
                     _logger.LogError(checkpointEx, "Error marking phase as failed");
+                    _uiLogger.LogError("Cannot save phase error status");
                 }
 
                 // Fail-fast: re-throw to stop execution
@@ -411,7 +421,7 @@ namespace Migration.Infrastructure.Implementation.Services
 
                 return result;
             }
-            catch
+            catch (Exception ex)
             {
                 try
                 {
@@ -421,6 +431,17 @@ namespace Migration.Infrastructure.Implementation.Services
                 {
                     // Ignore rollback errors
                 }
+
+                // Log to UI if this is a critical checkpoint operation failure
+                if (ex is TaskCanceledException)
+                {
+                    _uiLogger.LogWarning("Operation cancelled");
+                }
+                else
+                {
+                    _uiLogger.LogError("Database checkpoint error: {Error}", ex.Message);
+                }
+
                 throw;
             }
             // Connection and transaction will be automatically disposed here
@@ -586,6 +607,7 @@ namespace Migration.Infrastructure.Implementation.Services
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Error validating DocDescriptions checkpoint");
+                _uiLogger.LogError("Cannot validate document descriptions");
                 throw;
             }
         }

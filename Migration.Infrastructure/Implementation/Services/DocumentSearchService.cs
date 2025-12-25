@@ -711,6 +711,7 @@ namespace Migration.Infrastructure.Implementation.Services
             catch (Exception ex)
             {
                 _fileLogger.LogError("Failed to insert folders: {Error}", ex.Message);
+                _uiLogger.LogError("Error inserting folders to database");
                 await uow.RollbackAsync(ct: ct).ConfigureAwait(false);
                 throw;
             }
@@ -749,6 +750,8 @@ namespace Migration.Infrastructure.Implementation.Services
                 {
                     _fileLogger.LogWarning("Failed to enrich folder {Name} with ClientAPI: {Error}",
                         folder.Name, ex.Message);
+                    // Non-breaking error - just log as info to UI
+                    _uiLogger.LogInformation("Could not enrich folder {Name} with client data", folder.Name);
                 }
             }
         }
@@ -778,6 +781,7 @@ namespace Migration.Infrastructure.Implementation.Services
             catch (Exception ex)
             {
                 _fileLogger.LogError("Failed to insert documents: {Error}", ex.Message);
+                _uiLogger.LogError("Error inserting documents to database");
                 await uow.RollbackAsync(ct: ct).ConfigureAwait(false);
                 throw;
             }
@@ -952,6 +956,7 @@ namespace Migration.Infrastructure.Implementation.Services
             catch (Exception ex)
             {
                 _fileLogger.LogError(ex, "Error applying document mapping for document {Name}", alfrescoEntry.Name);
+                _uiLogger.LogWarning("Document mapping failed for {Name}, using defaults", alfrescoEntry.Name);
 
                 // Set safe defaults
                 doc.IsActive = false;

@@ -78,6 +78,7 @@ namespace Migration.Infrastructure.Implementation.Services
                 _options.Value.MoveService.BatchSize ?? _options.Value.BatchSize,
                 _options.Value.MoveService.MaxDegreeOfParallelism ?? _options.Value.MaxDegreeOfParallelism);
             _dbLogger.LogInformation("Move batch started");
+            _uiLogger.LogInformation("Processing documents batch...");
 
             var batch = _options.Value.MoveService.BatchSize ?? _options.Value.BatchSize;
             var dop = _options.Value.MoveService.MaxDegreeOfParallelism ?? _options.Value.MaxDegreeOfParallelism;
@@ -129,6 +130,7 @@ namespace Migration.Infrastructure.Implementation.Services
                         {
                             _fileLogger.LogWarning("Migration returned false for document {DocId} ({NodeId})", doc.Id, doc.NodeId);
                             _dbLogger.LogWarning("Migration returned false for document {DocId} ({NodeId})", doc.Id, doc.NodeId);
+                            _uiLogger.LogWarning("Document {DocId} migration failed", doc.Id);
                             errors.Add((doc.Id, new InvalidOperationException("Migration returned false")));
                         }
                     }
@@ -138,6 +140,7 @@ namespace Migration.Infrastructure.Implementation.Services
                         _dbLogger.LogError(ex,
                             "Failed to migrate document {DocId} ({NodeId})",
                             doc.Id, doc.NodeId);
+                        _uiLogger.LogError("Document {DocId} error: {Error}", doc.Id, ex.Message);
                         errors.Add((doc.Id, ex));
                     }
                 });
@@ -329,6 +332,7 @@ namespace Migration.Infrastructure.Implementation.Services
             {
                 _fileLogger.LogWarning("Failed to reset stuck documents: {Error}", ex.Message);
                 _dbLogger.LogError(ex, "Failed to reset stuck documents");
+                _uiLogger.LogWarning("Could not reset stuck items");
             }
         }
 
@@ -378,6 +382,7 @@ namespace Migration.Infrastructure.Implementation.Services
             {
                 _fileLogger.LogWarning("Failed to load checkpoint, starting fresh: {Error}", ex.Message);
                 _dbLogger.LogError(ex, "Failed to load checkpoint, starting fresh");
+                _uiLogger.LogInformation("Starting fresh migration");
                 _totalMoved = 0;
                 _totalFailed = 0;
                 _batchCounter = 0;
@@ -456,6 +461,7 @@ namespace Migration.Infrastructure.Implementation.Services
             {
                 _fileLogger.LogError("Failed to acquire documents: {Error}", ex.Message);
                 _dbLogger.LogError(ex, "Failed to acquire documents for move");
+                _uiLogger.LogError("Database error acquiring documents");
                 await uow.RollbackAsync().ConfigureAwait(false);
                 throw;
             }
@@ -478,6 +484,7 @@ namespace Migration.Infrastructure.Implementation.Services
                 // ========================================
                 if (string.IsNullOrWhiteSpace(doc.DestinationFolderId))
                 {
+                    _uiLogger.LogError("Missing destination folder for document {DocId}", doc.Id);
                     throw new InvalidOperationException(
                         $"DestinationFolderId is NULL for document {doc.Id} (NodeId: {doc.NodeId}). " +
                         $"FolderPreparationService (FAZA 3) must run first and populate this field!");
@@ -507,6 +514,7 @@ namespace Migration.Infrastructure.Implementation.Services
 
                 if (!success)
                 {
+                    _uiLogger.LogWarning("Document {DocId} {Operation} operation failed", doc.Id, useCopy ? "copy" : "move");
                     throw new InvalidOperationException(
                         $"{(useCopy ? "Copy" : "Move")} operation returned false for document {doc.Id} (NodeId: {doc.NodeId})");
                 }
@@ -609,6 +617,7 @@ namespace Migration.Infrastructure.Implementation.Services
                 else
                 {
                     _fileLogger.LogWarning("No properties to update for document {DocId} - skipping property update", doc.Id);
+                    _uiLogger.LogInformation("Document {DocId} has no properties to update", doc.Id);
                 }
 
                 return true;
@@ -618,6 +627,7 @@ namespace Migration.Infrastructure.Implementation.Services
                 _fileLogger.LogError(ex,
                     "Failed to migrate document {DocId} (NodeId: {NodeId})",
                     doc.Id, doc.NodeId);
+                _uiLogger.LogError("Migration failed for document {DocId}: {Error}", doc.Id, ex.Message);
                 throw;
             }
         }
@@ -655,6 +665,7 @@ namespace Migration.Infrastructure.Implementation.Services
             catch (Exception ex)
             {
                 _dbLogger.LogError(ex, "Failed to mark documents as failed");
+                _uiLogger.LogWarning("Could not update failed documents status");
                 await uow.RollbackAsync(ct: ct).ConfigureAwait(false);
             }
         }
@@ -690,6 +701,7 @@ namespace Migration.Infrastructure.Implementation.Services
             catch (Exception ex)
             {
                 _dbLogger.LogError(ex, "Failed to mark documents as succesed");
+                _uiLogger.LogWarning("Could not update successful documents status");
                 await uow.RollbackAsync(ct: ct).ConfigureAwait(false);
             }
         }
@@ -802,6 +814,7 @@ namespace Migration.Infrastructure.Implementation.Services
                 catch (Exception ex)
                 {
                     _dbLogger.LogError(ex, "Error in batch {BatchCounter}", batchCounter);
+                    _uiLogger.LogError("Batch error: {Error}", ex.Message);
 
                     progress.Message = $"Error in batch {batchCounter}: {ex.Message}";
                     progressCallback?.Invoke(progress);
