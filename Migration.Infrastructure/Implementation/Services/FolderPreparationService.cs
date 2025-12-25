@@ -287,8 +287,7 @@ namespace Migration.Infrastructure.Implementation.Services
         {
             try
             {
-                // Use DocumentResolver to create folder hierarchy
-                // DocumentResolver uses lock striping (Problem #3) so it's safe for concurrent calls
+
 
                 await using var scope = _scopeFactory.CreateAsyncScope();
                 var documentResolver = scope.ServiceProvider.GetRequiredService<IDocumentResolver>();

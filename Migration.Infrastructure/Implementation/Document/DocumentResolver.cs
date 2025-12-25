@@ -22,71 +22,44 @@ namespace Migration.Infrastructure.Implementation.Document
 {
     public class DocumentResolver : IDocumentResolver
     {
-        private readonly IDocStagingRepository _doc;
         private readonly IAlfrescoReadApi _read;
         private readonly IAlfrescoWriteApi _write;
-        private readonly IFolderManager _folderManager;
         private readonly IClientApi _clientApi;
         private readonly ILogger _fileLogger;
         private readonly ILogger _dbLogger;
         private readonly FolderNodeTypeMappingConfig _nodeTypeMapping;
 
-        // Thread-safe cache: Key = "parentId_folderName", Value = (folder ID, isCreated flag)
-        // Example: "abc-123_DOSSIERS-LE" -> ("def-456-ghi-789", true)
-        // isCreated = true means folder was created during migration, false means it already existed
+       
         private readonly ConcurrentDictionary<string, (string FolderId, bool IsCreated)> _folderCache = new();
 
-        // Lock striping: Fixed 1024 locks instead of unlimited SemaphoreSlim instances
-        // Prevents memory leak: 100 MB (1M locks) → 200 KB (1024 locks) = 99.8% reduction
+       
         private readonly LockStriping _lockStriping = new(1024);
 
-        public DocumentResolver(
-            IDocStagingRepository doc,
+        public DocumentResolver(           
             IAlfrescoReadApi read,
-            IAlfrescoWriteApi write,
-            IFolderManager folderManager,
+            IAlfrescoWriteApi write,            
             IClientApi clientApi,
             IServiceProvider serviceProvider,
             IOptions<FolderNodeTypeMappingConfig> nodeTypeMapping)
-        {
-            _doc = doc;
+        {           
             _read = read;
-            _write = write;
-            _folderManager = folderManager ?? throw new ArgumentNullException(nameof(folderManager));
+            _write = write;           
             _clientApi = clientApi ?? throw new ArgumentNullException(nameof(clientApi));
-
             var loggerFactory = serviceProvider.GetRequiredService<ILoggerFactory>();
             _fileLogger = loggerFactory.CreateLogger("FileLogger");
             _dbLogger = loggerFactory.CreateLogger("DbLogger");
             _nodeTypeMapping = nodeTypeMapping?.Value ?? new FolderNodeTypeMappingConfig();
         }       
-        public async Task<string> ResolveAsync(string destinationRootId, string newFolderName, CancellationToken ct)
-        {
-            return await ResolveAsync(destinationRootId, newFolderName, null, null, true, ct).ConfigureAwait(false);
-        }
+       
        
         public async Task<string> ResolveAsync(string destinationRootId, string newFolderName, Dictionary<string, object>? properties, CancellationToken ct)
         {
             return await ResolveAsync(destinationRootId, newFolderName, properties, null, true, ct).ConfigureAwait(false);
         }
         
-        public async Task<string> ResolveAsync(
-            string destinationRootId,
-            string newFolderName,
-            Dictionary<string, object>? properties,
-            bool createIfMissing,
-            CancellationToken ct)
-        {
-            return await ResolveAsync(destinationRootId, newFolderName, properties, null, createIfMissing, ct).ConfigureAwait(false);
-        }
        
-        public async Task<string> ResolveAsync(
-            string destinationRootId,
-            string newFolderName,
-            Dictionary<string, object>? properties,
-            string? customNodeType,
-            bool createIfMissing,
-            CancellationToken ct)
+       
+        public async Task<string> ResolveAsync(string destinationRootId,string newFolderName,Dictionary<string, object>? properties,string? customNodeType,bool createIfMissing,CancellationToken ct)
         {
             // ========================================
             // Step 1: Check cache first (fast path - no locking)
@@ -146,7 +119,7 @@ namespace Migration.Infrastructure.Implementation.Document
 
                 var clientDataProps = await CallClientApiForFolderAsync(newFolderName, ct).ConfigureAwait(false);
 
-                var cliProps = BuildPropertiesClientData(clientDataProps);
+                var cliProps = BuildPropertiesClientData(clientDataProps, newFolderName);
 
                 foreach (var prop in cliProps)
                 {
@@ -160,7 +133,7 @@ namespace Migration.Infrastructure.Implementation.Document
                     {
                         properties[prop.Key] = prop.Value;
                     }
-                    else 
+                    else
                     {
                         properties.Add(prop.Key, prop.Value);
                     }
@@ -252,14 +225,7 @@ namespace Migration.Infrastructure.Implementation.Document
             }
         }
 
-        /// <summary>
-        /// Calls ClientAPI to retrieve client data for folder enrichment.
-        /// Extracts CoreID from folder name and calls GetClientDataAsync.
-        /// </summary>
-        /// <param name="folderName">Folder name (e.g., "PI-102206", "ACC-13001926")</param>
-        /// <param name="ct">Cancellation token</param>
-        /// 
-
+        
         private async Task<ClientData> CallClientApiForFolderAsync(string folderName, CancellationToken ct)
         {
             ClientData toRet = new();
@@ -308,67 +274,9 @@ namespace Migration.Infrastructure.Implementation.Document
             return toRet;
         }
 
-        /// <summary>
-        /// Resolves folder with UniqueFolderInfo context for property enrichment
-        /// </summary>
-        public async Task<string> ResolveAsync(
-            string destinationRootId,
-            string newFolderName,
-            Dictionary<string, object>? properties,
-            UniqueFolderInfo? folderInfo,
-            CancellationToken ct)
-        {
-            // Determine nodeType based on folder info
-            string? customNodeType = null;
+                
 
-            if (folderInfo != null && folderInfo.TargetDossierType.HasValue)
-            {
-                // Get custom nodeType from configuration based on DossierType
-                customNodeType = _nodeTypeMapping.GetNodeType(folderInfo.TargetDossierType.Value);
-
-                _fileLogger.LogDebug(
-                    "Determined nodeType '{NodeType}' for DossierType {DossierType} (folder: {FolderName})",
-                    customNodeType, folderInfo.TargetDossierType.Value, newFolderName);
-            }
-
-            // Enrich properties with deposit-specific data if folderInfo is provided
-            if (folderInfo != null && folderInfo.TargetDossierType == 700) // 700 = Deposit dossier
-            {
-                properties = properties ?? new Dictionary<string, object>();
-
-                // Add ecm:bnkTypeOfProduct from TipProizvoda
-                if (!string.IsNullOrEmpty(folderInfo.TipProizvoda))
-                {
-                    properties["ecm:bnkTypeOfProduct"] = folderInfo.TipProizvoda;
-                }
-
-                // Add ecm:CoreId
-                if (!string.IsNullOrEmpty(folderInfo.CoreId))
-                {
-                    properties["ecm:coreId"] = folderInfo.CoreId;
-                }
-
-                // Add ecm:bnkNumberOfControcat formatted as YYYYMMDD
-                if (folderInfo.CreationDate.HasValue)
-                {
-                    var contractNumber = folderInfo.CreationDate.Value.ToString("yyyyMMdd");
-                    properties["ecm:bnkNumberOfContract"] = contractNumber;
-                }
-            }
-
-            // Call the standard ResolveAsync with enriched properties and custom nodeType
-            return await ResolveAsync(destinationRootId, newFolderName, properties, customNodeType, true, ct).ConfigureAwait(false);
-        }
-
-        /// <summary>
-        /// Resolves folder and returns both FolderId and IsCreated status
-        /// </summary>
-        public async Task<(string FolderId, bool IsCreated)> ResolveWithStatusAsync(
-            string destinationRootId,
-            string newFolderName,
-            Dictionary<string, object>? properties,
-            UniqueFolderInfo? folderInfo,
-            CancellationToken ct)
+        public async Task<(string FolderId, bool IsCreated)> ResolveWithStatusAsync(string destinationRootId,string newFolderName,Dictionary<string, object>? properties,UniqueFolderInfo? folderInfo,CancellationToken ct)
         {
             // Check cache first
             var cacheKey = $"{destinationRootId}_{newFolderName}";
@@ -379,9 +287,26 @@ namespace Migration.Infrastructure.Implementation.Document
                     newFolderName, cachedValue.FolderId, cachedValue.IsCreated);
                 return cachedValue;
             }
-            string customNodeType = _nodeTypeMapping.GetNodeType(folderInfo.TargetDossierType.Value);
 
-            // Call standard resolve (which will populate cache)
+            // Determine custom node type if folderInfo is provided
+            // This is CRITICAL - customNodeType determines which Alfresco content model type is used
+            // and which properties are available on the folder
+            string? customNodeType = null;
+            if (folderInfo?.TargetDossierType.HasValue == true)
+            {
+                customNodeType = _nodeTypeMapping.GetNodeType(folderInfo.TargetDossierType.Value);
+                _fileLogger.LogDebug(
+                    "ResolveWithStatus: Determined customNodeType '{NodeType}' for DossierType {DossierType}",
+                    customNodeType, folderInfo.TargetDossierType.Value);
+            }
+
+            // Enrich properties with ECM standard properties if folderInfo is provided
+            if (folderInfo != null)
+            {
+                properties = EnrichPropertiesWithEcmData(properties, newFolderName, folderInfo);
+            }
+
+            // Call standard resolve with customNodeType (CRITICAL for Alfresco content model)
             var folderId = await ResolveAsync(destinationRootId, newFolderName, properties, customNodeType, true, ct).ConfigureAwait(false);
 
             // Retrieve from cache (should always hit now)
@@ -395,10 +320,75 @@ namespace Migration.Infrastructure.Implementation.Document
             return (folderId, false);
         }
 
-        private Dictionary<string, object> BuildPropertiesClientData(ClientData clientData)
+
+        private Dictionary<string, object> EnrichPropertiesWithEcmData(Dictionary<string, object>? properties,string folderName,UniqueFolderInfo folderInfo)
+        {
+            properties = properties ?? new Dictionary<string, object>();
+
+            // Extract CoreId from folder name
+            var coreId = DossierIdFormatter.ExtractCoreId(folderName) ?? string.Empty;
+
+            // Get bnkDossierType string (PI, LE, ACC, D)
+            var bnkDossierType = MapDossierTypeToString(folderInfo.TargetDossierType);
+
+            // Add ecm:bnkDossierType (PI, LE, ACC, D)
+            if (!string.IsNullOrEmpty(bnkDossierType))
+            {
+                properties["ecm:bnkDossierType"] = bnkDossierType;
+            }
+
+            // Add ecm:bnkSourceId = {bnkDossierType}-{bnkClientId}
+            if (!string.IsNullOrEmpty(folderName))
+            {
+                properties["ecm:bnkSourceId"] = folderName;
+                properties["ecm:naziv"] = folderName;
+            }
+
+            if (!string.IsNullOrEmpty(folderInfo.CoreId))
+            {
+                properties["ecm:coreId"] = folderInfo.CoreId;
+                properties["ecm:bnkClientId"] = folderInfo.CoreId;
+            }
+            // Add deposit-specific properties if this is a deposit dossier (700)
+            if (folderInfo.TargetDossierType == 700)
+            {
+                // Add ecm:bnkTypeOfProduct from TipProizvoda
+                if (!string.IsNullOrEmpty(folderInfo.TipProizvoda))
+                {
+                    properties["ecm:bnkTypeOfProduct"] = folderInfo.TipProizvoda;
+                }
+
+                // Add ecm:CoreId
+
+                // Add ecm:bnkNumberOfContract formatted as YYYYMMDD
+                if (folderInfo.CreationDate.HasValue)
+                {
+                    var contractNumber = folderInfo.CreationDate.Value.ToString("yyyyMMdd");
+                    properties["ecm:bnkNumberOfContract"] = contractNumber;
+                }
+            }
+
+            _fileLogger.LogDebug(
+                "Enriched properties for dossier '{FolderName}': bnkDossierType={DossierType}, bnkSourceId={SourceId}",
+                folderName, bnkDossierType, $"{bnkDossierType}-{coreId}");
+
+            return properties;
+        }
+
+        private Dictionary<string, object> BuildPropertiesClientData(ClientData clientData, string folderName)
         {
             Dictionary<string,object> properties = new Dictionary<string,object>();
 
+            // Extract CoreId from folder name (e.g., "PI-102206" → "102206")
+            //var coreId = DossierIdFormatter.ExtractCoreId(folderName) ?? string.Empty;
+
+            // Standard ECM properties for all dossiers
+            //properties.Add("ecm:bnkClientId", coreId);
+            properties.Add("ecm:bnkStatus", "ACTIVE");
+            properties.Add("ecm:typeId", "dosije");
+            properties.Add("ecm:bnkSource", "Heimdall");
+
+            // ClientAPI enriched properties
             properties.Add("ecm:bnkClientType", clientData.Segment ?? string.Empty);
             properties.Add("ecm:bnkClientSubtype", clientData.ClientSubtype ?? string.Empty);
             properties.Add("ecm:bnkOfficeId", clientData.BarCLEXOpu ?? string.Empty);
@@ -407,10 +397,20 @@ namespace Migration.Infrastructure.Implementation.Document
             properties.Add("ecm:bnkBarclex", $"{clientData.BarCLEXGroupCode ?? string.Empty} {clientData.BarCLEXGroupName ?? string.Empty} ");
             properties.Add("ecm:bnkContributor", $"{clientData.BarCLEXCode ?? string.Empty} {clientData.BarCLEXName ?? string.Empty} ");
 
-
-
-
             return properties;
+        }
+
+       
+        private string MapDossierTypeToString(int? targetDossierType)
+        {
+            return targetDossierType switch
+            {
+                300 => "ACC",   // AccountPackage
+                400 => "LE",    // ClientPL (Legal Entity)
+                500 => "PI",    // ClientFL (Physical Individual)
+                700 => "D",     // Deposit
+                _ => string.Empty
+            };
         }
 
     }
