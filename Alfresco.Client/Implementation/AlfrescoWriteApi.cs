@@ -175,8 +175,8 @@ namespace Alfresco.Client.Implementation
             // Build body with optional properties
             dynamic body = new System.Dynamic.ExpandoObject();
             body.name = newFolderName;
-            body.nodeType = "cm:folder";  // Use custom nodeType if provided, otherwise default to cm:folder
-            //body.nodeType = customNodeType ?? "cm:folder";  // Use custom nodeType if provided, otherwise default to cm:folder
+            //body.nodeType = "cm:folder";  // Use custom nodeType if provided, otherwise default to cm:folder
+            body.nodeType = customNodeType ?? "cm:folder";  // Use custom nodeType if provided, otherwise default to cm:folder
 
             // Add custom properties if provided
             if (properties != null && properties.Count > 0)

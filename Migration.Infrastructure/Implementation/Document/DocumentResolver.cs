@@ -410,7 +410,7 @@ namespace Migration.Infrastructure.Implementation.Document
 
             // ClientAPI enriched properties
             properties.Add("ecm:bnkMTBR", clientData.MbrJmbg ?? string.Empty);
-            properties.Add("ecm:ClientName", clientData.ClientName ?? string.Empty);
+            properties.Add("ecm:bnkClientName", clientData.ClientName ?? string.Empty);
             properties.Add("ecm:bnkResidence", clientData.Residency ?? string.Empty);
 
             properties.Add("ecm:bnkClientType", clientData.Segment ?? string.Empty);

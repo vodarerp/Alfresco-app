@@ -212,7 +212,13 @@ namespace Alfresco.App.UserControls
                 var migrationByDocument = configuration.GetSection("Migration:MigrationByDocument").Value;
                 MigrationModeTextBox.Text = migrationByDocument?.ToLower() == "true" ? "By Document" : "By Folder";
 
-               
+                // Load MaxDocumentsToProcess
+                var maxDocumentsToProcess = configuration.GetSection("Migration:MaxDocumentsToProcess").Value;
+                MaxDocumentsToProcessTextBox.Text = maxDocumentsToProcess ?? "0";
+
+                // Load UseCopy from MoveService section
+                var useCopy = configuration.GetSection("Migration:MoveService:UseCopy").Value;
+                UseCopyCheckBox.IsChecked = useCopy?.ToLower() == "true";
 
                 StatusTextBlock.Text = "Configuration loaded successfully.";
                 StatusTextBlock.Foreground = System.Windows.Media.Brushes.Green;
@@ -500,6 +506,21 @@ namespace Alfresco.App.UserControls
 
             var isMigrationByDocument = migration["MigrationByDocument"]!.Value<bool>;
             //var migrationByDocument = migration["DocumentTypeDiscovery"] as Newtonsoft.Json.Linq.JObject;
+
+            // Update MaxDocumentsToProcess
+            if (int.TryParse(MaxDocumentsToProcessTextBox.Text, out int maxDocs))
+            {
+                migration["MaxDocumentsToProcess"] = maxDocs;
+            }
+
+            // Update UseCopy in MoveService section
+            var moveService = migration["MoveService"] as Newtonsoft.Json.Linq.JObject;
+            if (moveService == null)
+            {
+                moveService = new Newtonsoft.Json.Linq.JObject();
+                migration["MoveService"] = moveService;
+            }
+            moveService["UseCopy"] = UseCopyCheckBox.IsChecked ?? false;
 
             if (_isMigrationByDocument)
             {

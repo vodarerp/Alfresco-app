@@ -117,6 +117,8 @@
                             <RowDefinition Height="Auto"/>
                             <RowDefinition Height="Auto"/>
                             <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
                         </Grid.RowDefinitions>
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="200"/>
@@ -149,6 +151,14 @@
                         <TextBlock Grid.Row="5" Grid.Column="0" Text="Date To:" VerticalAlignment="Center" Margin="0,5"/>
                         <DatePicker Grid.Row="5" Grid.Column="1" Name="DateToPicker" Margin="5" Padding="5"
                                     ToolTip="Datum do (ako je Date Filter uključen)"/>
+
+                        <TextBlock Grid.Row="6" Grid.Column="0" Text="Max Documents to Process:" VerticalAlignment="Center" Margin="0,5"/>
+                        <TextBox Grid.Row="6" Grid.Column="1" Name="MaxDocumentsToProcessTextBox" Margin="5" Padding="5"
+                                 ToolTip="Maksimalan broj dokumenata za obradu (0 = unlimited)"/>
+
+                        <TextBlock Grid.Row="7" Grid.Column="0" Text="Use Copy:" VerticalAlignment="Center" Margin="0,5"/>
+                        <CheckBox Grid.Row="7" Grid.Column="1" Name="UseCopyCheckBox" Margin="5" VerticalAlignment="Center"
+                                  ToolTip="Koristi copy umesto move operacije"/>
                     </Grid>
                 </GroupBox>
 
