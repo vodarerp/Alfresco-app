@@ -37,5 +37,13 @@ namespace Migration.Abstraction.Interfaces
         /// <param name="ct">Cancellation token</param>
         /// <returns>True if client exists, false otherwise</returns>
         Task<bool> ValidateClientExistsAsync(string coreId, CancellationToken ct = default);
+
+        /// <summary>
+        /// Retrieves client detail information including name, resident indicator, and client ID.
+        /// </summary>
+        /// <param name="coreId">The client's Core ID</param>
+        /// <param name="ct">Cancellation token</param>
+        /// <returns>Client detail response with name, resident indicator, and client ID</returns>
+        Task<ClientDetailResponse> GetClientDetailAsync(string coreId, CancellationToken ct = default);
     }
 }

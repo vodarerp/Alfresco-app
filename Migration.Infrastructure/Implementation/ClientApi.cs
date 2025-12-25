@@ -285,6 +285,92 @@ namespace Migration.Infrastructure.Implementation
             }
         }
 
+        public async Task<ClientDetailResponse> GetClientDetailAsync(string coreId, CancellationToken ct = default)
+        {
+            if (string.IsNullOrWhiteSpace(coreId))
+            {
+                _fileLogger.LogWarning("GetClientDetailAsync called with null or empty CoreId, returning empty ClientDetailResponse");
+                return CreateEmptyClientDetailResponse();
+            }
+
+            // Check cache first
+            var cacheKey = $"{CacheKeyPrefix}ClientDetail_{coreId}";
+            if (_cache.TryGetValue(cacheKey, out ClientDetailResponse? cachedDetail) && cachedDetail != null)
+            {
+                _fileLogger.LogDebug("Cache HIT for client detail CoreId: {CoreId}", coreId);
+                return cachedDetail;
+            }
+
+            _fileLogger.LogDebug("Cache MISS for client detail CoreId: {CoreId}, fetching from API", coreId);
+
+            try
+            {
+                _fileLogger.LogDebug("Fetching client detail for CoreId: {CoreId}", coreId);
+
+                var endpoint = $"{_options.GetClientDetailEndpoint}/{coreId}";
+
+                var response = await _httpClient.GetAsync(endpoint, ct).ConfigureAwait(false);
+                response.EnsureSuccessStatusCode();
+
+                var clientDetailDto = await response.Content.ReadFromJsonAsync<ClientDetailDto>(cancellationToken: ct)
+                    .ConfigureAwait(false);
+
+                if (clientDetailDto == null)
+                {
+                    _fileLogger.LogWarning("Client API returned null data for CoreId: {CoreId}, returning empty ClientDetailResponse", coreId);
+                    return CreateEmptyClientDetailResponse();
+                }
+
+                // Map to ClientDetailResponse
+                var clientDetailResponse = new ClientDetailResponse
+                {
+                    Name = clientDetailDto.Name ?? string.Empty,
+                    ClientGeneral = new ClientGeneralInfo
+                    {
+                        ResidentIndicator = clientDetailDto.ClientGeneral?.ResidentIndicator ?? string.Empty,
+                        ClientID = clientDetailDto.ClientGeneral?.ClientID ?? string.Empty
+                    }
+                };
+
+                _fileLogger.LogInformation(
+                    "Successfully retrieved client detail for CoreId: {CoreId}, Name: {Name}, ClientID: {ClientID}, ResidentIndicator: {ResidentIndicator}",
+                    coreId, clientDetailResponse.Name, clientDetailResponse.ClientGeneral.ClientID, clientDetailResponse.ClientGeneral.ResidentIndicator);
+
+                // Cache the result
+                _cache.Set(cacheKey, clientDetailResponse, CacheDuration);
+                _fileLogger.LogDebug("Cached client detail for CoreId: {CoreId} with TTL: {Duration}", coreId, CacheDuration);
+
+                return clientDetailResponse;
+            }
+            catch (HttpRequestException ex)
+            {
+                _fileLogger.LogError("HTTP request failed while fetching client detail for CoreId: {CoreId}. Returning empty ClientDetailResponse.",
+                    coreId);
+                _dbLogger.LogError(ex,
+                    "HTTP request failed while fetching client detail for CoreId: {CoreId}",
+                    coreId);
+                return CreateEmptyClientDetailResponse();
+            }
+            catch (TaskCanceledException ex)
+            {
+                _fileLogger.LogError("Request timeout while fetching client detail for CoreId: {CoreId}. Returning empty ClientDetailResponse.",
+                    coreId);
+                _dbLogger.LogError(ex,
+                    "Request timeout while fetching client detail for CoreId: {CoreId}",
+                    coreId);
+                return CreateEmptyClientDetailResponse();
+            }
+            catch (Exception ex)
+            {
+                _fileLogger.LogError("Unexpected error while fetching client detail for CoreId: {CoreId}. Returning empty ClientDetailResponse.",
+                    coreId);
+                _dbLogger.LogError(ex,
+                    "Unexpected error while fetching client detail for CoreId: {CoreId}",
+                    coreId);
+                return CreateEmptyClientDetailResponse();
+            }
+        }
+
         #region Helper Methods
 
         /// <summary>
@@ -311,6 +397,22 @@ namespace Migration.Infrastructure.Implementation
                 BarCLEXGroupName = null,
                 BarCLEXGroupCode = null,
                 BarCLEXCode = null
+            };
+        }
+
+        /// <summary>
+        /// Creates an empty ClientDetailResponse object when ClientAPI fails or returns no data
+        /// </summary>
+        private ClientDetailResponse CreateEmptyClientDetailResponse()
+        {
+            return new ClientDetailResponse
+            {
+                Name = string.Empty,
+                ClientGeneral = new ClientGeneralInfo
+                {
+                    ResidentIndicator = string.Empty,
+                    ClientID = string.Empty
+                }
             };
         }
 
@@ -468,6 +570,38 @@ namespace Migration.Infrastructure.Implementation
             
         }
 
+        /// <summary>
+        /// DTO matching GetClientDetail response
+        /// </summary>
+        private class ClientDetailDto
+        {
+            /// <summary>
+            /// Client name
+            /// </summary>
+            public string Name { get; set; } = string.Empty;
+
+            /// <summary>
+            /// Client general information
+            /// </summary>
+            public ClientGeneralDto ClientGeneral { get; set; } = new();
+        }
+
+        /// <summary>
+        /// DTO for ClientGeneral nested object
+        /// </summary>
+        private class ClientGeneralDto
+        {
+            /// <summary>
+            /// Resident indicator
+            /// </summary>
+            public string ResidentIndicator { get; set; } = string.Empty;
+
+            /// <summary>
+            /// Client ID (MTBR)
+            /// </summary>
+            public string ClientID { get; set; } = string.Empty;
+        }
+
         #endregion
     }
 
@@ -493,6 +627,11 @@ namespace Migration.Infrastructure.Implementation
         /// Endpoint for getting active accounts (default: "/api/Client")
         /// </summary>
         public string GetActiveAccountsEndpoint { get; set; } = "/api/Client";
+
+        /// <summary>
+        /// Endpoint for getting client detail (default: "/api/Client/GetClientDetail")
+        /// </summary>
+        public string GetClientDetailEndpoint { get; set; } = "/api/Client/GetClientDetail";
 
         /// <summary>
         /// Endpoint for validating client exists (default: "/api/Client/GetClientDetail")

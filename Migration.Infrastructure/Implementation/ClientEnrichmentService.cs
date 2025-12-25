@@ -105,8 +105,12 @@ namespace Migration.Infrastructure.Implementation
                         var clientData = await _clientApi.GetClientDataAsync(folder.CoreId, ct)
                             .ConfigureAwait(false);
 
+                        // Get additional client detail data
+                        var clientDetail = await _clientApi.GetClientDetailAsync(folder.CoreId, ct)
+                            .ConfigureAwait(false);
+
                         // Build properties for new folder combining old folder properties and ClientAPI data
-                        var newFolderProperties = BuildNewFolderProperties(oldFolder.Entry.Properties, clientData, folder);
+                        var newFolderProperties = BuildNewFolderProperties(oldFolder.Entry.Properties, clientData, clientDetail, folder);
 
                         // Create new folder with properties
                         var newFolderId = await _alfrescoWriteApi.CreateFolderAsync(
@@ -319,6 +323,7 @@ namespace Migration.Infrastructure.Implementation
         private Dictionary<string, object> BuildNewFolderProperties(
             Dictionary<string, object> oldFolderProperties,
             ClientData clientData,
+            ClientDetailResponse clientDetail,
             FolderStaging folder)
         {
             var properties = new Dictionary<string, object>();
@@ -340,6 +345,9 @@ namespace Migration.Infrastructure.Implementation
 
             // ecm:clientName - Client API "bnkClientName"
             properties["ecm:clientName"] = clientData.ClientName ?? GetOldProperty("ecm:clientName") ?? string.Empty;
+
+            // ecm:ClientName - from GetClientDetail API (name)
+            properties["ecm:ClientName"] = clientDetail.Name ?? GetOldProperty("ecm:ClientName") ?? string.Empty;
 
             // ecm:bnkClientType - Client API "segment"
             properties["ecm:bnkClientType"] = clientData.Segment ?? GetOldProperty("ecm:bnkClientType") ?? string.Empty;
@@ -405,7 +413,10 @@ namespace Migration.Infrastructure.Implementation
 
             // ecm:residency / ecm:bnkResidence - Client API
             //properties["ecm:residency"] = clientData.Residency ?? GetOldProperty("ecm:residency") ?? string.Empty;
-            properties["ecm:bnkResidence"] = clientData.Residency ?? GetOldProperty("ecm:bnkResidence") ?? string.Empty;
+            properties["ecm:bnkResidence"] = clientDetail.ClientGeneral?.ResidentIndicator ?? clientData.Residency ?? GetOldProperty("ecm:bnkResidence") ?? string.Empty;
+
+            // ecm:bnkMTBR - from GetClientDetail API (clientGeneral.clientID)
+            properties["ecm:bnkMTBR"] = clientDetail.ClientGeneral?.ClientID ?? GetOldProperty("ecm:bnkMTBR") ?? string.Empty;
 
             // ecm:bnkSource - from folder
             properties["ecm:bnkSource"] = folder.Source ?? GetOldProperty("ecm:bnkSource") ?? string.Empty;

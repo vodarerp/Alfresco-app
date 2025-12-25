@@ -248,6 +248,23 @@ namespace Migration.Infrastructure.Implementation.Document
                 // Call ClientAPI to retrieve client data
                 toRet = await _clientApi.GetClientDataAsync(coreId, ct).ConfigureAwait(false);
 
+                var resCliDeteail = await _clientApi.GetClientDetailAsync(coreId, ct).ConfigureAwait(false);
+
+               
+
+                if (resCliDeteail != null)
+                {
+                    if (toRet == null) toRet = new();
+
+                    toRet.Residency = resCliDeteail.ClientGeneral.ResidentIndicator ?? "";
+                    toRet.ClientName = resCliDeteail.Name ?? "";
+                    toRet.MbrJmbg = resCliDeteail.ClientGeneral.ClientID ?? "";
+
+                    _fileLogger.LogInformation(
+                        "ClientAPI returned data for CoreID '{CoreId}': ClientName='{ClientName}', ClientType='{ClientType}'",
+                        coreId, toRet.ClientName, toRet.ClientType);
+                }
+
                 if (toRet != null)
                 {
                     _fileLogger.LogInformation(
@@ -388,12 +405,18 @@ namespace Migration.Infrastructure.Implementation.Document
             properties.Add("ecm:typeId", "dosije");
             properties.Add("ecm:bnkSource", "Heimdall");
 
+            
+
+
             // ClientAPI enriched properties
+            properties.Add("ecm:bnkMTBR", clientData.MbrJmbg ?? string.Empty);
+            properties.Add("ecm:ClientName", clientData.ClientName ?? string.Empty);
+            properties.Add("ecm:bnkResidence", clientData.Residency ?? string.Empty);
+
             properties.Add("ecm:bnkClientType", clientData.Segment ?? string.Empty);
             properties.Add("ecm:bnkClientSubtype", clientData.ClientSubtype ?? string.Empty);
             properties.Add("ecm:bnkOfficeId", clientData.BarCLEXOpu ?? string.Empty);
             properties.Add("ecm:bnkStaff", clientData.Staff ?? string.Empty);
-            properties.Add("ecm:bnkResidence", clientData.ClientName ?? string.Empty);
             properties.Add("ecm:bnkBarclex", $"{clientData.BarCLEXGroupCode ?? string.Empty} {clientData.BarCLEXGroupName ?? string.Empty} ");
             properties.Add("ecm:bnkContributor", $"{clientData.BarCLEXCode ?? string.Empty} {clientData.BarCLEXName ?? string.Empty} ");
 
