@@ -136,11 +136,24 @@ namespace Migration.Infrastructure.Implementation.Services
 
             if (currentType == "D") currentType = "DE";
             var regex = new Regex($"^{Regex.Escape(currentType)}[0-9]", RegexOptions.IgnoreCase);
+            var docDescHashSet = new HashSet<string>(docDescriptions, StringComparer.OrdinalIgnoreCase);
             var finalDocuments = searchResult.Documents.Where(o =>
-                                                        {
+                                                        {                                                           
                                                             var lastParentName = o.Entry.Path?.Elements?.LastOrDefault()?.Name;
                                                             return lastParentName != null && regex.IsMatch(lastParentName);
+                                                        }).Where(o =>
+                                                        {
+                                                            var docDesc = o.Entry.Properties?.GetValueOrDefault("ecm:docDesc")?.ToString();
+                                                            return docDesc != null && docDescHashSet.Contains(docDesc);
+
                                                         }).ToList();
+
+            //finalDocuments = finalDocuments.Where(o =>
+            //{
+            //    var docDesc = o.Entry.Properties?.GetValueOrDefault("ecm:docDesc")?.ToString();
+            //    return docDesc != null && docDescriptions.Contains(docDesc, StringComparer.OrdinalIgnoreCase);
+
+            //}).ToList();
 
 
 
@@ -245,6 +258,7 @@ namespace Migration.Infrastructure.Implementation.Services
                 var docStaging = doc.Entry.ToDocStagingInsert();
                 docStaging.Status = MigrationStatus.Ready.ToDbString();
                 docStaging.ToPath = string.Empty;
+                
 
                 await ApplyDocumentMappingAsync(docStaging, folder, doc.Entry, ct).ConfigureAwait(false);
 
