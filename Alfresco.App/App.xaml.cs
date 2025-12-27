@@ -11,6 +11,7 @@ using Alfresco.Contracts.Options;
 using Alfresco.Contracts.Oracle;
 using Alfresco.Contracts.SqlServer;
 using Dapper;
+using log4net.Core;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
@@ -130,10 +131,15 @@ namespace Alfresco.App
                         .SetHandlerLifetime(TimeSpan.FromMinutes(10))
                         .AddPolicyHandler((sp, req) =>
                         {
-                            var logger = sp.GetRequiredService<ILogger<AlfrescoReadApi>>();
+                            //var logger = sp.GetRequiredService<ILogger<AlfrescoReadApi>>();
+                            var logger = sp.GetRequiredService<ILoggerFactory>();
+                            var _dbLogger = logger.CreateLogger("DbLogger");
+                            var _fileLogger = logger.CreateLogger("FileLogger");
+                            var _uiLogger = logger.CreateLogger("UiLogger");
+
                             var pollyOptions = sp.GetRequiredService<IOptions<PollyPolicyOptions>>().Value;
                             // Combined policy: Timeout → Retry → Circuit Breaker → Bulkhead
-                            return PolicyHelpers.GetCombinedReadPolicy(pollyOptions.ReadOperations, logger);
+                            return PolicyHelpers.GetCombinedReadPolicy(pollyOptions.ReadOperations, _fileLogger, _dbLogger, _uiLogger);
                         });
                     //.AddPolicyHandler(GetRetryPlicy())
                     //.AddPolicyHandler(GetCircuitBreakerPolicy());
@@ -164,11 +170,15 @@ namespace Alfresco.App
                         .SetHandlerLifetime(TimeSpan.FromMinutes(10))
                         .AddPolicyHandler((sp, req) =>
                         {
-                            var logger = sp.GetRequiredService<ILogger<AlfrescoReadApi>>();
+                            //var logger = sp.GetRequiredService<ILogger<AlfrescoReadApi>>();
+                            var logger = sp.GetRequiredService<ILoggerFactory>();
+                            var _dbLogger = logger.CreateLogger("DbLogger");
+                            var _fileLogger = logger.CreateLogger("FileLogger");
+                            var _uiLogger = logger.CreateLogger("UiLogger");
                             var pollyOptions = sp.GetRequiredService<IOptions<PollyPolicyOptions>>().Value;
 
                             // Combined policy: Timeout → Retry → Circuit Breaker → Bulkhead
-                            return PolicyHelpers.GetCombinedWritePolicy(pollyOptions.WriteOperations, logger);
+                            return PolicyHelpers.GetCombinedWritePolicy(pollyOptions.WriteOperations, _fileLogger, _dbLogger, _uiLogger);
                         });
                         //.AddPolicyHandler(GetRetryPlicy())
                         //.AddPolicyHandler(GetCircuitBreakerPolicy());
@@ -219,11 +229,16 @@ namespace Alfresco.App
                         .SetHandlerLifetime(TimeSpan.FromMinutes(5))
                         .AddPolicyHandler((sp, req) =>
                         {
-                            var logger = sp.GetRequiredService<ILogger<Migration.Infrastructure.Implementation.ClientApi>>();
+                            //var logger = sp.GetRequiredService<ILogger<Migration.Infrastructure.Implementation.ClientApi>>();kkkkkkk
+                            //ILoggerFactory logger
+                            var logger = sp.GetRequiredService<ILoggerFactory>();
+                            var _dbLogger = logger.CreateLogger("DbLogger");
+                            var _fileLogger = logger.CreateLogger("FileLogger");
+                            var _uiLogger = logger.CreateLogger("UiLogger");
                             var pollyOptions = sp.GetRequiredService<IOptions<PollyPolicyOptions>>().Value;
 
                             // ClientAPI uses Read policy (similar to AlfrescoReadApi)
-                            return PolicyHelpers.GetCombinedReadPolicy(pollyOptions.ReadOperations, logger);
+                            return PolicyHelpers.GetCombinedReadPolicy(pollyOptions.ReadOperations, _fileLogger, _dbLogger, _uiLogger);
                         });                    
 
                     services.AddTransient<SqlServer.Abstraction.Interfaces.IDocStagingRepository, SqlServer.Infrastructure.Implementation.DocStagingRepository>();
@@ -238,6 +253,7 @@ namespace Alfresco.App
                     services.AddScoped<Migration.Abstraction.Interfaces.IOpisToTipMapper, OpisToTipMapperV2>();
                     services.AddScoped<Migration.Infrastructure.Implementation.DocumentStatusDetectorV2>();
                     services.Configure<MigrationOptions>(context.Configuration.GetSection("Migration"));
+                    services.Configure<ErrorThresholdsOptions>(context.Configuration.GetSection(ErrorThresholdsOptions.SectionName));
                     services.Configure<FolderNodeTypeMappingConfig>(context.Configuration.GetSection("Migration:FolderNodeTypeMapping"));
               
                     services.AddScoped<IUnitOfWork>(sp =>
@@ -261,6 +277,7 @@ namespace Alfresco.App
                     services.AddTransient<IMoveExecutor, MoveExecutor>();
                     services.AddSingleton<IMoveService, MoveService>();                  
                     services.AddSingleton<IFolderPreparationService, FolderPreparationService>();                    
+                    services.AddSingleton<GlobalErrorTracker>();
                     services.AddSingleton<IMigrationWorker, MigrationWorker>();
                     services.AddSingleton<IAlfrescoDbReader, AlfrescoDbReader>();
                   

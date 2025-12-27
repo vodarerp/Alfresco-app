@@ -540,7 +540,7 @@ namespace Migration.Infrastructure.Implementation.Services
                 },
                 Paging = new PagingRequest
                 {
-                    MaxItems = maxItems,
+                    MaxItems = 100000,// maxItems,
                     SkipCount = skipCount
                 },
                 Sort = new List<SortRequest>

@@ -178,7 +178,7 @@ namespace Alfresco.App.UserControls
             {
                 Connected = await _alfrescoService.PingAsync();   
             }
-            catch 
+            catch (Exception ex) 
             {
                 Connected = false;                
             }

@@ -1,10 +1,12 @@
-﻿using Alfresco.Contracts.Options;        // ← PollyPolicyOptions
+﻿using Alfresco.Abstraction.Models;       // ← Custom Exceptions
+using Alfresco.Contracts.Options;        // ← PollyPolicyOptions
 using Microsoft.Extensions.Logging;     // ← ILogger
+using Migration.Infrastructure.Implementation.Services;
 using Polly;                             // ← Policy, AsyncRetryPolicy
 using Polly.CircuitBreaker;              // ← AsyncCircuitBreakerPolicy
 using Polly.Extensions.Http;
 using Polly.Retry;                       // ← AsyncRetryPolicy
-using Polly.Timeout;                     // ← AsyncTimeoutPolicy
+using Polly.Timeout;                     // ← AsyncTimeoutPolicy, TimeoutRejectedException
 using System.Net;
 using System.Net.Http;
 
@@ -12,26 +14,11 @@ namespace Alfresco.App.Helpers
 {
     public static class PolicyHelpers
     {
-        [Obsolete("Use GetCombinedReadPolicy or GetCombinedWritePolicy with PolicyOperationOptions from appsettings.json instead", error: true)]
-        public static IAsyncPolicy<HttpResponseMessage> GetRetryPlicy()
-        {
-            return HttpPolicyExtensions
-                 .HandleTransientHttpError()
-                .OrResult(msg => msg.StatusCode == HttpStatusCode.TooManyRequests)
-                .WaitAndRetryAsync(3, retryAttempt => TimeSpan.FromSeconds(Math.Pow(2, retryAttempt)));
-        }
-
-        [Obsolete("Use GetCombinedReadPolicy or GetCombinedWritePolicy with PolicyOperationOptions from appsettings.json instead", error: true)]
-        public static IAsyncPolicy<HttpResponseMessage> GetCircuitBreakerPolicy()
-        {
-            return HttpPolicyExtensions
-                .HandleTransientHttpError()
-                .CircuitBreakerAsync(5, TimeSpan.FromSeconds(30));
-        }
+        
 
         public static AsyncRetryPolicy<HttpResponseMessage> GetRetryPolicy(
             int retryCount = 3,
-            ILogger? logger = null)
+            ILogger? fileLogger = null, ILogger? dbLogger = null, ILogger? uiLogger = null)
         {
             return Policy
                 .HandleResult<HttpResponseMessage>(r =>
@@ -40,33 +27,59 @@ namespace Alfresco.App.Helpers
                     r.StatusCode == HttpStatusCode.RequestTimeout ||
                     (int)r.StatusCode >= 500)
                 .Or<HttpRequestException>()
-                // REMOVED: .Or<TaskCanceledException>() - Ne retry-uj timeout greške!
-                // Timeout znači da je operacija predugo trajala, retry neće pomoći
+                .Or<TimeoutRejectedException>() // Retry timeout exceptions - server može da se oporavi
                 .WaitAndRetryAsync(
                     retryCount: retryCount,
                     sleepDurationProvider: retryAttempt =>
                     {
                         // Exponential backoff: 2s, 4s, 8s
-                        //var delay = TimeSpan.FromSeconds(Math.Pow(2, retryAttempt));
-                        var delay = TimeSpan.FromMilliseconds(500 * retryAttempt);
+                        var delay = TimeSpan.FromSeconds(Math.Pow(2, retryAttempt));
 
                         // Jitter to avoid thundering herd (random 0-500ms)
                         var jitter = TimeSpan.FromMilliseconds(Random.Shared.Next(0, 500));
                         return delay + jitter;
                     },
-                    onRetry: (outcome, timespan, retryCount, context) =>
+                    onRetry: (outcome, timespan, retryAttempt, context) =>
                     {
-                        var statusCode = outcome.Result?.StatusCode.ToString() ?? "Exception";
-                        logger?.LogWarning(
-                            "Retry {RetryCount}/{MaxRetries} after {Delay}ms due to {StatusCode}",
-                            retryCount, retryCount, timespan.TotalMilliseconds, statusCode);
+                        var operation = context.PolicyKey ?? "Unknown";
+                        var statusCode = outcome.Result?.StatusCode.ToString() ?? "N/A";
+                        var exceptionType = outcome.Exception?.GetType().Name ?? "N/A";
+
+                        if (outcome.Exception is TimeoutRejectedException)
+                        {
+                            fileLogger?.LogWarning(
+                                "⚠️ Retry {RetryAttempt}/{MaxRetries} for operation '{Operation}' - TIMEOUT. " +
+                                "Waiting {Delay}s before next attempt.",
+                                retryAttempt, retryCount, operation, timespan.TotalSeconds);
+
+                            uiLogger?.LogWarning(
+                                "Retry pokušaj {RetryAttempt} od {MaxRetries} - Timeout na operaciji '{Operation}'",
+                                retryAttempt, retryCount, operation);
+                        }
+                        else if (outcome.Exception != null)
+                        {
+                            fileLogger?.LogWarning(
+                                "⚠️ Retry {RetryAttempt}/{MaxRetries} for operation '{Operation}' - {ExceptionType}: {Message}. " +
+                                "Waiting {Delay}s before next attempt.",
+                                retryAttempt, retryCount, operation, exceptionType, outcome.Exception.Message, timespan.TotalSeconds);
+                        }
+                        else
+                        {
+                            fileLogger?.LogWarning(
+                                "⚠️ Retry {RetryAttempt}/{MaxRetries} for operation '{Operation}' - HTTP {StatusCode}. " +
+                                "Waiting {Delay}s before next attempt.",
+                                retryAttempt, retryCount, operation, statusCode, timespan.TotalSeconds);
+                        }
+
+                        // Store retry count in context for fallback policy
+                        context["RetryAttempts"] = retryAttempt;
                     });
         }
 
         public static AsyncCircuitBreakerPolicy<HttpResponseMessage> GetCircuitBreakerPolicy(
             int failuresBeforeBreaking = 5,
             TimeSpan? durationOfBreak = null,
-            ILogger? logger = null)
+            ILogger? fileLogger = null, ILogger? dbLogger = null, ILogger? uiLogger = null)
         {
             durationOfBreak ??= TimeSpan.FromSeconds(30);
 
@@ -78,26 +91,26 @@ namespace Alfresco.App.Helpers
                     durationOfBreak: durationOfBreak.Value,
                     onBreak: (outcome, duration) =>
                     {
-                        logger?.LogError(
+                        fileLogger?.LogError(
                             " Circuit breaker OPENED for {Duration}s due to failures. " +
                             "All requests will fail immediately until reset.",
                             duration.TotalSeconds);
                     },
                     onReset: () =>
                     {
-                        logger?.LogInformation(
+                        fileLogger?.LogInformation(
                             " Circuit breaker CLOSED - requests will resume normally");
                     },
                     onHalfOpen: () =>
                     {
-                        logger?.LogInformation(
+                        fileLogger?.LogInformation(
                             " Circuit breaker HALF-OPEN - testing with next request");
                     });
         }
 
         public static AsyncTimeoutPolicy<HttpResponseMessage> GetTimeoutPolicy(
             TimeSpan timeout,
-            ILogger? logger = null)
+            ILogger? fileLogger = null, ILogger? dbLogger = null, ILogger? uiLogger = null)
         {
             return Policy
                 .TimeoutAsync<HttpResponseMessage>(
@@ -105,7 +118,7 @@ namespace Alfresco.App.Helpers
                     TimeoutStrategy.Optimistic, // Changed to Optimistic for better cancellation handling
                     onTimeoutAsync: (context, timespan, task) =>
                     {
-                        logger?.LogWarning(
+                        fileLogger?.LogWarning(
                             "⏱️ Request timed out after {Timeout}s",
                             timespan.TotalSeconds);
                         return Task.CompletedTask;
@@ -115,7 +128,7 @@ namespace Alfresco.App.Helpers
         public static AsyncPolicy<HttpResponseMessage> GetBulkheadPolicy(
             int maxParallelization = 50,
             int maxQueuingActions = 100,
-            ILogger? logger = null)
+            ILogger? fileLogger = null, ILogger? dbLogger = null, ILogger? uiLogger = null)
         {
             return Policy
                 .BulkheadAsync<HttpResponseMessage>(
@@ -123,7 +136,7 @@ namespace Alfresco.App.Helpers
                     maxQueuingActions,
                     onBulkheadRejectedAsync: context =>
                     {
-                        logger?.LogWarning(
+                        fileLogger?.LogWarning(
                             "🚫 Bulkhead rejected request - too many concurrent calls " +
                             "(max: {Max}, queued: {Queue})",
                             maxParallelization, maxQueuingActions);
@@ -131,31 +144,106 @@ namespace Alfresco.App.Helpers
                     });
         }
 
+        /// <summary>
+        /// Fallback policy that throws custom exceptions when all retries are exhausted
+        /// </summary>
+        public static IAsyncPolicy<HttpResponseMessage> GetFallbackPolicy(
+            int maxRetryCount,
+            TimeSpan timeout,
+            ILogger? fileLogger = null, ILogger? dbLogger = null, ILogger? uiLogger = null)
+        {
+            return Policy<HttpResponseMessage>
+                .Handle<Exception>()
+                .FallbackAsync(
+                    fallbackAction: (outcome, context, token) =>
+                    {
+                        var operation = context.PolicyKey ?? "Unknown";
+                        var retryAttempts = context.ContainsKey("RetryAttempts")
+                            ? (int)context["RetryAttempts"]
+                            : 0;
+
+                        // Check if final exception is timeout-related
+                        if (outcome.Exception is TimeoutRejectedException timeoutEx)
+                        {
+                            fileLogger?.LogError(
+                                "❌ FINAL FAILURE - Operation '{Operation}' timed out after {RetryCount} attempts. " +
+                                "Throwing AlfrescoTimeoutException.",
+                                operation, retryAttempts);
+
+                            uiLogger?.LogError(
+                                "GREŠKA: Operacija '{Operation}' je istekla nakon {RetryCount} pokušaja (timeout: {Timeout}s)",
+                                operation, retryAttempts, timeout.TotalSeconds);
+
+                            throw new AlfrescoTimeoutException(
+                                operation: operation,
+                                timeoutDuration: timeout,
+                                innerException: timeoutEx,
+                                additionalDetails: $"Failed after {retryAttempts} retry attempts");
+                        }
+                        // All other exceptions - retry exhausted
+                        else
+                        {
+                            var statusCode = (outcome.Result?.StatusCode != null)
+                                ? (int)outcome.Result.StatusCode
+                                : (int?)null;
+
+                            fileLogger?.LogError(
+                                "❌ FINAL FAILURE - Operation '{Operation}' failed after {RetryCount} attempts. " +
+                                "Last error: {Exception}. Throwing AlfrescoRetryExhaustedException.",
+                                operation, retryAttempts, outcome.Exception?.Message ?? "Unknown");
+
+                            uiLogger?.LogError(
+                                "GREŠKA: Operacija '{Operation}' je pala nakon {RetryCount} pokušaja. Greška: {Error}",
+                                operation, retryAttempts, outcome.Exception?.Message ?? "Unknown");
+
+                            throw new AlfrescoRetryExhaustedException(
+                                operation: operation,
+                                retryCount: retryAttempts,
+                                lastException: outcome.Exception,
+                                lastStatusCode: statusCode,
+                                additionalDetails: "All retry attempts exhausted");
+                        }
+                    },
+                    onFallbackAsync: (outcome, context) =>
+                    {
+                        var operation = context.PolicyKey ?? "Unknown";
+                        fileLogger?.LogWarning("⚠️ Fallback triggered for operation '{Operation}'", operation);
+                        return Task.CompletedTask;
+                    });
+        }
+
         public static IAsyncPolicy<HttpResponseMessage> GetCombinedReadPolicy(
             PolicyOperationOptions? options = null,
-            ILogger? logger = null)
+            ILogger? fileLogger = null, ILogger? dbLogger = null, ILogger? uiLogger = null)
         {
             // Use defaults if options not provided
             options ??= new PolicyOperationOptions();
 
-            var timeout = GetTimeoutPolicy(options.GetTimeout(), logger);
-            var retry = GetRetryPolicy(options.RetryCount, logger);
+            var timeout = GetTimeoutPolicy(options.GetTimeout(), fileLogger, dbLogger, uiLogger);
+            var retry = GetRetryPolicy(options.RetryCount, fileLogger, dbLogger, uiLogger);
             var circuitBreaker = GetCircuitBreakerPolicy(
                 options.CircuitBreakerFailuresBeforeBreaking,
                 options.GetCircuitBreakerDuration(),
-                logger);
+                 fileLogger, dbLogger, uiLogger);
             var bulkhead = GetBulkheadPolicy(
                 options.BulkheadMaxParallelization,
                 options.BulkheadMaxQueuingActions,
-                logger);
+                 fileLogger, dbLogger, uiLogger);
+            var fallback = GetFallbackPolicy(
+                options.RetryCount,
+                options.GetTimeout(),
+                fileLogger, dbLogger, uiLogger);
 
-            // Wrap policies - inner to outer execution
-            return Policy.WrapAsync(timeout, retry, circuitBreaker, bulkhead);
+            // Wrap policies - outer to inner execution order
+            // Execution flow: Fallback → Timeout → Retry → CircuitBreaker → Bulkhead → HttpClient
+            // This means: Bulkhead executes first, then CircuitBreaker, then Retry, then Timeout, finally Fallback catches all failures
+            return Policy.WrapAsync(fallback, timeout, retry, circuitBreaker, bulkhead)
+                .WithPolicyKey("AlfrescoRead"); // PolicyKey for operation tracking in logs
         }
 
         public static IAsyncPolicy<HttpResponseMessage> GetCombinedWritePolicy(
             PolicyOperationOptions? options = null,
-            ILogger? logger = null)
+            ILogger? fileLogger = null, ILogger? dbLogger = null, ILogger? uiLogger = null)
         {
             // Use defaults if options not provided
             options ??= new PolicyOperationOptions
@@ -164,20 +252,26 @@ namespace Alfresco.App.Helpers
                 BulkheadMaxQueuingActions = 200
             };
 
-            var timeout = GetTimeoutPolicy(options.GetTimeout(), logger);
-            var retry = GetRetryPolicy(options.RetryCount, logger);
+            var timeout = GetTimeoutPolicy(options.GetTimeout(), fileLogger, dbLogger, uiLogger);
+            var retry = GetRetryPolicy(options.RetryCount, fileLogger, dbLogger, uiLogger);
             var circuitBreaker = GetCircuitBreakerPolicy(
                 options.CircuitBreakerFailuresBeforeBreaking,
                 options.GetCircuitBreakerDuration(),
-                logger);
+                 fileLogger, dbLogger, uiLogger);
             var bulkhead = GetBulkheadPolicy(
                 options.BulkheadMaxParallelization,
                 options.BulkheadMaxQueuingActions,
-                logger);
+                 fileLogger, dbLogger, uiLogger);
+            var fallback = GetFallbackPolicy(
+                options.RetryCount,
+                options.GetTimeout(),
+                fileLogger, dbLogger, uiLogger);
 
-            // Write operations with retry for transient failures
-            // timeout + retry + circuit breaker + bulkhead for concurrency control
-            return Policy.WrapAsync(timeout, retry, circuitBreaker, bulkhead);
+            // Wrap policies - outer to inner execution order
+            // Execution flow: Fallback → Timeout → Retry → CircuitBreaker → Bulkhead → HttpClient
+            // Write operations with retry for transient failures + fallback for final exception handling
+            return Policy.WrapAsync(fallback, timeout, retry, circuitBreaker, bulkhead)
+                .WithPolicyKey("AlfrescoWrite"); // PolicyKey for operation tracking in logs
         }
 
 

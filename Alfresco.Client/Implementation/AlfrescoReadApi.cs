@@ -2,14 +2,15 @@
 using Alfresco.Abstraction.Models;
 using Alfresco.Contracts.Request;
 using Alfresco.Contracts.Response;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
+using Newtonsoft.Json;
 using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
-using Newtonsoft.Json;
-using Microsoft.Extensions.Options;
 
 namespace Alfresco.Client.Implementation
 {
@@ -17,14 +18,20 @@ namespace Alfresco.Client.Implementation
     {
         private readonly HttpClient _client;
         private readonly AlfrescoOptions _options;
+        private readonly ILogger _fileLogger;
 
-        public AlfrescoReadApi(HttpClient client, IOptions<AlfrescoOptions> options)
+        public AlfrescoReadApi(HttpClient client, IOptions<AlfrescoOptions> options, ILoggerFactory logger)
         {
             _client = client;
             _options = options.Value;
+            _fileLogger = logger.CreateLogger("FileLogger");
         }
 
-       
+        /// <summary>
+        /// Gets a folder by its relative path
+        /// </summary>
+        /// <exception cref="AlfrescoTimeoutException">Thrown when operation times out after all retries</exception>
+        /// <exception cref="AlfrescoRetryExhaustedException">Thrown when all retry attempts are exhausted</exception>
         public async Task<string> GetFolderByRelative(string inNodeId, string inRelativePath, CancellationToken ct = default)
         {
             var toRet = string.Empty;
@@ -55,21 +62,6 @@ namespace Alfresco.Client.Implementation
                     Include = null // Don't include extra data, just need the ID
                 };
 
-                //var searchRequest = new PostSearchRequest
-                //{
-                //    Query = new QueryRequest
-                //    {
-                //        Language = "cmis",  // ← Promena sa "afts" na "cmis"
-                //        Query = "SELECT * FROM cmis:folder WHERE IN_FOLDER('{parentId}') AND cmis:name = '{folderName}'"
-                //    },
-                //    Paging = new PagingRequest
-                //    {
-                //        MaxItems = 1,
-                //        SkipCount = 0
-                //    },
-                //    Include = null
-                //};
-
                 // Execute search
                 var searchResult = await SearchAsync(searchRequest, ct).ConfigureAwait(false);
 
@@ -83,25 +75,61 @@ namespace Alfresco.Client.Implementation
                     }
                 }
             }
+            catch (AlfrescoTimeoutException timeoutEx)
+            {
+                _fileLogger.LogError(
+                    "⏱️ TIMEOUT: GetFolderByRelative - ParentId: {ParentId}, Path: {Path}, Timeout: {Timeout}s",
+                    inNodeId, inRelativePath, timeoutEx.TimeoutDuration.TotalSeconds);
+                throw;
+            }
+            catch (AlfrescoRetryExhaustedException retryEx)
+            {
+                _fileLogger.LogError(
+                    "❌ RETRY EXHAUSTED: GetFolderByRelative - ParentId: {ParentId}, Path: {Path}, Retries: {RetryCount}",
+                    inNodeId, inRelativePath, retryEx.RetryCount);
+                throw;
+            }
             catch (Exception ex)
             {
-                // Log error or rethrow based on your error handling strategy
-                // For now, return empty string to maintain backward compatibility
-                Console.WriteLine($"Error in GetFolderByRelative: {ex.Message}");
+                _fileLogger.LogError(ex, "Error in GetFolderByRelative - ParentId: {ParentId}, Path: {Path}", inNodeId, inRelativePath);
+                // Return empty string to maintain backward compatibility
             }
 
             return toRet;
         }
 
+        /// <summary>
+        /// Gets all children of a node
+        /// </summary>
+        /// <exception cref="AlfrescoTimeoutException">Thrown when operation times out after all retries</exception>
+        /// <exception cref="AlfrescoRetryExhaustedException">Thrown when all retry attempts are exhausted</exception>
+        /// <exception cref="AlfrescoException">Thrown when the response is not successful</exception>
         public async Task<NodeChildrenResponse> GetNodeChildrenAsync(string nodeId, CancellationToken ct = default)
         {
-            using var getResponse = await _client.GetAsync($"/alfresco/api/-default-/public/alfresco/versions/1/nodes/{nodeId}/children?include=properties", ct).ConfigureAwait(false);
-            var body = await getResponse.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
-            if (!getResponse.IsSuccessStatusCode)
-                throw new AlfrescoException("Neuspešan odgovor pri čitanju root čvora.", (int)getResponse.StatusCode, body); // izbaciti
+            try
+            {
+                using var getResponse = await _client.GetAsync($"/alfresco/api/-default-/public/alfresco/versions/1/nodes/{nodeId}/children?include=properties", ct).ConfigureAwait(false);
+                var body = await getResponse.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
+                if (!getResponse.IsSuccessStatusCode)
+                    throw new AlfrescoException("Neuspešan odgovor pri čitanju root čvora.", (int)getResponse.StatusCode, body);
 
-            var toRet = JsonConvert.DeserializeObject<NodeChildrenResponse>(body);
-            return toRet;
+                var toRet = JsonConvert.DeserializeObject<NodeChildrenResponse>(body);
+                return toRet;
+            }
+            catch (AlfrescoTimeoutException timeoutEx)
+            {
+                _fileLogger.LogError(
+                    "⏱️ TIMEOUT: GetNodeChildren - NodeId: {NodeId}, Timeout: {Timeout}s",
+                    nodeId, timeoutEx.TimeoutDuration.TotalSeconds);
+                throw;
+            }
+            catch (AlfrescoRetryExhaustedException retryEx)
+            {
+                _fileLogger.LogError(
+                    "❌ RETRY EXHAUSTED: GetNodeChildren - NodeId: {NodeId}, Retries: {RetryCount}",
+                    nodeId, retryEx.RetryCount);
+                throw;
+            }
         }
 
         public async Task<NodeChildrenResponse> GetNodeChildrenAsync(string nodeId, int skipCount, int maxItems, CancellationToken ct = default)
@@ -132,28 +160,46 @@ namespace Alfresco.Client.Implementation
         //    return toRet.IsSuccessStatusCode;
         //}
 
+        /// <summary>
+        /// Executes a search query against Alfresco
+        /// </summary>
+        /// <exception cref="AlfrescoTimeoutException">Thrown when operation times out after all retries</exception>
+        /// <exception cref="AlfrescoRetryExhaustedException">Thrown when all retry attempts are exhausted</exception>
         public async Task<NodeChildrenResponse> SearchAsync(PostSearchRequest inRequest, CancellationToken ct = default)
         {
-            var jsonSerializerSettings = new JsonSerializerSettings
+            try
             {
-                NullValueHandling = NullValueHandling.Ignore,
-                ContractResolver = new Newtonsoft.Json.Serialization.CamelCasePropertyNamesContractResolver()
-            };
+                var jsonSerializerSettings = new JsonSerializerSettings
+                {
+                    NullValueHandling = NullValueHandling.Ignore,
+                    ContractResolver = new Newtonsoft.Json.Serialization.CamelCasePropertyNamesContractResolver()
+                };
 
-            var json = JsonConvert.SerializeObject(inRequest, jsonSerializerSettings);
+                var json = JsonConvert.SerializeObject(inRequest, jsonSerializerSettings);
 
-            using var bodyRequest = new StringContent(json, Encoding.UTF8, "application/json");
+                using var bodyRequest = new StringContent(json, Encoding.UTF8, "application/json");
 
-            //var x = await bodyRequest.ReadAsStringAsync();
+                using var postResponse = await _client.PostAsync($"/alfresco/api/-default-/public/search/versions/1/search", bodyRequest, ct).ConfigureAwait(false);
 
-            using var postResponse = await _client.PostAsync($"/alfresco/api/-default-/public/search/versions/1/search", bodyRequest, ct).ConfigureAwait(false);
+                var stringResponse = await postResponse.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
+                var toRet = JsonConvert.DeserializeObject<NodeChildrenResponse>(stringResponse);
 
-
-            var stringResponse = await postResponse.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
-            var toRet = JsonConvert.DeserializeObject<NodeChildrenResponse>(stringResponse) ;
-
-
-            return toRet;
+                return toRet;
+            }
+            catch (AlfrescoTimeoutException timeoutEx)
+            {
+                _fileLogger.LogError(
+                    "⏱️ TIMEOUT: Search - Query: {Query}, Language: {Language}, Timeout: {Timeout}s",
+                    inRequest?.Query?.Query, inRequest?.Query?.Language, timeoutEx.TimeoutDuration.TotalSeconds);
+                throw;
+            }
+            catch (AlfrescoRetryExhaustedException retryEx)
+            {
+                _fileLogger.LogError(
+                    "❌ RETRY EXHAUSTED: Search - Query: {Query}, Language: {Language}, Retries: {RetryCount}",
+                    inRequest?.Query?.Query, inRequest?.Query?.Language, retryEx.RetryCount);
+                throw;
+            }
         }
 
         public async Task<NodeResponse> GetNodeByIdAsync(string nodeId, CancellationToken ct = default)

@@ -1,3 +1,4 @@
+using Alfresco.Abstraction.Models;
 using Alfresco.Contracts.Enums;
 using Alfresco.Contracts.Options;
 using Alfresco.Contracts.Oracle.Models;
@@ -35,6 +36,7 @@ namespace Migration.Infrastructure.Implementation.Services
         private readonly ILogger _logger;
         private readonly ILogger _uiLogger;
         private readonly IServiceScopeFactory _scopeFactory;
+        private readonly GlobalErrorTracker _errorTracker;
 
         private readonly string _connectionString;
         private readonly MigrationOptions _migrationOptions;
@@ -47,8 +49,9 @@ namespace Migration.Infrastructure.Implementation.Services
             IPhaseCheckpointRepository phaseCheckpointRepo,
             ILoggerFactory logger,
             IOptions<global::Alfresco.Contracts.SqlServer.SqlServerOptions> sqlOptions,
-             IServiceScopeFactory scopeFactory,
-        IOptions<MigrationOptions> migrationOptions,
+            IServiceScopeFactory scopeFactory,
+            IOptions<MigrationOptions> migrationOptions,
+            GlobalErrorTracker errorTracker,
             IDocumentSearchService? documentSearch = null)
         {
             _folderDiscovery = folderDiscovery ?? throw new ArgumentNullException(nameof(folderDiscovery));
@@ -62,13 +65,17 @@ namespace Migration.Infrastructure.Implementation.Services
             _connectionString = sqlOptions?.Value?.ConnectionString ?? throw new ArgumentNullException(nameof(sqlOptions));
             _migrationOptions = migrationOptions?.Value ?? throw new ArgumentNullException(nameof(migrationOptions));
             _scopeFactory = scopeFactory ?? throw new ArgumentNullException(nameof(scopeFactory));
+            _errorTracker = errorTracker ?? throw new ArgumentNullException(nameof(errorTracker));
         }
 
         public async Task RunAsync(CancellationToken ct = default)
         {
             try
             {
-                _logger.LogInformation("Migration pipeline started");
+                // Reset error tracker at the start of migration
+                _errorTracker.Reset();
+                _logger.LogInformation("Migration pipeline started - Error tracker reset");
+                _uiLogger.LogInformation("Migracija pokrenuta");
 
                 // Determine migration mode
                 if (_migrationOptions.MigrationByDocument)
@@ -141,12 +148,30 @@ namespace Migration.Infrastructure.Implementation.Services
                     ct);
 
                 _logger.LogInformation("Migration pipeline completed successfully!");
-                _uiLogger.LogInformation("Migration completed successfully!");
+                _uiLogger.LogInformation("✅ Migracija uspešno završena!");
+
+                // Log final error metrics
+                var metrics = _errorTracker.GetMetrics();
+                _logger.LogInformation(
+                    "📊 Migration Error Summary: Timeouts: {TimeoutCount}, Retry Failures: {RetryFailureCount}, Total: {TotalErrors}",
+                    metrics.TimeoutCount, metrics.RetryExhaustedCount, metrics.TotalErrorCount);
+                _uiLogger.LogInformation(
+                    "📊 Greške tokom migracije: Timeout-i: {TimeoutCount}, Retry failures: {RetryFailureCount}",
+                    metrics.TimeoutCount, metrics.RetryExhaustedCount);
             }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Migration pipeline failed");
-                _uiLogger.LogError("Migration stopped - critical error: {Error}", ex.Message);
+                _uiLogger.LogError("❌ Migracija prekinuta - kritična greška: {Error}", ex.Message);
+
+                // Log error metrics before stopping
+                var metrics = _errorTracker.GetMetrics();
+                _logger.LogError(
+                    "📊 Error Summary at failure: Timeouts: {TimeoutCount}/{MaxTimeouts}, Retry Failures: {RetryFailureCount}/{MaxRetryFailures}, Total: {TotalErrors}/{MaxTotalErrors}",
+                    metrics.TimeoutCount, metrics.MaxTimeouts,
+                    metrics.RetryExhaustedCount, metrics.MaxRetryFailures,
+                    metrics.TotalErrorCount, metrics.MaxTotalErrors);
+
                 throw;
             }
         }
@@ -363,41 +388,97 @@ namespace Migration.Infrastructure.Implementation.Services
 
                 _logger.LogInformation("✅ {PhaseDisplayName} completed", phaseDisplayName);
             }
+            catch (AlfrescoTimeoutException timeoutEx)
+            {
+                // Record timeout in global error tracker
+                _errorTracker.RecordTimeout(timeoutEx, $"Phase: {phaseDisplayName}");
+
+                _logger.LogError(timeoutEx, "❌ {PhaseDisplayName} failed - TIMEOUT after {Timeout}s",
+                    phaseDisplayName, timeoutEx.TimeoutDuration.TotalSeconds);
+                _uiLogger.LogError("❌ {PhaseDisplayName} neuspešan - TIMEOUT ({Timeout}s)",
+                    phaseDisplayName, timeoutEx.TimeoutDuration.TotalSeconds);
+
+                // Mark phase as failed
+                await MarkPhaseAsFailed(phase, timeoutEx.Message, ct);
+
+                // Check if migration should stop
+                if (_errorTracker.ShouldStopMigration)
+                {
+                    _logger.LogCritical("🛑 STOPPING MIGRATION: Error threshold exceeded!");
+                    _uiLogger.LogCritical("🛑 MIGRACIJA ZAUSTAVLJENA: Prekoračen limit grešaka!");
+                    throw;
+                }
+
+                // Re-throw to stop execution
+                throw;
+            }
+            catch (AlfrescoRetryExhaustedException retryEx)
+            {
+                // Record retry exhausted in global error tracker
+                _errorTracker.RecordRetryExhausted(retryEx, $"Phase: {phaseDisplayName}");
+
+                _logger.LogError(retryEx, "❌ {PhaseDisplayName} failed - RETRY EXHAUSTED after {RetryCount} attempts",
+                    phaseDisplayName, retryEx.RetryCount);
+                _uiLogger.LogError("❌ {PhaseDisplayName} neuspešan - Svi retry pokušaji iskorišćeni ({RetryCount})",
+                    phaseDisplayName, retryEx.RetryCount);
+
+                // Mark phase as failed
+                await MarkPhaseAsFailed(phase, retryEx.Message, ct);
+
+                // Check if migration should stop
+                if (_errorTracker.ShouldStopMigration)
+                {
+                    _logger.LogCritical("🛑 STOPPING MIGRATION: Error threshold exceeded!");
+                    _uiLogger.LogCritical("🛑 MIGRACIJA ZAUSTAVLJENA: Prekoračen limit grešaka!");
+                    throw;
+                }
+
+                // Re-throw to stop execution
+                throw;
+            }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "❌ {PhaseDisplayName} failed", phaseDisplayName);
-                _uiLogger.LogError("{PhaseDisplayName} failed: {Error}", phaseDisplayName, ex.Message);
+                _uiLogger.LogError("❌ {PhaseDisplayName} neuspešan: {Error}", phaseDisplayName, ex.Message);
 
                 // Mark phase as failed
-                try
-                {
-                    await ExecuteCheckpointOperationAsync(async (uow) =>
-                    {
-                        var sql = @"UPDATE PhaseCheckpoints
-                                    SET Status = @status, ErrorMessage = @errorMessage, UpdatedAt = @updatedAt
-                                    WHERE Phase = @phase";
-                        var errorMsg = ex.Message?.Length > 4000 ? ex.Message.Substring(0, 4000) : ex.Message;
-                        var cmd = new CommandDefinition(sql, new
-                        {
-                            phase = (int)phase,
-                            status = (int)PhaseStatus.Failed,
-                            errorMessage = errorMsg,
-                            updatedAt = DateTime.UtcNow
-                        }, transaction: uow.Transaction, cancellationToken: ct);
-                        await uow.Connection.ExecuteAsync(cmd);
-                    }, ct);
-                }
-                catch (Exception checkpointEx)
-                {
-                    _logger.LogError(checkpointEx, "Error marking phase as failed");
-                    _uiLogger.LogError("Cannot save phase error status");
-                }
+                await MarkPhaseAsFailed(phase, ex.Message, ct);
 
                 // Fail-fast: re-throw to stop execution
                 throw;
             }
         }
 
+
+        /// <summary>
+        /// Helper method to mark phase as failed
+        /// </summary>
+        private async Task MarkPhaseAsFailed(MigrationPhase phase, string errorMessage, CancellationToken ct)
+        {
+            try
+            {
+                await ExecuteCheckpointOperationAsync(async (uow) =>
+                {
+                    var sql = @"UPDATE PhaseCheckpoints
+                                SET Status = @status, ErrorMessage = @errorMessage, UpdatedAt = @updatedAt
+                                WHERE Phase = @phase";
+                    var errorMsg = errorMessage?.Length > 4000 ? errorMessage.Substring(0, 4000) : errorMessage;
+                    var cmd = new CommandDefinition(sql, new
+                    {
+                        phase = (int)phase,
+                        status = (int)PhaseStatus.Failed,
+                        errorMessage = errorMsg,
+                        updatedAt = DateTime.UtcNow
+                    }, transaction: uow.Transaction, cancellationToken: ct);
+                    await uow.Connection.ExecuteAsync(cmd);
+                }, ct);
+            }
+            catch (Exception checkpointEx)
+            {
+                _logger.LogError(checkpointEx, "Error marking phase as failed");
+                _uiLogger.LogError("Cannot save phase error status");
+            }
+        }
 
         private async Task<T> ExecuteCheckpointOperationAsync<T>(Func<IUnitOfWork, Task<T>> operation, CancellationToken ct)
         {
