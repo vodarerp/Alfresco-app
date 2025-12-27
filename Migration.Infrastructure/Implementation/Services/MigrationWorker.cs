@@ -3,12 +3,14 @@ using Alfresco.Contracts.Options;
 using Alfresco.Contracts.Oracle.Models;
 using Dapper;
 using Microsoft.Data.SqlClient;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Migration.Abstraction.Interfaces.Services;
 using Migration.Abstraction.Interfaces.Wrappers;
 using SqlServer.Abstraction.Interfaces;
+using System;
 using System.Data;
 
 namespace Migration.Infrastructure.Implementation.Services
@@ -32,6 +34,7 @@ namespace Migration.Infrastructure.Implementation.Services
         private readonly IPhaseCheckpointRepository _phaseCheckpointRepo;
         private readonly ILogger _logger;
         private readonly ILogger _uiLogger;
+        private readonly IServiceScopeFactory _scopeFactory;
 
         private readonly string _connectionString;
         private readonly MigrationOptions _migrationOptions;
@@ -44,7 +47,8 @@ namespace Migration.Infrastructure.Implementation.Services
             IPhaseCheckpointRepository phaseCheckpointRepo,
             ILoggerFactory logger,
             IOptions<global::Alfresco.Contracts.SqlServer.SqlServerOptions> sqlOptions,
-            IOptions<MigrationOptions> migrationOptions,
+             IServiceScopeFactory scopeFactory,
+        IOptions<MigrationOptions> migrationOptions,
             IDocumentSearchService? documentSearch = null)
         {
             _folderDiscovery = folderDiscovery ?? throw new ArgumentNullException(nameof(folderDiscovery));
@@ -57,6 +61,7 @@ namespace Migration.Infrastructure.Implementation.Services
             _uiLogger = logger.CreateLogger("UiLogger");
             _connectionString = sqlOptions?.Value?.ConnectionString ?? throw new ArgumentNullException(nameof(sqlOptions));
             _migrationOptions = migrationOptions?.Value ?? throw new ArgumentNullException(nameof(migrationOptions));
+            _scopeFactory = scopeFactory ?? throw new ArgumentNullException(nameof(scopeFactory));
         }
 
         public async Task RunAsync(CancellationToken ct = default)
@@ -151,11 +156,11 @@ namespace Migration.Infrastructure.Implementation.Services
             try
             {
                 // Use dedicated connection for status reads (no conflict with phase services)
-                var checkpoints = await ExecuteCheckpointOperationAsync(async (conn, tran) =>
+                var checkpoints = await ExecuteCheckpointOperationAsync(async (uow) =>
                 {
                     var sql = "SELECT * FROM PhaseCheckpoints ORDER BY Phase ASC";
-                    var cmd = new CommandDefinition(sql, transaction: tran, cancellationToken: ct);
-                    var results = await conn.QueryAsync<PhaseCheckpoint>(cmd);
+                    var cmd = new CommandDefinition(sql, transaction: uow.Transaction, cancellationToken: ct);
+                    var results = await uow.Connection.QueryAsync<PhaseCheckpoint>(cmd); //((IDbConnection)uow.Connection)
                     return results.ToList();
                 }, ct);
 
@@ -224,7 +229,7 @@ namespace Migration.Infrastructure.Implementation.Services
             {
                 _logger.LogWarning("⚠️  Resetting all migration phases to NotStarted...");
 
-                await ExecuteCheckpointOperationAsync(async (conn, tran) =>
+                await ExecuteCheckpointOperationAsync(async (uow) =>
                 {
                     var sql = @"UPDATE PhaseCheckpoints
                                 SET Status = @status, StartedAt = NULL, CompletedAt = NULL,
@@ -234,8 +239,8 @@ namespace Migration.Infrastructure.Implementation.Services
                     {
                         status = (int)PhaseStatus.NotStarted,
                         updatedAt = DateTime.UtcNow
-                    }, transaction: tran, cancellationToken: ct);
-                    await conn.ExecuteAsync(cmd);
+                    }, transaction: uow.Transaction, cancellationToken: ct);
+                    await uow.Connection.ExecuteAsync(cmd);
                 }, ct);
 
                 _logger.LogInformation("✅ All phases reset to NotStarted");
@@ -254,7 +259,7 @@ namespace Migration.Infrastructure.Implementation.Services
             {
                 _logger.LogWarning("⚠️  Resetting phase {Phase} to NotStarted...", phase);
 
-                await ExecuteCheckpointOperationAsync(async (conn, tran) =>
+                await ExecuteCheckpointOperationAsync(async (uow) =>
                 {
                     var sql = @"UPDATE PhaseCheckpoints
                                 SET Status = @status, StartedAt = NULL, CompletedAt = NULL,
@@ -266,8 +271,8 @@ namespace Migration.Infrastructure.Implementation.Services
                         phase = (int)phase,
                         status = (int)PhaseStatus.NotStarted,
                         updatedAt = DateTime.UtcNow
-                    }, transaction: tran, cancellationToken: ct);
-                    await conn.ExecuteAsync(cmd);
+                    }, transaction: uow.Transaction, cancellationToken: ct);
+                    await uow.Connection.ExecuteAsync(cmd);
                 }, ct);
 
                 _logger.LogInformation("✅ Phase {Phase} reset to NotStarted", phase);
@@ -296,11 +301,11 @@ namespace Migration.Infrastructure.Implementation.Services
             {
                 // Check if phase is already completed
                 // Use a dedicated SQL connection (NOT shared UnitOfWork) for checkpoint operations
-                checkpoint = await ExecuteCheckpointOperationAsync(async (conn, tran) =>
+                checkpoint = await ExecuteCheckpointOperationAsync(async (uow) =>
                 {
                     var sql = "SELECT * FROM PhaseCheckpoints WHERE Phase = @phase";
-                    var cmd = new CommandDefinition(sql, new { phase = (int)phase }, transaction: tran, cancellationToken: ct);
-                    return await conn.QueryFirstOrDefaultAsync<PhaseCheckpoint>(cmd);
+                    var cmd = new CommandDefinition(sql, new { phase = (int)phase }, transaction: uow.Transaction, cancellationToken: ct);
+                    return await uow.Connection.QueryFirstOrDefaultAsync<PhaseCheckpoint>(cmd);
                 }, ct);
 
                 if (checkpoint?.Status == PhaseStatus.Completed)
@@ -312,7 +317,7 @@ namespace Migration.Infrastructure.Implementation.Services
                 // Mark phase as started
                 _logger.LogInformation("{PhaseDisplayName} starting...", phaseDisplayName);
 
-                await ExecuteCheckpointOperationAsync(async (conn, tran) =>
+                await ExecuteCheckpointOperationAsync(async (uow) =>
                 {
                     var sql = @"UPDATE PhaseCheckpoints
                                 SET Status = @status, StartedAt = @startedAt, CompletedAt = NULL,
@@ -324,8 +329,8 @@ namespace Migration.Infrastructure.Implementation.Services
                         status = (int)PhaseStatus.InProgress,
                         startedAt = DateTime.UtcNow,
                         updatedAt = DateTime.UtcNow
-                    }, transaction: tran, cancellationToken: ct);
-                    var rowsAffected = await conn.ExecuteAsync(cmd);
+                    }, transaction: uow.Transaction, cancellationToken: ct);
+                    var rowsAffected = await uow.Connection.ExecuteAsync(cmd);
 
                     _logger.LogInformation("Phase {Phase} ({PhaseDisplayName}) marked as InProgress - {RowsAffected} rows updated",
                         (int)phase, phaseDisplayName, rowsAffected);
@@ -341,7 +346,7 @@ namespace Migration.Infrastructure.Implementation.Services
                 await phaseAction(ct);
 
                 // Mark phase as completed
-                await ExecuteCheckpointOperationAsync(async (conn, tran) =>
+                await ExecuteCheckpointOperationAsync(async (uow) =>
                 {
                     var sql = @"UPDATE PhaseCheckpoints
                                 SET Status = @status, CompletedAt = @completedAt, UpdatedAt = @updatedAt
@@ -352,8 +357,8 @@ namespace Migration.Infrastructure.Implementation.Services
                         status = (int)PhaseStatus.Completed,
                         completedAt = DateTime.UtcNow,
                         updatedAt = DateTime.UtcNow
-                    }, transaction: tran, cancellationToken: ct);
-                    await conn.ExecuteAsync(cmd);
+                    }, transaction: uow.Transaction, cancellationToken: ct);
+                    await uow.Connection.ExecuteAsync(cmd);
                 }, ct);
 
                 _logger.LogInformation("✅ {PhaseDisplayName} completed", phaseDisplayName);
@@ -366,7 +371,7 @@ namespace Migration.Infrastructure.Implementation.Services
                 // Mark phase as failed
                 try
                 {
-                    await ExecuteCheckpointOperationAsync(async (conn, tran) =>
+                    await ExecuteCheckpointOperationAsync(async (uow) =>
                     {
                         var sql = @"UPDATE PhaseCheckpoints
                                     SET Status = @status, ErrorMessage = @errorMessage, UpdatedAt = @updatedAt
@@ -378,8 +383,8 @@ namespace Migration.Infrastructure.Implementation.Services
                             status = (int)PhaseStatus.Failed,
                             errorMessage = errorMsg,
                             updatedAt = DateTime.UtcNow
-                        }, transaction: tran, cancellationToken: ct);
-                        await conn.ExecuteAsync(cmd);
+                        }, transaction: uow.Transaction, cancellationToken: ct);
+                        await uow.Connection.ExecuteAsync(cmd);
                     }, ct);
                 }
                 catch (Exception checkpointEx)
@@ -393,31 +398,23 @@ namespace Migration.Infrastructure.Implementation.Services
             }
         }
 
-        /// <summary>
-        /// Executes a checkpoint operation using a DEDICATED SQL connection.
-        /// This completely isolates checkpoint operations from phase service transactions,
-        /// preventing MultipleActiveResultSets errors.
-        ///
-        /// CRITICAL: Phase services use the shared IUnitOfWork (Scoped) for their transactions.
-        /// MigrationWorker checkpoint operations create their OWN independent SQL connections
-        /// to avoid any conflicts.
-        /// </summary>
-        private async Task<T> ExecuteCheckpointOperationAsync<T>(Func<SqlConnection, SqlTransaction, Task<T>> operation, CancellationToken ct)
-        {
-            // Create a completely independent SQL connection for checkpoint operations
-            // This connection is NOT shared with phase services
-            await using var connection = new SqlConnection(_connectionString);
-            await connection.OpenAsync(ct);
 
-            await using var transaction = connection.BeginTransaction();
+        private async Task<T> ExecuteCheckpointOperationAsync<T>(Func<IUnitOfWork, Task<T>> operation, CancellationToken ct)
+        {
+            // Create a new scope with a dedicated UnitOfWork instance
+            // This UnitOfWork is completely independent from phase services
+            await using var scope = _scopeFactory.CreateAsyncScope();
+            var uow = scope.ServiceProvider.GetRequiredService<IUnitOfWork>();
+
+            await uow.BeginAsync(ct: ct).ConfigureAwait(false);
 
             try
             {
-                // Execute the operation with our dedicated connection AND transaction
-                var result = await operation(connection, transaction);
+                // Execute the operation with our dedicated UnitOfWork
+                var result = await operation(uow);
 
                 // Commit immediately
-                transaction.Commit();
+                await uow.CommitAsync(ct).ConfigureAwait(false);
 
                 return result;
             }
@@ -425,7 +422,7 @@ namespace Migration.Infrastructure.Implementation.Services
             {
                 try
                 {
-                    transaction.Rollback();
+                    await uow.RollbackAsync(ct).ConfigureAwait(false);
                 }
                 catch
                 {
@@ -444,17 +441,16 @@ namespace Migration.Infrastructure.Implementation.Services
 
                 throw;
             }
-            // Connection and transaction will be automatically disposed here
+            // UnitOfWork will be automatically disposed by scope disposal
         }
 
-        /// <summary>
-        /// Overload for operations that don't return a value
-        /// </summary>
-        private async Task ExecuteCheckpointOperationAsync(Func<SqlConnection, SqlTransaction, Task> operation, CancellationToken ct)
+      
+        
+        private async Task ExecuteCheckpointOperationAsync(Func<IUnitOfWork, Task> operation, CancellationToken ct)
         {
-            await ExecuteCheckpointOperationAsync(async (conn, tran) =>
+            await ExecuteCheckpointOperationAsync(async (uow) =>
             {
-                await operation(conn, tran);
+                await operation(uow);
                 return 0; // Dummy return value
             }, ct);
         }
@@ -486,10 +482,7 @@ namespace Migration.Infrastructure.Implementation.Services
                 _ => 0
             };
         }
-
-        /// <summary>
-        /// Validates DocDescriptions for MigrationByDocument mode and resets checkpoint if they changed
-        /// </summary>
+        
         private async Task ValidateAndResetDocDescriptionsCheckpointAsync(CancellationToken ct)
         {
             try
@@ -505,11 +498,11 @@ namespace Migration.Infrastructure.Implementation.Services
                 var currentDocDescriptionsStr = string.Join(",", currentDocDescriptions.OrderBy(dt => dt));
 
                 // Get checkpoint for FolderDiscovery phase (reused for DocumentSearch)
-                var checkpoint = await ExecuteCheckpointOperationAsync(async (conn, tran) =>
+                var checkpoint = await ExecuteCheckpointOperationAsync(async (uow) =>
                 {
                     var sql = "SELECT * FROM PhaseCheckpoints WHERE Phase = @phase";
-                    var cmd = new CommandDefinition(sql, new { phase = (int)MigrationPhase.FolderDiscovery }, transaction: tran, cancellationToken: ct);
-                    return await conn.QueryFirstOrDefaultAsync<PhaseCheckpoint>(cmd);
+                    var cmd = new CommandDefinition(sql, new { phase = (int)MigrationPhase.FolderDiscovery }, transaction: uow.Transaction, cancellationToken: ct);
+                    return await uow.Connection.QueryFirstOrDefaultAsync<PhaseCheckpoint>(cmd);
                 }, ct);
 
                 if (checkpoint == null)
@@ -523,7 +516,7 @@ namespace Migration.Infrastructure.Implementation.Services
                 {
                     // First run with DocDescriptions - save them
                     _logger.LogInformation("Saving DocDescriptions to checkpoint: {DocDescriptions}", currentDocDescriptionsStr);
-                    await ExecuteCheckpointOperationAsync(async (conn, tran) =>
+                    await ExecuteCheckpointOperationAsync(async (uow) =>
                     {
                         var sql = @"UPDATE PhaseCheckpoints
                                     SET DocTypes = @docTypes, UpdatedAt = @updatedAt
@@ -533,8 +526,8 @@ namespace Migration.Infrastructure.Implementation.Services
                             phase = (int)MigrationPhase.FolderDiscovery,
                             docTypes = currentDocDescriptionsStr,
                             updatedAt = DateTime.UtcNow
-                        }, transaction: tran, cancellationToken: ct);
-                        await conn.ExecuteAsync(cmd);
+                        }, transaction: uow.Transaction, cancellationToken: ct);
+                        await uow.Connection.ExecuteAsync(cmd);
                     }, ct);
                 }
                 else
@@ -549,7 +542,7 @@ namespace Migration.Infrastructure.Implementation.Services
                             checkpoint.DocTypes, currentDocDescriptionsStr);
 
                         // Reset the checkpoint and update DocDescriptions
-                        await ExecuteCheckpointOperationAsync(async (conn, tran) =>
+                        await ExecuteCheckpointOperationAsync(async (uow) =>
                         {
                             var sql = @"UPDATE PhaseCheckpoints
                                         SET Status = @status,
@@ -568,13 +561,13 @@ namespace Migration.Infrastructure.Implementation.Services
                                 status = (int)PhaseStatus.NotStarted,
                                 docTypes = currentDocDescriptionsStr,
                                 updatedAt = DateTime.UtcNow
-                            }, transaction: tran, cancellationToken: ct);
-                            await conn.ExecuteAsync(cmd);
+                            }, transaction: uow.Transaction, cancellationToken: ct);
+                            await uow.Connection.ExecuteAsync(cmd);
                         }, ct);
 
                         // Also reset subsequent phases (FolderPreparation, Move)
                         _logger.LogInformation("Resetting subsequent phases (FolderPreparation, Move)...");
-                        await ExecuteCheckpointOperationAsync(async (conn, tran) =>
+                        await ExecuteCheckpointOperationAsync(async (uow) =>
                         {
                             var sql = @"UPDATE PhaseCheckpoints
                                         SET Status = @status,
@@ -592,8 +585,8 @@ namespace Migration.Infrastructure.Implementation.Services
                                 move = (int)MigrationPhase.Move,
                                 status = (int)PhaseStatus.NotStarted,
                                 updatedAt = DateTime.UtcNow
-                            }, transaction: tran, cancellationToken: ct);
-                            await conn.ExecuteAsync(cmd);
+                            }, transaction: uow.Transaction, cancellationToken: ct);
+                            await uow.Connection.ExecuteAsync(cmd);
                         }, ct);
 
                         _logger.LogInformation("✅ Checkpoint reset due to DocDescriptions change");
