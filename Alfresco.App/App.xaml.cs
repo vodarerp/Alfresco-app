@@ -23,39 +23,28 @@ using Migration.Abstraction.Interfaces.Services;
 using Migration.Abstraction.Interfaces.Wrappers;
 using Migration.Infrastructure.Implementation;
 using Migration.Infrastructure.Implementation.Alfresco;
-// TODO: Uncomment when external APIs are available
-// using Migration.Abstraction.Models;
-// using Migration.Infrastructure.Implementation;
 using Migration.Infrastructure.Implementation.Document;
 using Migration.Infrastructure.Implementation.Folder;
 using Migration.Infrastructure.Implementation.Move;
 using Migration.Infrastructure.Implementation.Services;
 using Migration.Workers;
 using Migration.Workers.Interfaces;
-using Polly;
-using Polly.Extensions.Http;
-//using Oracle.Abstraction.Interfaces;
-//using Oracle.Infrastructure.Helpers;
-//using Oracle.Infrastructure.Implementation;
-//using Oracle.ManagedDataAccess.Client;
+
 using SqlServer.Abstraction.Interfaces;
 using SqlServer.Infrastructure.Implementation;
-using System.Configuration;
+
 using System.IO;
 using System.Windows;
-using System.Xml.Linq;
-using static Alfresco.App.Helpers.PolicyHelpers;
+
 
 namespace Alfresco.App
 {
-    /// <summary>
-    /// Interaction logic for App.xaml
-    /// </summary>
+
     public partial class App : Application
     {
         public static IHost AppHost { get; private set; } = null!;
 
-        // Lazy initialization to ensure LogViewer is created on UI thread at the right time
+        
         private static LiveLogViewer? _logViewer;
         private static readonly object _logViewerLock = new object();
 
@@ -75,8 +64,7 @@ namespace Alfresco.App
                                 _logViewer = new LiveLogViewer();
                             }
                             else
-                            {
-                                // Marshal to UI thread
+                            {                               
                                 Current?.Dispatcher?.Invoke(() => _logViewer = new LiveLogViewer());
                             }
                         }
@@ -96,10 +84,7 @@ namespace Alfresco.App
                 {
                    // Determine the correct path for appsettings.Connections.json
                    var basePath = AppDomain.CurrentDomain.BaseDirectory;
-                   string connectionsPath;
-
-                    // In Development mode, read from project source folder
-                    // In Production mode, read from executable directory
+                   string connectionsPath;                    
                     if (basePath.Contains(@"\bin\Debug\") || basePath.Contains(@"\bin\Release\"))
                     {
                         // Development mode - go to project root
@@ -110,57 +95,25 @@ namespace Alfresco.App
                     {
                         // Production mode - use file next to executable
                         connectionsPath = Path.Combine(basePath, "appsettings.Connections.json");
-                    }
-
-                    // Load connections config from determined path
-                    config.AddJsonFile(connectionsPath, optional: true, reloadOnChange: true);
-                    //config.AddJsonFile("appsettings.Connections.json", optional: true, reloadOnChange: true);
-
+                    }                    
+                    config.AddJsonFile(connectionsPath, optional: true, reloadOnChange: true); 
                 })
                 .ConfigureServices((context, services) =>
-                {
-                    // Register ConnectionsOptions - loaded from appsettings.Connections.json
+                {                   
                     services.Configure<ConnectionsOptions>(context.Configuration);
-
-                    // Register individual connection options for backward compatibility
                     services.Configure<AlfrescoOptions>(context.Configuration.GetSection("Alfresco"));
                     services.Configure<SqlServerOptions>(context.Configuration.GetSection("SqlServer"));
-
                     services.AddTransient<BasicAuthHandler>();
-
-                    //services.AddHttpClient<IAlfrescoApi, AlfrescoAPI>(cli =>
-                    //{
-                    //    cli.Timeout = TimeSpan.FromSeconds(30);
-                    //})
-                    //    .ConfigureHttpClient((sp, cli) =>
-                    //    {
-                    //        var options = sp.GetRequiredService<IOptions<AlfrescoOptions>>().Value;
-                    //        cli.BaseAddress = new Uri(options.BaseUrl);
-                    //        cli.DefaultRequestHeaders.Accept.Add(new System.Net.Http.Headers.MediaTypeWithQualityHeaderValue("application/json"));
-                    //    })
-
-                    //    .AddHttpMessageHandler<BasicAuthHandler>()
-                    //    .SetHandlerLifetime(TimeSpan.FromMinutes(5))
-                    //    .AddPolicyHandler(GetRetryPlicy())
-                    //    .AddPolicyHandler(GetCircuitBreakerPolicy());
-
                     services.AddHttpClient<IAlfrescoReadApi, AlfrescoReadApi>(cli =>
                     {
                         cli.Timeout = Timeout.InfiniteTimeSpan; // TimeOut iz polly
                     })
                         .ConfigureHttpClient((sp, cli) =>
-                        {
-                            // Try ConnectionsOptions first, fallback to AlfrescoOptions
-                            //var connOptions = sp.GetService<IOptions<ConnectionsOptions>>()?.Value;
-                            //var baseUrl = connOptions?.Alfresco?.BaseUrl;
+                        {                            
                             var options = sp.GetRequiredService<IOptions<AlfrescoOptions>>().Value;
                             var credentials = Convert.ToBase64String(
                                 System.Text.Encoding.ASCII.GetBytes($"{options.Username}:{options.Password}")
                             );
-
-                            //baseUrl = options.BaseUrl;
-
-
                             cli.BaseAddress = new Uri(options.BaseUrl);
                             cli.DefaultRequestHeaders.Accept.Add(new System.Net.Http.Headers.MediaTypeWithQualityHeaderValue("application/json"));
                             cli.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Basic", credentials);
@@ -179,7 +132,6 @@ namespace Alfresco.App
                         {
                             var logger = sp.GetRequiredService<ILogger<AlfrescoReadApi>>();
                             var pollyOptions = sp.GetRequiredService<IOptions<PollyPolicyOptions>>().Value;
-
                             // Combined policy: Timeout → Retry → Circuit Breaker → Bulkhead
                             return PolicyHelpers.GetCombinedReadPolicy(pollyOptions.ReadOperations, logger);
                         });
@@ -224,16 +176,8 @@ namespace Alfresco.App
                     //services.Configure<OracleOptions>(context.Configuration.GetSection("Oracle"));
                     services.Configure<Alfresco.Contracts.SqlServer.SqlServerOptions>(context.Configuration.GetSection("SqlServer"));
                     services.Configure<AlfrescoDbOptions>(context.Configuration.GetSection(AlfrescoDbOptions.SectionName));
-                    services.AddSingleton(sp => sp.GetRequiredService<IOptions<Alfresco.Contracts.SqlServer.SqlServerOptions>>().Value);
-
-                    // Configure Polly Policy Options
+                    services.AddSingleton(sp => sp.GetRequiredService<IOptions<Alfresco.Contracts.SqlServer.SqlServerOptions>>().Value);                    
                     services.Configure<PollyPolicyOptions>(context.Configuration.GetSection(PollyPolicyOptions.SectionName));
-
-                    // =====================================================================================
-                    // EXTERNAL API CLIENTS AND MIGRATION SERVICES
-                    // =====================================================================================
-
-                    // Configure ClientAPI Options
                     services.Configure<Migration.Infrastructure.Implementation.ClientApiOptions>(
                         context.Configuration.GetSection(Migration.Infrastructure.Implementation.ClientApiOptions.SectionName));
 
@@ -280,49 +224,22 @@ namespace Alfresco.App
 
                             // ClientAPI uses Read policy (similar to AlfrescoReadApi)
                             return PolicyHelpers.GetCombinedReadPolicy(pollyOptions.ReadOperations, logger);
-                        });
-
-                    
+                        });                    
 
                     services.AddTransient<SqlServer.Abstraction.Interfaces.IDocStagingRepository, SqlServer.Infrastructure.Implementation.DocStagingRepository>();
                     services.AddTransient<SqlServer.Abstraction.Interfaces.IFolderStagingRepository, SqlServer.Infrastructure.Implementation.FolderStagingRepository>();
                     services.AddTransient<SqlServer.Abstraction.Interfaces.IMigrationCheckpointRepository, SqlServer.Infrastructure.Implementation.MigrationCheckpointRepository>();
-
-                    // Phase-based checkpoint repository (NEW - for refactoring)
                     services.AddTransient<SqlServer.Abstraction.Interfaces.IPhaseCheckpointRepository, SqlServer.Infrastructure.Implementation.PhaseCheckpointRepository>();
-
-                    // KDP Document Processing repositories
                     services.AddTransient<SqlServer.Abstraction.Interfaces.IKdpDocumentStagingRepository, SqlServer.Infrastructure.Implementation.KdpDocumentStagingRepository>();
                     services.AddTransient<SqlServer.Abstraction.Interfaces.IKdpExportResultRepository, SqlServer.Infrastructure.Implementation.KdpExportResultRepository>();
-
-                    // Memory Cache for DocumentMappingRepository (caching individual query results + category mappings)
                     services.AddMemoryCache();
-
-                    // DocumentMappings - Database-driven mapping service (replaces HeimdallDocumentMapper)
-                    // Automatically enriches DocumentMapping with CategoryMapping data
                     services.AddScoped<SqlServer.Abstraction.Interfaces.IDocumentMappingRepository, SqlServer.Infrastructure.Implementation.DocumentMappingRepository>();
                     services.AddScoped<Migration.Abstraction.Interfaces.IDocumentMappingService, Migration.Infrastructure.Implementation.DocumentMappingService>();
-
-                    // Mappers that use DocumentMappingService
-                    // Using OptimizedOpisToTipMapper with in-memory caching (30× faster than OpisToTipMapperV2)
-                    // services.AddScoped<Migration.Abstraction.Interfaces.IOpisToTipMapper, Migration.Infrastructure.Implementation.Mappers.OptimizedOpisToTipMapper>();
                     services.AddScoped<Migration.Abstraction.Interfaces.IOpisToTipMapper, OpisToTipMapperV2>();
                     services.AddScoped<Migration.Infrastructure.Implementation.DocumentStatusDetectorV2>();
-
-                    #region oracle DI (commented)
-                    //services.AddTransient<IDocStagingRepository, DocStagingRepository>();
-                    //services.AddTransient<IFolderStagingRepository, FolderStagingRepository>();
-                    //services.AddTransient<IMigrationCheckpointRepository, MigrationCheckpointRepository>(); 
-                    #endregion
-
-
                     services.Configure<MigrationOptions>(context.Configuration.GetSection("Migration"));
                     services.Configure<FolderNodeTypeMappingConfig>(context.Configuration.GetSection("Migration:FolderNodeTypeMapping"));
-                   // services.Configure<WorkerSetting>(context.Configuration.GetSection("WorkerSetting"));
-
-                    //services.AddScoped<IUnitOfWork>(sp => new OracleUnitOfWork(sp.GetRequiredService<OracleOptions>().ConnectionString));
-
-                    // Use ConnectionsOptions for centralized connection management
+              
                     services.AddScoped<IUnitOfWork>(sp =>
                     {
                         var connOptions = sp.GetRequiredService<IOptions<ConnectionsOptions>>().Value;
@@ -331,49 +248,29 @@ namespace Alfresco.App
 
                     services.AddTransient<IFolderReader, FolderReader>();
                     services.AddTransient<IFolderIngestor,FolderIngestor>();
-                    services.AddSingleton<IFolderDiscoveryService, FolderDiscoveryService>();
-
-                    // Folder path and management services
+                    services.AddSingleton<IFolderDiscoveryService, FolderDiscoveryService>();           
                     services.AddSingleton<IFolderPathService, Migration.Infrastructure.Implementation.FolderPathService>();
                     services.AddSingleton<IFolderManager, Migration.Infrastructure.Implementation.FolderManager>();
-
                     services.AddTransient<IDocumentReader, DocumentReader>();
                     services.AddTransient<IDocumentResolver, DocumentResolver>();
                     services.AddTransient<IDocumentIngestor, DocumentIngestor>();
-                    services.AddSingleton<IDocumentDiscoveryService, DocumentDiscoveryService>();
-
-                    // NEW: DocumentSearchService (MigrationByDocument mode - searches by ecm:docType)
+                    services.AddSingleton<IDocumentDiscoveryService, DocumentDiscoveryService>();                   
                     services.AddSingleton<IDocumentSearchService, DocumentSearchService>();
-
-                    // KDP Document Processing Service
                     services.AddSingleton<IKdpDocumentProcessingService, KdpDocumentProcessingService>();
-
                     services.AddTransient<IMoveReader, MoveReader>();
                     services.AddTransient<IMoveExecutor, MoveExecutor>();
-                    services.AddSingleton<IMoveService, MoveService>();
-
-                    // NEW: FolderPreparationService (FAZA 3 - parallel folder creation)
-                    services.AddSingleton<IFolderPreparationService, FolderPreparationService>();
-
-                    // NEW: MigrationWorker (orchestrator za sve 4 faze)
+                    services.AddSingleton<IMoveService, MoveService>();                  
+                    services.AddSingleton<IFolderPreparationService, FolderPreparationService>();                    
                     services.AddSingleton<IMigrationWorker, MigrationWorker>();
-
                     services.AddSingleton<IAlfrescoDbReader, AlfrescoDbReader>();
-
-                    //
-
-
+                  
                     var useMigByDoc = context.Configuration.GetValue<bool>("Migration:MigrationByDocument");
-
                     var options = context.Configuration.GetSection("Migration").Get<MigrationOptions>();
-
                     if (context.Configuration.GetValue<bool>("EnableDocumentSearchWorker") && useMigByDoc)
-                    {
-                        //services.AddHostedService<FolderPreparationWorker>();
+                    {                       
                         services.AddSingleton<IWorkerController, DocumentSearchWorker>();
                         services.AddHostedService(sp => (DocumentSearchWorker)sp.GetServices<IWorkerController>().First(o => o is DocumentSearchWorker));
                     }
-
                     if (context.Configuration.GetValue<bool>("EnableFolderWorker") && !useMigByDoc)
                     {
                         //services.AddHostedService<FolderDiscoveryWorker>();
@@ -400,15 +297,8 @@ namespace Alfresco.App
                         services.AddHostedService(sp => (MoveWorker)sp.GetServices<IWorkerController>().First(o => o is MoveWorker));
                     }
                     
-                    
-
-
                     services.AddHealthChecks()
-                            //.AddOracle(connectionString: context.Configuration["Oracle:ConnectionString"],
-                            //           name: "Oracle-db",
-                            //
-                            //           failureStatus: HealthStatus.Unhealthy,
-                            //           tags: new[] {"db", "oracle"})
+                           
                             .AddSqlServer(connectionString: context.Configuration["SqlServer:ConnectionString"],
                                        name: "SqlServer-db",
 
@@ -459,9 +349,7 @@ namespace Alfresco.App
                 .Build();
 
 
-            //AppHost.MapHealthChecks();
-            //Dapper.DefaultTypeMap.MatchNamesWithUnderscores = true;
-            //OracleHelpers.RegisterFrom<DocStaging>(); // Oracle specific - not needed for SQL Server
+           
         }
 
         protected override void OnStartup(StartupEventArgs e)
@@ -482,9 +370,7 @@ namespace Alfresco.App
             base.OnExit(e);
         }
 
-        /// <summary>
-        /// Ensures connections config exists in local directory, creates from template if not
-        /// </summary>
+        
         private static void EnsureConnectionsConfigExists()
         {
             try
