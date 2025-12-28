@@ -15,6 +15,9 @@ using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Threading;
+using Alfresco.Abstraction.Interfaces;
+using Migration.Abstraction.Interfaces;
+using SqlServer.Abstraction.Interfaces;
 
 namespace Alfresco.App.UserControls
 {
@@ -25,6 +28,11 @@ namespace Alfresco.App.UserControls
         private readonly MigrationOptions _migrationOptions;
         private readonly DispatcherTimer _updateTimer;
         private CancellationTokenSource? _migrationCts;
+
+        // Services for connection validation
+        private readonly IAlfrescoReadApi _alfrescoService;
+        private readonly IClientApi _clientApi;
+        private readonly IUnitOfWork _unitOfWork;
 
         #region Properties
 
@@ -97,6 +105,12 @@ namespace Alfresco.App.UserControls
 
             _migrationWorker = App.AppHost.Services.GetRequiredService<IMigrationWorker>();
             _migrationOptions = App.AppHost.Services.GetRequiredService<IOptions<MigrationOptions>>().Value;
+
+            // Initialize services for connection validation
+            _alfrescoService = App.AppHost.Services.GetRequiredService<IAlfrescoReadApi>();
+            _clientApi = App.AppHost.Services.GetRequiredService<IClientApi>();
+            _unitOfWork = App.AppHost.Services.GetRequiredService<IUnitOfWork>();
+
             IsMigrationByDocument = false;
             // Get DocumentSearchService if in MigrationByDocument mode
             if (_migrationOptions.MigrationByDocument)
@@ -221,12 +235,82 @@ namespace Alfresco.App.UserControls
             }
         }
 
-        private async void btnStart_Click(object sender, RoutedEventArgs e)
+        private async Task<(bool isConnected, string errorMessage)> ValidateAllConnectionsAsync()
         {
-        
+            var disconnectedServices = new List<string>();
+
+            // Check Alfresco connection
             try
             {
-                btnStart.IsEnabled = false;
+                bool alfrescoConnected = await _alfrescoService.PingAsync();
+                if (!alfrescoConnected)
+                {
+                    disconnectedServices.Add("Alfresco");
+                }
+            }
+            catch
+            {
+                disconnectedServices.Add("Alfresco");
+            }
+
+            // Check SQL Server connection
+            try
+            {
+                await _unitOfWork.BeginAsync(System.Data.IsolationLevel.ReadUncommitted);
+                await _unitOfWork.CommitAsync();
+            }
+            catch
+            {
+                disconnectedServices.Add("SQL Server");
+                try
+                {
+                    await _unitOfWork.RollbackAsync();
+                }
+                catch { /* Ignore rollback errors */ }
+            }
+
+            // Check Client API connection
+            try
+            {
+                bool clientApiConnected = await _clientApi.ValidateClientExistsAsync("test");
+                if (!clientApiConnected)
+                {
+                    disconnectedServices.Add("Client API");
+                }
+            }
+            catch
+            {
+                disconnectedServices.Add("Client API");
+            }
+
+            // Return result
+            if (disconnectedServices.Any())
+            {
+                var errorMessage = $"Migracija ne može biti pokrenuta!\n\n" +
+                                 $"Sledeći servisi nisu povezani:\n" +
+                                 string.Join("\n", disconnectedServices.Select(s => $"  • {s}")) +
+                                 $"\n\nProverite konekciju i pokušajte ponovo.";
+                return (false, errorMessage);
+            }
+
+            return (true, string.Empty);
+        }
+
+        private async void btnStart_Click(object sender, RoutedEventArgs e)
+        {
+            try
+            {
+                // Validate all service connections before starting migration
+                var (isConnected, errorMessage) = await ValidateAllConnectionsAsync();
+                if (!isConnected)
+                {
+                    MessageBox.Show(errorMessage,
+                        "Greška - Servisi nisu povezani",
+                        MessageBoxButton.OK,
+                        MessageBoxImage.Error);
+                    return;
+                }
+
                 // If MigrationByDocument mode, validate and apply DocDescriptions from UI
                 if (_migrationOptions.MigrationByDocument && _documentSearchService != null)
                 {
@@ -256,6 +340,7 @@ namespace Alfresco.App.UserControls
                     StatusMessage = $"DocDescriptions set: {string.Join(", ", docDescList)}";
                 }
 
+                // All validations passed - disable start button and enable stop button
                 btnStart.IsEnabled = false;
                 btnStop.IsEnabled = true;
 
@@ -425,8 +510,6 @@ namespace Alfresco.App.UserControls
                 btnStart.IsEnabled = true;
                 btnStop.IsEnabled = false;
             }
-
-            btnStart.IsEnabled = true;
         }
 
         private void btnStop_Click(object sender, RoutedEventArgs e)

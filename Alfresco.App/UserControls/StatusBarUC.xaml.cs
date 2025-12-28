@@ -1,10 +1,10 @@
 ﻿using Alfresco.Abstraction.Interfaces;
 using Alfresco.App.Helpers;
-using Microsoft.Data.SqlClient;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
 using Microsoft.Extensions.Options;
 using Migration.Abstraction.Interfaces;
+using SqlServer.Abstraction.Interfaces;
 using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
@@ -32,9 +32,9 @@ namespace Alfresco.App.UserControls
     {
 
         private readonly IAlfrescoReadApi _alfrescoService;
-        private readonly IOptions<Alfresco.Contracts.SqlServer.SqlServerOptions> _options;
         private readonly IDocumentMappingService _mappingService;
         private readonly IClientApi _clientApi;
+        private readonly IUnitOfWork _unitOfWork;
 
         #region -HealthItems- property
         private ObservableCollection<HealthItem> _HealthItems = new();
@@ -140,8 +140,7 @@ namespace Alfresco.App.UserControls
             _alfrescoService = App.AppHost.Services.GetRequiredService<IAlfrescoReadApi>();
             _mappingService = App.AppHost.Services.GetRequiredService<IDocumentMappingService>();
             _clientApi = App.AppHost.Services.GetRequiredService<IClientApi>();
-
-            _options = App.AppHost.Services.GetRequiredService<IOptions<Alfresco.Contracts.SqlServer.SqlServerOptions>>();
+            _unitOfWork = App.AppHost.Services.GetRequiredService<IUnitOfWork>();
 
             this.Loaded += StatusBarUC_Loaded;
 
@@ -161,17 +160,18 @@ namespace Alfresco.App.UserControls
 
             try
             {
-                using (var conn = new SqlConnection(_options.Value.ConnectionString))
-                {
-                    conn.Open();
-
-                    DbConnected = conn.State == System.Data.ConnectionState.Open;
-                }
+                await _unitOfWork.BeginAsync(System.Data.IsolationLevel.ReadUncommitted);
+                await _unitOfWork.CommitAsync();
+                DbConnected = true;
             }
-            catch 
+            catch
             {
-
                 DbConnected = false;
+                try
+                {
+                    await _unitOfWork.RollbackAsync();
+                }
+                catch { /* Ignore rollback errors */ }
             }
 
             try
