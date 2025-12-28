@@ -1,4 +1,5 @@
 ﻿using Alfresco.Abstraction.Interfaces;
+using Alfresco.Abstraction.Models;
 using Alfresco.Contracts.Mapper;
 using Alfresco.Contracts.Models;
 using Microsoft.Extensions.DependencyInjection;
@@ -278,13 +279,31 @@ namespace Migration.Infrastructure.Implementation.Document
                         coreId, folderName);
                 }
             }
+            catch (ClientApiTimeoutException timeoutEx)
+            {
+                _fileLogger.LogError("DocumentResolver stopped - Client API Timeout: {Message}", timeoutEx.Message);
+                _dbLogger.LogError(timeoutEx, "DocumentResolver stopped - Client API Timeout for folder '{FolderName}'", folderName);
+                throw; // Re-throw to stop migration
+            }
+            catch (ClientApiRetryExhaustedException retryEx)
+            {
+                _fileLogger.LogError("DocumentResolver stopped - Client API Retry Exhausted: {Message}", retryEx.Message);
+                _dbLogger.LogError(retryEx, "DocumentResolver stopped - Client API Retry Exhausted for folder '{FolderName}'", folderName);
+                throw; // Re-throw to stop migration
+            }
+            catch (ClientApiException clientEx)
+            {
+                _fileLogger.LogError("DocumentResolver stopped - Client API Error: {Message}", clientEx.Message);
+                _dbLogger.LogError(clientEx, "DocumentResolver stopped - Client API Error for folder '{FolderName}'", folderName);
+                throw; // Re-throw to stop migration
+            }
             catch (Exception ex)
             {
-                // Log error but don't throw - ClientAPI failure should not block folder creation
-                _fileLogger.LogWarning("ClientAPI call failed for folder '{FolderName}'. Continuing with folder creation.",
-                    folderName);
+                // Log error but don't throw - Other unexpected errors should not block folder creation
+                _fileLogger.LogWarning("Unexpected error calling ClientAPI for folder '{FolderName}'. Continuing with folder creation. Error: {Error}",
+                    folderName, ex.Message);
                 _dbLogger.LogError(ex,
-                    "ClientAPI call failed for folder '{FolderName}'",
+                    "Unexpected error calling ClientAPI for folder '{FolderName}'",
                     folderName);
             }
 

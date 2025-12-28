@@ -1,3 +1,4 @@
+using Alfresco.Abstraction.Models;
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
@@ -115,32 +116,37 @@ namespace Migration.Infrastructure.Implementation
 
                 return clientData;
             }
-            catch (HttpRequestException ex)
+            catch (ClientApiTimeoutException)
             {
-                _fileLogger.LogError("HTTP request failed while fetching client data for CoreId: {CoreId}. Returning empty ClientData.",
-                    coreId);
-                _dbLogger.LogError(ex,
-                    "HTTP request failed while fetching client data for CoreId: {CoreId}",
-                    coreId);
-                return CreateEmptyClientData(coreId);
+                // Re-throw ClientAPI timeout exception to propagate to services and UI
+                _fileLogger.LogError("Client API timeout while fetching client data for CoreId: {CoreId}. Stopping migration.", coreId);
+                throw;
             }
-            catch (TaskCanceledException ex)
+            catch (ClientApiRetryExhaustedException)
             {
-                _fileLogger.LogError("Request timeout while fetching client data for CoreId: {CoreId}. Returning empty ClientData.",
-                    coreId);
-                _dbLogger.LogError(ex,
-                    "Request timeout while fetching client data for CoreId: {CoreId}",
-                    coreId);
-                return CreateEmptyClientData(coreId);
+                // Re-throw ClientAPI retry exhausted exception to propagate to services and UI
+                _fileLogger.LogError("Client API retry exhausted while fetching client data for CoreId: {CoreId}. Stopping migration.", coreId);
+                throw;
+            }
+            catch (ClientApiException)
+            {
+                // Re-throw ClientAPI exception to propagate to services and UI
+                _fileLogger.LogError("Client API error while fetching client data for CoreId: {CoreId}. Stopping migration.", coreId);
+                throw;
             }
             catch (Exception ex)
             {
-                _fileLogger.LogError("Unexpected error while fetching client data for CoreId: {CoreId}. Returning empty ClientData.",
-                    coreId);
+                _fileLogger.LogError("Unexpected error while fetching client data for CoreId: {CoreId}. Error: {Message}",
+                    coreId, ex.Message);
                 _dbLogger.LogError(ex,
                     "Unexpected error while fetching client data for CoreId: {CoreId}",
                     coreId);
-                return CreateEmptyClientData(coreId);
+                // Wrap unexpected exceptions as ClientApiException
+                throw new ClientApiException(
+                    message: $"Unexpected error while fetching client data for CoreId: {coreId}",
+                    statusCode: 500,
+                    responseBody: ex.Message,
+                    innerException: ex);
             }
         }
 
@@ -190,30 +196,33 @@ namespace Migration.Infrastructure.Implementation
                 return accounts;
                 */
             }
-            catch (HttpRequestException ex)
+            catch (ClientApiTimeoutException)
             {
-                _fileLogger.LogError(ex,
-                    "HTTP request failed while fetching active accounts for CoreId: {CoreId}. " +
-                    "Error: {ErrorMessage}. Returning empty list.",
-                    coreId, ex.Message);
-                return new List<string>();
+                _fileLogger.LogError("Client API timeout while fetching active accounts for CoreId: {CoreId}. Stopping migration.", coreId);
+                throw;
             }
-            catch (TaskCanceledException ex)
+            catch (ClientApiRetryExhaustedException)
             {
-                _fileLogger.LogError(ex,
-                    "Request timeout while fetching active accounts for CoreId: {CoreId}. " +
-                    "Error: {ErrorMessage}. Returning empty list.",
-                    coreId, ex.Message);
-                return new List<string>();
+                _fileLogger.LogError("Client API retry exhausted while fetching active accounts for CoreId: {CoreId}. Stopping migration.", coreId);
+                throw;
+            }
+            catch (ClientApiException)
+            {
+                _fileLogger.LogError("Client API error while fetching active accounts for CoreId: {CoreId}. Stopping migration.", coreId);
+                throw;
             }
             catch (Exception ex)
             {
-                _fileLogger.LogError("Unexpected error while fetching active accounts for CoreId: {CoreId}. Returning empty list.",
-                    coreId);
+                _fileLogger.LogError("Unexpected error while fetching active accounts for CoreId: {CoreId}. Error: {Message}",
+                    coreId, ex.Message);
                 _dbLogger.LogError(ex,
                     "Unexpected error while fetching active accounts for CoreId: {CoreId}",
                     coreId);
-                return new List<string>();
+                throw new ClientApiException(
+                    message: $"Unexpected error while fetching active accounts for CoreId: {coreId}",
+                    statusCode: 500,
+                    responseBody: ex.Message,
+                    innerException: ex);
             }
         }
 
@@ -256,32 +265,33 @@ namespace Migration.Infrastructure.Implementation
 
                 return exists;
             }
-            catch (HttpRequestException ex)
+            catch (ClientApiTimeoutException)
             {
-                _fileLogger.LogError("HTTP request failed while validating client for CoreId: {CoreId}. Assuming client does not exist.",
-                    coreId);
-                _dbLogger.LogError(ex,
-                    "HTTP request failed while validating client for CoreId: {CoreId}",
-                    coreId);
-                return false;
+                _fileLogger.LogError("Client API timeout while validating client for CoreId: {CoreId}. Stopping migration.", coreId);
+                throw;
             }
-            catch (TaskCanceledException ex)
+            catch (ClientApiRetryExhaustedException)
             {
-                _fileLogger.LogError("Request timeout while validating client for CoreId: {CoreId}. Assuming client does not exist.",
-                    coreId);
-                _dbLogger.LogError(ex,
-                    "Request timeout while validating client for CoreId: {CoreId}",
-                    coreId);
-                return false;
+                _fileLogger.LogError("Client API retry exhausted while validating client for CoreId: {CoreId}. Stopping migration.", coreId);
+                throw;
+            }
+            catch (ClientApiException)
+            {
+                _fileLogger.LogError("Client API error while validating client for CoreId: {CoreId}. Stopping migration.", coreId);
+                throw;
             }
             catch (Exception ex)
             {
-                _fileLogger.LogError("Unexpected error while validating client for CoreId: {CoreId}. Assuming client does not exist.",
-                    coreId);
+                _fileLogger.LogError("Unexpected error while validating client for CoreId: {CoreId}. Error: {Message}",
+                    coreId, ex.Message);
                 _dbLogger.LogError(ex,
                     "Unexpected error while validating client for CoreId: {CoreId}",
                     coreId);
-                return false;
+                throw new ClientApiException(
+                    message: $"Unexpected error while validating client for CoreId: {coreId}",
+                    statusCode: 500,
+                    responseBody: ex.Message,
+                    innerException: ex);
             }
         }
 
@@ -342,32 +352,33 @@ namespace Migration.Infrastructure.Implementation
 
                 return clientDetailResponse;
             }
-            catch (HttpRequestException ex)
+            catch (ClientApiTimeoutException)
             {
-                _fileLogger.LogError("HTTP request failed while fetching client detail for CoreId: {CoreId}. Returning empty ClientDetailResponse.",
-                    coreId);
-                _dbLogger.LogError(ex,
-                    "HTTP request failed while fetching client detail for CoreId: {CoreId}",
-                    coreId);
-                return CreateEmptyClientDetailResponse();
+                _fileLogger.LogError("Client API timeout while fetching client detail for CoreId: {CoreId}. Stopping migration.", coreId);
+                throw;
             }
-            catch (TaskCanceledException ex)
+            catch (ClientApiRetryExhaustedException)
             {
-                _fileLogger.LogError("Request timeout while fetching client detail for CoreId: {CoreId}. Returning empty ClientDetailResponse.",
-                    coreId);
-                _dbLogger.LogError(ex,
-                    "Request timeout while fetching client detail for CoreId: {CoreId}",
-                    coreId);
-                return CreateEmptyClientDetailResponse();
+                _fileLogger.LogError("Client API retry exhausted while fetching client detail for CoreId: {CoreId}. Stopping migration.", coreId);
+                throw;
+            }
+            catch (ClientApiException)
+            {
+                _fileLogger.LogError("Client API error while fetching client detail for CoreId: {CoreId}. Stopping migration.", coreId);
+                throw;
             }
             catch (Exception ex)
             {
-                _fileLogger.LogError("Unexpected error while fetching client detail for CoreId: {CoreId}. Returning empty ClientDetailResponse.",
-                    coreId);
+                _fileLogger.LogError("Unexpected error while fetching client detail for CoreId: {CoreId}. Error: {Message}",
+                    coreId, ex.Message);
                 _dbLogger.LogError(ex,
                     "Unexpected error while fetching client detail for CoreId: {CoreId}",
                     coreId);
-                return CreateEmptyClientDetailResponse();
+                throw new ClientApiException(
+                    message: $"Unexpected error while fetching client detail for CoreId: {coreId}",
+                    statusCode: 500,
+                    responseBody: ex.Message,
+                    innerException: ex);
             }
         }
 

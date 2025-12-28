@@ -440,6 +440,27 @@ namespace Migration.Infrastructure.Implementation.Services
                     _uiLogger.LogError("Document Search stopped - Alfresco Error (Status: {StatusCode})", alfrescoEx.StatusCode);
                     throw; // Re-throw to stop migration
                 }
+                catch (ClientApiTimeoutException clientTimeoutEx)
+                {
+                    _fileLogger.LogError("DocumentSearch service stopped - Client API Timeout: {Message}", clientTimeoutEx.Message);
+                    _dbLogger.LogError(clientTimeoutEx, "DocumentSearch service stopped - Client API Timeout");
+                    _uiLogger.LogError("Document Search stopped - Client API Timeout: {Operation}", clientTimeoutEx.Operation);
+                    throw; // Re-throw to stop migration
+                }
+                catch (ClientApiRetryExhaustedException clientRetryEx)
+                {
+                    _fileLogger.LogError("DocumentSearch service stopped - Client API Retry Exhausted: {Message}", clientRetryEx.Message);
+                    _dbLogger.LogError(clientRetryEx, "DocumentSearch service stopped - Client API Retry Exhausted");
+                    _uiLogger.LogError("Document Search stopped - Client API Retry Exhausted: {Operation}", clientRetryEx.Operation);
+                    throw; // Re-throw to stop migration
+                }
+                catch (ClientApiException clientEx)
+                {
+                    _fileLogger.LogError("DocumentSearch service stopped - Client API Error: {Message}", clientEx.Message);
+                    _dbLogger.LogError(clientEx, "DocumentSearch service stopped - Client API Error");
+                    _uiLogger.LogError("Document Search stopped - Client API Error (Status: {StatusCode})", clientEx.StatusCode);
+                    throw; // Re-throw to stop migration
+                }
                 catch (Exception ex)
                 {
                     _fileLogger.LogError("Critical error in batch {BatchCounter}: {Error}", _batchCounter, ex.Message);
@@ -727,7 +748,7 @@ namespace Migration.Infrastructure.Implementation.Services
                 return 0;
 
             // Enrich folders with ClientAPI data if needed
-            await EnrichFoldersAsync(folders, ct).ConfigureAwait(false);
+            //await EnrichFoldersAsync(folders, ct).ConfigureAwait(false);
 
             await using var scope = _scopeFactory.CreateAsyncScope();
             var uow = scope.ServiceProvider.GetRequiredService<IUnitOfWork>();
@@ -781,6 +802,24 @@ namespace Migration.Infrastructure.Implementation.Services
                         folder.Residency = clientData.Residency;
                         // Add other enrichments as needed
                     }
+                }
+                catch (ClientApiTimeoutException timeoutEx)
+                {
+                    _fileLogger.LogError("DocumentSearch stopped - Client API Timeout: {Message}", timeoutEx.Message);
+                    _uiLogger.LogError("Document Search stopped - Client API Timeout: {Operation}", timeoutEx.Operation);
+                    throw; // Re-throw to stop migration
+                }
+                catch (ClientApiRetryExhaustedException retryEx)
+                {
+                    _fileLogger.LogError("DocumentSearch stopped - Client API Retry Exhausted: {Message}", retryEx.Message);
+                    _uiLogger.LogError("Document Search stopped - Client API Retry Exhausted: {Operation}", retryEx.Operation);
+                    throw; // Re-throw to stop migration
+                }
+                catch (ClientApiException clientEx)
+                {
+                    _fileLogger.LogError("DocumentSearch stopped - Client API Error: {Message}", clientEx.Message);
+                    _uiLogger.LogError("Document Search stopped - Client API Error (Status: {StatusCode})", clientEx.StatusCode);
+                    throw; // Re-throw to stop migration
                 }
                 catch (Exception ex)
                 {

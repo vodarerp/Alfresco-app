@@ -229,16 +229,14 @@ namespace Alfresco.App
                         .SetHandlerLifetime(TimeSpan.FromMinutes(5))
                         .AddPolicyHandler((sp, req) =>
                         {
-                            //var logger = sp.GetRequiredService<ILogger<Migration.Infrastructure.Implementation.ClientApi>>();kkkkkkk
-                            //ILoggerFactory logger
                             var logger = sp.GetRequiredService<ILoggerFactory>();
                             var _dbLogger = logger.CreateLogger("DbLogger");
                             var _fileLogger = logger.CreateLogger("FileLogger");
                             var _uiLogger = logger.CreateLogger("UiLogger");
                             var pollyOptions = sp.GetRequiredService<IOptions<PollyPolicyOptions>>().Value;
 
-                            // ClientAPI uses Read policy (similar to AlfrescoReadApi)
-                            return PolicyHelpers.GetCombinedReadPolicy(pollyOptions.ReadOperations, _fileLogger, _dbLogger, _uiLogger);
+                            // ClientAPI uses dedicated policy with ClientAPI custom exceptions
+                            return PolicyHelpers.GetCombinedClientApiPolicy(pollyOptions.ReadOperations, _fileLogger, _dbLogger, _uiLogger);
                         });                    
 
                     services.AddTransient<SqlServer.Abstraction.Interfaces.IDocStagingRepository, SqlServer.Infrastructure.Implementation.DocStagingRepository>();

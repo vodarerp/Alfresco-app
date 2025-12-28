@@ -212,6 +212,74 @@ namespace Alfresco.App.Helpers
                     });
         }
 
+        /// <summary>
+        /// Fallback policy for Client API that throws custom exceptions when all retries are exhausted
+        /// </summary>
+        public static IAsyncPolicy<HttpResponseMessage> GetClientApiFallbackPolicy(
+            int maxRetryCount,
+            TimeSpan timeout,
+            ILogger? fileLogger = null, ILogger? dbLogger = null, ILogger? uiLogger = null)
+        {
+            return Policy<HttpResponseMessage>
+                .Handle<Exception>()
+                .FallbackAsync(
+                    fallbackAction: (outcome, context, token) =>
+                    {
+                        var operation = context.PolicyKey ?? "Unknown";
+                        var retryAttempts = context.ContainsKey("RetryAttempts")
+                            ? (int)context["RetryAttempts"]
+                            : 0;
+
+                        // Check if final exception is timeout-related
+                        if (outcome.Exception is TimeoutRejectedException timeoutEx)
+                        {
+                            fileLogger?.LogError(
+                                "❌ FINAL FAILURE - Client API operation '{Operation}' timed out after {RetryCount} attempts. " +
+                                "Throwing ClientApiTimeoutException.",
+                                operation, retryAttempts);
+
+                            uiLogger?.LogError(
+                                "GREŠKA: Client API operacija '{Operation}' je istekla nakon {RetryCount} pokušaja (timeout: {Timeout}s)",
+                                operation, retryAttempts, timeout.TotalSeconds);
+
+                            throw new ClientApiTimeoutException(
+                                operation: operation,
+                                timeoutDuration: timeout,
+                                innerException: timeoutEx,
+                                additionalDetails: $"Failed after {retryAttempts} retry attempts");
+                        }
+                        // All other exceptions - retry exhausted
+                        else
+                        {
+                            var statusCode = (outcome.Result?.StatusCode != null)
+                                ? (int)outcome.Result.StatusCode
+                                : (int?)null;
+
+                            fileLogger?.LogError(
+                                "❌ FINAL FAILURE - Client API operation '{Operation}' failed after {RetryCount} attempts. " +
+                                "Last error: {Exception}. Throwing ClientApiRetryExhaustedException.",
+                                operation, retryAttempts, outcome.Exception?.Message ?? "Unknown");
+
+                            uiLogger?.LogError(
+                                "GREŠKA: Client API operacija '{Operation}' je pala nakon {RetryCount} pokušaja. Greška: {Error}",
+                                operation, retryAttempts, outcome.Exception?.Message ?? "Unknown");
+
+                            throw new ClientApiRetryExhaustedException(
+                                operation: operation,
+                                retryCount: retryAttempts,
+                                lastException: outcome.Exception,
+                                lastStatusCode: statusCode,
+                                additionalDetails: "All retry attempts exhausted");
+                        }
+                    },
+                    onFallbackAsync: (outcome, context) =>
+                    {
+                        var operation = context.PolicyKey ?? "Unknown";
+                        fileLogger?.LogWarning("⚠️ Client API Fallback triggered for operation '{Operation}'", operation);
+                        return Task.CompletedTask;
+                    });
+        }
+
         public static IAsyncPolicy<HttpResponseMessage> GetCombinedReadPolicy(
             PolicyOperationOptions? options = null,
             ILogger? fileLogger = null, ILogger? dbLogger = null, ILogger? uiLogger = null)
@@ -276,6 +344,35 @@ namespace Alfresco.App.Helpers
                 .WithPolicyKey("AlfrescoWrite"); // PolicyKey for operation tracking in logs
         }
 
+        public static IAsyncPolicy<HttpResponseMessage> GetCombinedClientApiPolicy(
+            PolicyOperationOptions? options = null,
+            ILogger? fileLogger = null, ILogger? dbLogger = null, ILogger? uiLogger = null)
+        {
+            // Use defaults if options not provided
+            options ??= new PolicyOperationOptions();
+
+            var timeout = GetTimeoutPolicy(options.GetTimeout(), fileLogger, dbLogger, uiLogger);
+            var retry = GetRetryPolicy(options.RetryCount, fileLogger, dbLogger, uiLogger);
+            var circuitBreaker = GetCircuitBreakerPolicy(
+                options.CircuitBreakerFailuresBeforeBreaking,
+                options.GetCircuitBreakerDuration(),
+                fileLogger, dbLogger, uiLogger);
+            var bulkhead = GetBulkheadPolicy(
+                options.BulkheadMaxParallelization,
+                options.BulkheadMaxQueuingActions,
+                fileLogger, dbLogger, uiLogger);
+            var fallback = GetClientApiFallbackPolicy(
+                options.RetryCount,
+                options.GetTimeout(),
+                fileLogger, dbLogger, uiLogger);
+
+            // Wrap policies - outer to inner execution order
+            // Execution flow: Fallback → Retry → Timeout → CircuitBreaker → Bulkhead → HttpClient
+            // This means: Each retry attempt has its own timeout. If timeout occurs, Retry policy catches it and retries.
+            // Only after all retries are exhausted, Fallback catches and throws custom ClientAPI exception.
+            return Policy.WrapAsync(fallback, retry, timeout, circuitBreaker, bulkhead)
+                .WithPolicyKey("ClientApi"); // PolicyKey for operation tracking in logs
+        }
 
     }
 }

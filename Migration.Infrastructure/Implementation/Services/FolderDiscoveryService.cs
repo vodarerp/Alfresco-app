@@ -424,6 +424,27 @@ namespace Migration.Infrastructure.Implementation.Services
                     _uiLogger.LogError("Folder Discovery stopped - Alfresco Error (Status: {StatusCode})", alfrescoEx.StatusCode);
                     throw; // Re-throw to stop migration
                 }
+                catch (ClientApiTimeoutException clientTimeoutEx)
+                {
+                    _fileLogger.LogError("FolderDiscovery service stopped - Client API Timeout: {Message}", clientTimeoutEx.Message);
+                    _dbLogger.LogError(clientTimeoutEx, "FolderDiscovery service stopped - Client API Timeout");
+                    _uiLogger.LogError("Folder Discovery stopped - Client API Timeout: {Operation}", clientTimeoutEx.Operation);
+                    throw; // Re-throw to stop migration
+                }
+                catch (ClientApiRetryExhaustedException clientRetryEx)
+                {
+                    _fileLogger.LogError("FolderDiscovery service stopped - Client API Retry Exhausted: {Message}", clientRetryEx.Message);
+                    _dbLogger.LogError(clientRetryEx, "FolderDiscovery service stopped - Client API Retry Exhausted");
+                    _uiLogger.LogError("Folder Discovery stopped - Client API Retry Exhausted: {Operation}", clientRetryEx.Operation);
+                    throw; // Re-throw to stop migration
+                }
+                catch (ClientApiException clientEx)
+                {
+                    _fileLogger.LogError("FolderDiscovery service stopped - Client API Error: {Message}", clientEx.Message);
+                    _dbLogger.LogError(clientEx, "FolderDiscovery service stopped - Client API Error");
+                    _uiLogger.LogError("Folder Discovery stopped - Client API Error (Status: {StatusCode})", clientEx.StatusCode);
+                    throw; // Re-throw to stop migration
+                }
                 catch (Exception ex)
                 {
                     _fileLogger.LogError("Critical error in batch {BatchCounter}: {Error}", batchCounter, ex.Message);
@@ -579,6 +600,27 @@ namespace Migration.Infrastructure.Implementation.Services
                     _fileLogger.LogError("FolderDiscovery worker stopped - Alfresco Error: {Message}", alfrescoEx.Message);
                     _dbLogger.LogError(alfrescoEx, "FolderDiscovery worker stopped - Alfresco Error");
                     _uiLogger.LogError("Folder Discovery worker stopped - Alfresco Error (Status: {StatusCode})", alfrescoEx.StatusCode);
+                    throw; // Re-throw to stop migration
+                }
+                catch (ClientApiTimeoutException clientTimeoutEx)
+                {
+                    _fileLogger.LogError("FolderDiscovery worker stopped - Client API Timeout: {Message}", clientTimeoutEx.Message);
+                    _dbLogger.LogError(clientTimeoutEx, "FolderDiscovery worker stopped - Client API Timeout");
+                    _uiLogger.LogError("Folder Discovery worker stopped - Client API Timeout: {Operation}", clientTimeoutEx.Operation);
+                    throw; // Re-throw to stop migration
+                }
+                catch (ClientApiRetryExhaustedException clientRetryEx)
+                {
+                    _fileLogger.LogError("FolderDiscovery worker stopped - Client API Retry Exhausted: {Message}", clientRetryEx.Message);
+                    _dbLogger.LogError(clientRetryEx, "FolderDiscovery worker stopped - Client API Retry Exhausted");
+                    _uiLogger.LogError("Folder Discovery worker stopped - Client API Retry Exhausted: {Operation}", clientRetryEx.Operation);
+                    throw; // Re-throw to stop migration
+                }
+                catch (ClientApiException clientEx)
+                {
+                    _fileLogger.LogError("FolderDiscovery worker stopped - Client API Error: {Message}", clientEx.Message);
+                    _dbLogger.LogError(clientEx, "FolderDiscovery worker stopped - Client API Error");
+                    _uiLogger.LogError("Folder Discovery worker stopped - Client API Error (Status: {StatusCode})", clientEx.StatusCode);
                     throw; // Re-throw to stop migration
                 }
                 catch (Exception ex)
@@ -809,6 +851,24 @@ namespace Migration.Infrastructure.Implementation.Services
                     _fileLogger.LogDebug(
                         "Successfully enriched folder {Name} with ClientAPI data for CoreId: {CoreId}",
                         entry.Name, coreId);
+                }
+                catch (ClientApiTimeoutException timeoutEx)
+                {
+                    _fileLogger.LogError("FolderDiscovery stopped - Client API Timeout: {Message}", timeoutEx.Message);
+                    _uiLogger.LogError("Folder Discovery stopped - Client API Timeout: {Operation}", timeoutEx.Operation);
+                    throw; // Re-throw to stop migration
+                }
+                catch (ClientApiRetryExhaustedException retryEx)
+                {
+                    _fileLogger.LogError("FolderDiscovery stopped - Client API Retry Exhausted: {Message}", retryEx.Message);
+                    _uiLogger.LogError("Folder Discovery stopped - Client API Retry Exhausted: {Operation}", retryEx.Operation);
+                    throw; // Re-throw to stop migration
+                }
+                catch (ClientApiException clientEx)
+                {
+                    _fileLogger.LogError("FolderDiscovery stopped - Client API Error: {Message}", clientEx.Message);
+                    _uiLogger.LogError("Folder Discovery stopped - Client API Error (Status: {StatusCode})", clientEx.StatusCode);
+                    throw; // Re-throw to stop migration
                 }
                 catch (Exception ex)
                 {

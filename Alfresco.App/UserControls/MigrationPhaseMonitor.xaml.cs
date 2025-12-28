@@ -344,6 +344,62 @@ namespace Alfresco.App.UserControls
                                 MessageBoxImage.Error);
                         });
                     }
+                    catch (ClientApiTimeoutException clientTimeoutEx)
+                    {
+                        Dispatcher.Invoke(() =>
+                        {
+                            StatusMessage = $"Migration stopped - Client API Timeout occurred: {clientTimeoutEx.Operation}";
+                            btnStart.IsEnabled = true;
+                            btnStop.IsEnabled = false;
+                            MessageBox.Show(
+                                $"Migracija prekinuta!\n\n" +
+                                $"Razlog: CLIENT API TIMEOUT\n" +
+                                $"Operacija: {clientTimeoutEx.Operation}\n" +
+                                $"Timeout limit: {clientTimeoutEx.TimeoutDuration.TotalSeconds}s\n" +
+                                $"Proteklo vreme: {clientTimeoutEx.ElapsedTime.TotalSeconds:F2}s\n\n" +
+                                $"Proverite log za više detalja.",
+                                "Migracija prekinuta - Client API Timeout",
+                                MessageBoxButton.OK,
+                                MessageBoxImage.Warning);
+                        });
+                    }
+                    catch (ClientApiRetryExhaustedException clientRetryEx)
+                    {
+                        Dispatcher.Invoke(() =>
+                        {
+                            StatusMessage = $"Migration stopped - Client API retry attempts exhausted: {clientRetryEx.Operation}";
+                            btnStart.IsEnabled = true;
+                            btnStop.IsEnabled = false;
+                            MessageBox.Show(
+                                $"Migracija prekinuta!\n\n" +
+                                $"Razlog: Client API - Svi retry pokušaji iskorišćeni\n" +
+                                $"Operacija: {clientRetryEx.Operation}\n" +
+                                $"Broj pokušaja: {clientRetryEx.RetryCount}\n" +
+                                $"Poslednja greška: {clientRetryEx.LastException?.Message ?? "N/A"}\n\n" +
+                                $"Proverite log za više detalja.",
+                                "Migracija prekinuta - Client API Retry Exhausted",
+                                MessageBoxButton.OK,
+                                MessageBoxImage.Warning);
+                        });
+                    }
+                    catch (ClientApiException clientEx)
+                    {
+                        Dispatcher.Invoke(() =>
+                        {
+                            StatusMessage = $"Migration stopped - Client API error occurred";
+                            btnStart.IsEnabled = true;
+                            btnStop.IsEnabled = false;
+                            MessageBox.Show(
+                                $"Migracija prekinuta!\n\n" +
+                                $"Razlog: Client API greška\n" +
+                                $"Status Code: {clientEx.StatusCode}\n" +
+                                $"Poruka: {clientEx.Message}\n\n" +
+                                $"Proverite log za više detalja.",
+                                "Migracija prekinuta - Client API greška",
+                                MessageBoxButton.OK,
+                                MessageBoxImage.Error);
+                        });
+                    }
                     catch (Exception ex)
                     {
                         Dispatcher.Invoke(() =>
