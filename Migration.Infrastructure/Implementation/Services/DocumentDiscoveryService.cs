@@ -1,4 +1,5 @@
 ﻿using Alfresco.Abstraction.Interfaces;
+using Alfresco.Abstraction.Models;
 using Alfresco.Contracts.Enums;
 using Alfresco.Contracts.Extensions;
 using Alfresco.Contracts.Options;
@@ -271,6 +272,27 @@ namespace Migration.Infrastructure.Implementation.Services
                     progress.Message = $"Cancelled after processing {_totalProcessed} folders ({_totalFailed} failed)";
                     progressCallback?.Invoke(progress);
                     throw;
+                }
+                catch (AlfrescoTimeoutException timeoutEx)
+                {
+                    _fileLogger.LogError("DocumentDiscovery service stopped - Alfresco Timeout: {Message}", timeoutEx.Message);
+                    _dbLogger.LogError(timeoutEx, "DocumentDiscovery service stopped - Timeout");
+                    _uiLogger.LogError("Document Discovery stopped - Timeout: {Operation}", timeoutEx.Operation);
+                    throw; // Re-throw to stop migration
+                }
+                catch (AlfrescoRetryExhaustedException retryEx)
+                {
+                    _fileLogger.LogError("DocumentDiscovery service stopped - Alfresco Retry Exhausted: {Message}", retryEx.Message);
+                    _dbLogger.LogError(retryEx, "DocumentDiscovery service stopped - Retry Exhausted");
+                    _uiLogger.LogError("Document Discovery stopped - Retry Exhausted: {Operation}", retryEx.Operation);
+                    throw; // Re-throw to stop migration
+                }
+                catch (AlfrescoException alfrescoEx)
+                {
+                    _fileLogger.LogError("DocumentDiscovery service stopped - Alfresco Error: {Message}", alfrescoEx.Message);
+                    _dbLogger.LogError(alfrescoEx, "DocumentDiscovery service stopped - Alfresco Error");
+                    _uiLogger.LogError("Document Discovery stopped - Alfresco Error (Status: {StatusCode})", alfrescoEx.StatusCode);
+                    throw; // Re-throw to stop migration
                 }
                 catch (Exception ex)
                 {

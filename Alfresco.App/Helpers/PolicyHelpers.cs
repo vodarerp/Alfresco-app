@@ -235,9 +235,10 @@ namespace Alfresco.App.Helpers
                 fileLogger, dbLogger, uiLogger);
 
             // Wrap policies - outer to inner execution order
-            // Execution flow: Fallback → Timeout → Retry → CircuitBreaker → Bulkhead → HttpClient
-            // This means: Bulkhead executes first, then CircuitBreaker, then Retry, then Timeout, finally Fallback catches all failures
-            return Policy.WrapAsync(fallback, timeout, retry, circuitBreaker, bulkhead)
+            // Execution flow: Fallback → Retry → Timeout → CircuitBreaker → Bulkhead → HttpClient
+            // This means: Each retry attempt has its own timeout. If timeout occurs, Retry policy catches it and retries.
+            // Only after all retries are exhausted, Fallback catches and throws custom exception.
+            return Policy.WrapAsync(fallback, retry, timeout, circuitBreaker, bulkhead)
                 .WithPolicyKey("AlfrescoRead"); // PolicyKey for operation tracking in logs
         }
 
@@ -268,9 +269,10 @@ namespace Alfresco.App.Helpers
                 fileLogger, dbLogger, uiLogger);
 
             // Wrap policies - outer to inner execution order
-            // Execution flow: Fallback → Timeout → Retry → CircuitBreaker → Bulkhead → HttpClient
-            // Write operations with retry for transient failures + fallback for final exception handling
-            return Policy.WrapAsync(fallback, timeout, retry, circuitBreaker, bulkhead)
+            // Execution flow: Fallback → Retry → Timeout → CircuitBreaker → Bulkhead → HttpClient
+            // This means: Each retry attempt has its own timeout. If timeout occurs, Retry policy catches it and retries.
+            // Only after all retries are exhausted, Fallback catches and throws custom exception.
+            return Policy.WrapAsync(fallback, retry, timeout, circuitBreaker, bulkhead)
                 .WithPolicyKey("AlfrescoWrite"); // PolicyKey for operation tracking in logs
         }
 

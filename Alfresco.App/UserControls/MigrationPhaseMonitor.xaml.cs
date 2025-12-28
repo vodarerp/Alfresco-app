@@ -1,3 +1,4 @@
+using Alfresco.Abstraction.Models;
 using Alfresco.Contracts.Enums;
 using Alfresco.Contracts.Options;
 using Microsoft.Extensions.DependencyInjection;
@@ -287,6 +288,62 @@ namespace Alfresco.App.UserControls
                             btnStop.IsEnabled = false;
                         });
                     }
+                    catch (AlfrescoTimeoutException timeoutEx)
+                    {
+                        Dispatcher.Invoke(() =>
+                        {
+                            StatusMessage = $"Migration stopped - Timeout occurred: {timeoutEx.Operation}";
+                            btnStart.IsEnabled = true;
+                            btnStop.IsEnabled = false;
+                            MessageBox.Show(
+                                $"Migracija prekinuta!\n\n" +
+                                $"Razlog: TIMEOUT\n" +
+                                $"Operacija: {timeoutEx.Operation}\n" +
+                                $"Timeout limit: {timeoutEx.TimeoutDuration.TotalSeconds}s\n" +
+                                $"Proteklo vreme: {timeoutEx.ElapsedTime.TotalSeconds:F2}s\n\n" +
+                                $"Proverite log za više detalja.",
+                                "Migracija prekinuta - Timeout",
+                                MessageBoxButton.OK,
+                                MessageBoxImage.Warning);
+                        });
+                    }
+                    catch (AlfrescoRetryExhaustedException retryEx)
+                    {
+                        Dispatcher.Invoke(() =>
+                        {
+                            StatusMessage = $"Migration stopped - All retry attempts exhausted: {retryEx.Operation}";
+                            btnStart.IsEnabled = true;
+                            btnStop.IsEnabled = false;
+                            MessageBox.Show(
+                                $"Migracija prekinuta!\n\n" +
+                                $"Razlog: Svi retry pokušaji iskorišćeni\n" +
+                                $"Operacija: {retryEx.Operation}\n" +
+                                $"Broj pokušaja: {retryEx.RetryCount}\n" +
+                                $"Poslednja greška: {retryEx.LastException?.Message ?? "N/A"}\n\n" +
+                                $"Proverite log za više detalja.",
+                                "Migracija prekinuta - Retry Exhausted",
+                                MessageBoxButton.OK,
+                                MessageBoxImage.Warning);
+                        });
+                    }
+                    catch (AlfrescoException alfrescoEx)
+                    {
+                        Dispatcher.Invoke(() =>
+                        {
+                            StatusMessage = $"Migration stopped - Alfresco error occurred";
+                            btnStart.IsEnabled = true;
+                            btnStop.IsEnabled = false;
+                            MessageBox.Show(
+                                $"Migracija prekinuta!\n\n" +
+                                $"Razlog: Alfresco greška\n" +
+                                $"Status Code: {alfrescoEx.StatusCode}\n" +
+                                $"Poruka: {alfrescoEx.Message}\n\n" +
+                                $"Proverite log za više detalja.",
+                                "Migracija prekinuta - Alfresco greška",
+                                MessageBoxButton.OK,
+                                MessageBoxImage.Error);
+                        });
+                    }
                     catch (Exception ex)
                     {
                         Dispatcher.Invoke(() =>
@@ -294,6 +351,14 @@ namespace Alfresco.App.UserControls
                             StatusMessage = $"Migration failed: {ex.Message}";
                             btnStart.IsEnabled = true;
                             btnStop.IsEnabled = false;
+                            MessageBox.Show(
+                                $"Migracija prekinuta!\n\n" +
+                                $"Razlog: Neočekivana greška\n" +
+                                $"Poruka: {ex.Message}\n\n" +
+                                $"Proverite log za više detalja.",
+                                "Migracija prekinuta",
+                                MessageBoxButton.OK,
+                                MessageBoxImage.Error);
                         });
                     }
                 });

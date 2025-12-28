@@ -1,4 +1,5 @@
 using Alfresco.Abstraction.Interfaces;
+using Alfresco.Abstraction.Models;
 using Alfresco.Contracts.Enums;
 using Alfresco.Contracts.Extensions;
 using Alfresco.Contracts.Mapper;
@@ -418,6 +419,27 @@ namespace Migration.Infrastructure.Implementation.Services
                     progressCallback?.Invoke(progress);
                     throw;
                 }
+                catch (AlfrescoTimeoutException timeoutEx)
+                {
+                    _fileLogger.LogError("DocumentSearch service stopped - Alfresco Timeout: {Message}", timeoutEx.Message);
+                    _dbLogger.LogError(timeoutEx, "DocumentSearch service stopped - Timeout");
+                    _uiLogger.LogError("Document Search stopped - Timeout: {Operation}", timeoutEx.Operation);
+                    throw; // Re-throw to stop migration
+                }
+                catch (AlfrescoRetryExhaustedException retryEx)
+                {
+                    _fileLogger.LogError("DocumentSearch service stopped - Alfresco Retry Exhausted: {Message}", retryEx.Message);
+                    _dbLogger.LogError(retryEx, "DocumentSearch service stopped - Retry Exhausted");
+                    _uiLogger.LogError("Document Search stopped - Retry Exhausted: {Operation}", retryEx.Operation);
+                    throw; // Re-throw to stop migration
+                }
+                catch (AlfrescoException alfrescoEx)
+                {
+                    _fileLogger.LogError("DocumentSearch service stopped - Alfresco Error: {Message}", alfrescoEx.Message);
+                    _dbLogger.LogError(alfrescoEx, "DocumentSearch service stopped - Alfresco Error");
+                    _uiLogger.LogError("Document Search stopped - Alfresco Error (Status: {StatusCode})", alfrescoEx.StatusCode);
+                    throw; // Re-throw to stop migration
+                }
                 catch (Exception ex)
                 {
                     _fileLogger.LogError("Critical error in batch {BatchCounter}: {Error}", _batchCounter, ex.Message);
@@ -540,7 +562,7 @@ namespace Migration.Infrastructure.Implementation.Services
                 },
                 Paging = new PagingRequest
                 {
-                    MaxItems = 100000,// maxItems,
+                    MaxItems =  maxItems,
                     SkipCount = skipCount
                 },
                 Sort = new List<SortRequest>

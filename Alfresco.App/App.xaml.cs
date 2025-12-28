@@ -314,17 +314,17 @@ namespace Alfresco.App
                         services.AddHostedService(sp => (MoveWorker)sp.GetServices<IWorkerController>().First(o => o is MoveWorker));
                     }
                     
-                    services.AddHealthChecks()
+                    //services.AddHealthChecks()
                            
-                            .AddSqlServer(connectionString: context.Configuration["SqlServer:ConnectionString"],
-                                       name: "SqlServer-db",
+                    //        .AddSqlServer(connectionString: context.Configuration["SqlServer:ConnectionString"],
+                    //                   name: "SqlServer-db",
 
-                                       failureStatus: HealthStatus.Unhealthy,
-                                       tags: new[] {"db", "sqlserver"})
-                            .AddUrlGroup(uri: new Uri(context.Configuration["Alfresco:BaseUrl"]!),
-                                         name: "alfresco-api",
-                                         failureStatus: HealthStatus.Unhealthy,
-                                         tags: new[] {"api","alfresco"});                     
+                    //                   failureStatus: HealthStatus.Unhealthy,
+                    //                   tags: new[] {"db", "sqlserver"})
+                    //        .AddUrlGroup(uri: new Uri(context.Configuration["Alfresco:BaseUrl"]!),
+                    //                     name: "alfresco-api",
+                    //                     failureStatus: HealthStatus.Unhealthy,
+                    //                     tags: new[] {"api","alfresco"});                     
 
                     services.AddTransient<MainWindow>();
 

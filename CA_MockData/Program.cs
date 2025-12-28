@@ -38,7 +38,7 @@ public static class Program
             BaseUrl = "http://localhost:8080/",
             Username =  "admin",
             Password = "admin",
-            RootParentId = "2ee499d8-012b-4bd0-a499-d8012bfbd058",
+            RootParentId = "b56a7bdf-2095-4281-aa7b-df2095028111",
             FolderCount = 50,
             DocsPerFolder = 3,
             DegreeOfParallelism = 8,
@@ -47,7 +47,7 @@ public static class Program
             UseNewFolderStructure = true,           // Enable new folder structure
             ClientTypes = new[] { "PI", "LE", "D" },  // NOTE: ACC dossiers are created DURING migration, not as old dossiers
             StartingCoreId = 102206,                // Start from realistic CoreId
-            AddFolderProperties = true,             // Set to true after deploying bankContentModel.xml
+            AddFolderProperties = false,             // Set to true after deploying bankContentModel.xml
             DocumentMappingService = documentMappingService,  // Inject document mapping service
 
             // KDP document generation settings

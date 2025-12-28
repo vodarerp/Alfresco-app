@@ -1,4 +1,5 @@
 ﻿using Alfresco.Abstraction.Interfaces;
+using Alfresco.Abstraction.Models;
 using Alfresco.Contracts.Enums;
 using Alfresco.Contracts.Options;
 using Alfresco.Contracts.Oracle.Models;
@@ -259,6 +260,27 @@ namespace Migration.Infrastructure.Implementation.Services
                     _dbLogger.LogInformation("Move service cancelled");
                     _uiLogger.LogInformation("Move cancelled");
                     throw;
+                }
+                catch (AlfrescoTimeoutException timeoutEx)
+                {
+                    _fileLogger.LogError("Move service stopped - Alfresco Timeout: {Message}", timeoutEx.Message);
+                    _dbLogger.LogError(timeoutEx, "Move service stopped - Timeout");
+                    _uiLogger.LogError("Move service stopped - Timeout: {Operation}", timeoutEx.Operation);
+                    throw; // Re-throw to stop migration
+                }
+                catch (AlfrescoRetryExhaustedException retryEx)
+                {
+                    _fileLogger.LogError("Move service stopped - Alfresco Retry Exhausted: {Message}", retryEx.Message);
+                    _dbLogger.LogError(retryEx, "Move service stopped - Retry Exhausted");
+                    _uiLogger.LogError("Move service stopped - Retry Exhausted: {Operation}", retryEx.Operation);
+                    throw; // Re-throw to stop migration
+                }
+                catch (AlfrescoException alfrescoEx)
+                {
+                    _fileLogger.LogError("Move service stopped - Alfresco Error: {Message}", alfrescoEx.Message);
+                    _dbLogger.LogError(alfrescoEx, "Move service stopped - Alfresco Error");
+                    _uiLogger.LogError("Move service stopped - Alfresco Error (Status: {StatusCode})", alfrescoEx.StatusCode);
+                    throw; // Re-throw to stop migration
                 }
                 catch (Exception ex)
                 {
@@ -810,6 +832,27 @@ namespace Migration.Infrastructure.Implementation.Services
                     progress.Message = $"Cancelled after moving {_totalMoved} documents ({_totalFailed} failed)";
                     progressCallback?.Invoke(progress);
                     throw;
+                }
+                catch (AlfrescoTimeoutException timeoutEx)
+                {
+                    _fileLogger.LogError("Move worker stopped - Alfresco Timeout: {Message}", timeoutEx.Message);
+                    _dbLogger.LogError(timeoutEx, "Move worker stopped - Timeout");
+                    _uiLogger.LogError("Move worker stopped - Timeout: {Operation}", timeoutEx.Operation);
+                    throw; // Re-throw to stop migration
+                }
+                catch (AlfrescoRetryExhaustedException retryEx)
+                {
+                    _fileLogger.LogError("Move worker stopped - Alfresco Retry Exhausted: {Message}", retryEx.Message);
+                    _dbLogger.LogError(retryEx, "Move worker stopped - Retry Exhausted");
+                    _uiLogger.LogError("Move worker stopped - Retry Exhausted: {Operation}", retryEx.Operation);
+                    throw; // Re-throw to stop migration
+                }
+                catch (AlfrescoException alfrescoEx)
+                {
+                    _fileLogger.LogError("Move worker stopped - Alfresco Error: {Message}", alfrescoEx.Message);
+                    _dbLogger.LogError(alfrescoEx, "Move worker stopped - Alfresco Error");
+                    _uiLogger.LogError("Move worker stopped - Alfresco Error (Status: {StatusCode})", alfrescoEx.StatusCode);
+                    throw; // Re-throw to stop migration
                 }
                 catch (Exception ex)
                 {

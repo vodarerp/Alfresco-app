@@ -1,4 +1,5 @@
-﻿using Alfresco.Contracts.Enums;
+﻿using Alfresco.Abstraction.Models;
+using Alfresco.Contracts.Enums;
 using Alfresco.Contracts.Extensions;
 using Alfresco.Contracts.Mapper;
 using Alfresco.Contracts.Models;
@@ -402,6 +403,27 @@ namespace Migration.Infrastructure.Implementation.Services
                     _uiLogger.LogInformation("Folder Discovery cancelled");
                     throw;
                 }
+                catch (AlfrescoTimeoutException timeoutEx)
+                {
+                    _fileLogger.LogError("FolderDiscovery service stopped - Alfresco Timeout: {Message}", timeoutEx.Message);
+                    _dbLogger.LogError(timeoutEx, "FolderDiscovery service stopped - Timeout");
+                    _uiLogger.LogError("Folder Discovery stopped - Timeout: {Operation}", timeoutEx.Operation);
+                    throw; // Re-throw to stop migration
+                }
+                catch (AlfrescoRetryExhaustedException retryEx)
+                {
+                    _fileLogger.LogError("FolderDiscovery service stopped - Alfresco Retry Exhausted: {Message}", retryEx.Message);
+                    _dbLogger.LogError(retryEx, "FolderDiscovery service stopped - Retry Exhausted");
+                    _uiLogger.LogError("Folder Discovery stopped - Retry Exhausted: {Operation}", retryEx.Operation);
+                    throw; // Re-throw to stop migration
+                }
+                catch (AlfrescoException alfrescoEx)
+                {
+                    _fileLogger.LogError("FolderDiscovery service stopped - Alfresco Error: {Message}", alfrescoEx.Message);
+                    _dbLogger.LogError(alfrescoEx, "FolderDiscovery service stopped - Alfresco Error");
+                    _uiLogger.LogError("Folder Discovery stopped - Alfresco Error (Status: {StatusCode})", alfrescoEx.StatusCode);
+                    throw; // Re-throw to stop migration
+                }
                 catch (Exception ex)
                 {
                     _fileLogger.LogError("Critical error in batch {BatchCounter}: {Error}", batchCounter, ex.Message);
@@ -537,6 +559,27 @@ namespace Migration.Infrastructure.Implementation.Services
                     progress.Message = $"Cancelled after discovering {_totalInserted} folders";
                     progressCallback?.Invoke(progress);
                     throw;
+                }
+                catch (AlfrescoTimeoutException timeoutEx)
+                {
+                    _fileLogger.LogError("FolderDiscovery worker stopped - Alfresco Timeout: {Message}", timeoutEx.Message);
+                    _dbLogger.LogError(timeoutEx, "FolderDiscovery worker stopped - Timeout");
+                    _uiLogger.LogError("Folder Discovery worker stopped - Timeout: {Operation}", timeoutEx.Operation);
+                    throw; // Re-throw to stop migration
+                }
+                catch (AlfrescoRetryExhaustedException retryEx)
+                {
+                    _fileLogger.LogError("FolderDiscovery worker stopped - Alfresco Retry Exhausted: {Message}", retryEx.Message);
+                    _dbLogger.LogError(retryEx, "FolderDiscovery worker stopped - Retry Exhausted");
+                    _uiLogger.LogError("Folder Discovery worker stopped - Retry Exhausted: {Operation}", retryEx.Operation);
+                    throw; // Re-throw to stop migration
+                }
+                catch (AlfrescoException alfrescoEx)
+                {
+                    _fileLogger.LogError("FolderDiscovery worker stopped - Alfresco Error: {Message}", alfrescoEx.Message);
+                    _dbLogger.LogError(alfrescoEx, "FolderDiscovery worker stopped - Alfresco Error");
+                    _uiLogger.LogError("Folder Discovery worker stopped - Alfresco Error (Status: {StatusCode})", alfrescoEx.StatusCode);
+                    throw; // Re-throw to stop migration
                 }
                 catch (Exception ex)
                 {
