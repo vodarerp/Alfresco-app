@@ -368,9 +368,12 @@ namespace Alfresco.App
         }
 
         protected override void OnStartup(StartupEventArgs e)
-        {                    
+        {
 
             AppHost.Start();
+
+            // Log startup configuration information
+            LogStartupConfiguration();
 
             //var window = AppHost.Services.GetRequiredService<MainWindow>();
             //window.Show();
@@ -385,7 +388,7 @@ namespace Alfresco.App
             base.OnExit(e);
         }
 
-        
+
         private static void EnsureConnectionsConfigExists()
         {
             try
@@ -403,13 +406,107 @@ namespace Alfresco.App
                         // Copy example to local directory
                         File.Copy(examplePath, localConnectionsPath);
                     }
-                       
+
                 }
             }
-            catch 
+            catch
             {
-               
+
             }
+        }
+
+        private static void LogStartupConfiguration()
+        {
+            try
+            {
+                const string appVersion = "4.9.0"; // Manual version - update as needed
+
+                var loggerFactory = AppHost.Services.GetRequiredService<ILoggerFactory>();
+                var logger = loggerFactory.CreateLogger("FileLogger");
+
+                logger.LogInformation("========================================");
+                logger.LogInformation("Application Starting - Configuration Summary");
+                logger.LogInformation("========================================");
+                logger.LogInformation("App Version: {AppVersion}", appVersion);
+
+                // SQL Server Configuration
+                var connectionsOptions = AppHost.Services.GetService<IOptions<ConnectionsOptions>>()?.Value;
+                if (connectionsOptions?.SqlServer != null)
+                {
+                    var sqlConnectionString = connectionsOptions.SqlServer.ConnectionString;
+                    var sqlServerInfo = ParseSqlServerConnectionString(sqlConnectionString);
+                    logger.LogInformation("SQL Server: {Server}", sqlServerInfo.Server);
+                    logger.LogInformation("Database: {Database}", sqlServerInfo.Database);
+                    logger.LogInformation("SQL User: {User}", sqlServerInfo.User);
+                }
+
+                // Alfresco Configuration
+                if (connectionsOptions?.Alfresco != null)
+                {
+                    logger.LogInformation("Alfresco URL: {AlfrescoUrl}", connectionsOptions.Alfresco.BaseUrl);
+                    logger.LogInformation("Alfresco User: {AlfrescoUser}", connectionsOptions.Alfresco.Username);
+                }
+
+                // Client API Configuration
+                if (connectionsOptions?.ClientApi != null)
+                {
+                    logger.LogInformation("Client API URL: {ClientApiUrl}", connectionsOptions.ClientApi.BaseUrl);
+                }
+
+                // Migration Configuration
+                var migrationOptions = AppHost.Services.GetService<IOptions<MigrationOptions>>()?.Value;
+                if (migrationOptions != null)
+                {
+                    logger.LogInformation("Destination Folder ID: {DestinationFolderId}", migrationOptions.RootDestinationFolderId);
+                    logger.LogInformation("Discovery Folder ID: {DiscoveryFolderId}", migrationOptions.RootDiscoveryFolderId);
+                    logger.LogInformation("Root Document Path: {RootDocumentPath}", migrationOptions.RootDocumentPath ?? "Not configured");
+                }
+
+                logger.LogInformation("========================================");
+            }
+            catch (Exception ex)
+            {
+                // If logging fails, don't crash the application
+                System.Diagnostics.Debug.WriteLine($"Failed to log startup configuration: {ex.Message}");
+            }
+        }
+
+        private static (string Server, string Database, string User) ParseSqlServerConnectionString(string connectionString)
+        {
+            var server = "Not configured";
+            var database = "Not configured";
+            var user = "Not configured";
+
+            if (string.IsNullOrWhiteSpace(connectionString))
+                return (server, database, user);
+
+            try
+            {
+                var parts = connectionString.Split(';', StringSplitOptions.RemoveEmptyEntries);
+                foreach (var part in parts)
+                {
+                    var keyValue = part.Split('=', 2);
+                    if (keyValue.Length != 2) continue;
+
+                    var key = keyValue[0].Trim().ToLowerInvariant();
+                    var value = keyValue[1].Trim();
+
+                    if (key == "server" || key == "data source")
+                        server = value;
+                    else if (key == "database" || key == "initial catalog")
+                        database = value;
+                    else if (key == "user id" || key == "uid")
+                        user = value;
+                    else if (key == "integrated security" && value.ToLowerInvariant() == "true")
+                        user = "Windows Authentication";
+                }
+            }
+            catch
+            {
+                // If parsing fails, return default values
+            }
+
+            return (server, database, user);
         }
 
     }
