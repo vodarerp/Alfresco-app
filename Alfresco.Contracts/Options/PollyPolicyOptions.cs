@@ -35,7 +35,7 @@ namespace Alfresco.Contracts.Options
         /// <summary>
         /// Number of retry attempts for transient failures
         /// Default: 3
-        /// Note: Timeout exceptions (TaskCanceledException) are NOT retried
+        /// Note: Retries include network failures (SocketException, IOException) and Polly timeouts (TimeoutRejectedException)
         /// </summary>
         public int RetryCount { get; set; } = 3;
 

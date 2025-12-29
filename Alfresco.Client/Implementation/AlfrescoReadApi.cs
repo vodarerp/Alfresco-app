@@ -174,6 +174,15 @@ namespace Alfresco.Client.Implementation
         {
             try
             {
+                // DIAGNOSTIKA: Proveri da li je CancellationToken već canceled PRE HTTP poziva
+                if (ct.IsCancellationRequested)
+                {
+                    _fileLogger.LogWarning(
+                        "⚠️ DIJAGNOSTIKA: CancellationToken JE VEĆ CANCELED pre HTTP search poziva! " +
+                        "Query: {Query}. Ovo ukazuje na eksterni cancellation (SQL, Worker stop, itd.)",
+                        inRequest?.Query?.Query);
+                }
+
                 var jsonSerializerSettings = new JsonSerializerSettings
                 {
                     NullValueHandling = NullValueHandling.Ignore,
@@ -184,7 +193,15 @@ namespace Alfresco.Client.Implementation
 
                 using var bodyRequest = new StringContent(json, Encoding.UTF8, "application/json");
 
+                // DIAGNOSTIKA: Log start vremena
+                var startTime = DateTime.UtcNow;
+                _fileLogger.LogDebug("🔍 Starting Alfresco search: {Query}", inRequest?.Query?.Query);
+
                 using var postResponse = await _client.PostAsync($"/alfresco/api/-default-/public/search/versions/1/search", bodyRequest, ct).ConfigureAwait(false);
+
+                // DIAGNOSTIKA: Log trajanje poziva
+                var elapsed = DateTime.UtcNow - startTime;
+                _fileLogger.LogDebug("✅ Alfresco search completed in {Elapsed}s", elapsed.TotalSeconds);
 
                 var stringResponse = await postResponse.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
                 var toRet = JsonConvert.DeserializeObject<NodeChildrenResponse>(stringResponse);
@@ -200,9 +217,28 @@ namespace Alfresco.Client.Implementation
             }
             catch (AlfrescoRetryExhaustedException retryEx)
             {
+                // DIAGNOSTIKA: Log CancellationToken status i inner exception details
+                var isCanceled = ct.IsCancellationRequested ? "DA" : "NE";
+                var innerExType = retryEx.LastException?.GetType().Name ?? "None";
+                var innerInnerExType = retryEx.LastException?.InnerException?.GetType().Name ?? "None";
+
                 _fileLogger.LogError(
-                    "❌ RETRY EXHAUSTED: Search - Query: {Query}, Language: {Language}, Retries: {RetryCount}",
-                    inRequest?.Query?.Query, inRequest?.Query?.Language, retryEx.RetryCount);
+                    "❌ RETRY EXHAUSTED: Search - Query: {Query}, Language: {Language}, Retries: {RetryCount}, " +
+                    "CancellationToken canceled: {IsCanceled}, LastException: {ExType}, InnerException: {InnerType}",
+                    inRequest?.Query?.Query, inRequest?.Query?.Language, retryEx.RetryCount, isCanceled, innerExType, innerInnerExType);
+                throw;
+            }
+            catch (Exception ex)
+            {
+                // DIAGNOSTIKA: Log unexpected exceptions sa CT statusom
+                var isCanceled = ct.IsCancellationRequested ? "DA" : "NE";
+                var innerExType = ex.InnerException?.GetType().Name ?? "None";
+
+                _fileLogger.LogError(ex,
+                    "❌ SEARCH FAILED: Query: {Query}, ExceptionType: {ExType}, InnerException: {InnerType}, " +
+                    "CancellationToken canceled: {IsCanceled}",
+                    inRequest?.Query?.Query, ex.GetType().Name, innerExType, isCanceled);
+
                 throw;
             }
         }

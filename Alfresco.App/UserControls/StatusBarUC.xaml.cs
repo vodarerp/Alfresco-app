@@ -193,8 +193,8 @@ namespace Alfresco.App.UserControls
         private async void StatusBarUC_Loaded(object sender, RoutedEventArgs e)
         {
             TestConnection();
-            
-            
+
+
         }
 
         #region INotifyPropertyChange implementation
