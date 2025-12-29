@@ -435,7 +435,16 @@ namespace Migration.Infrastructure.Implementation.Document
             properties.Add("ecm:bnkClientType", clientData.Segment ?? string.Empty);
             properties.Add("ecm:bnkClientSubtype", clientData.ClientSubtype ?? string.Empty);
             properties.Add("ecm:bnkOfficeId", clientData.BarCLEXOpu ?? string.Empty);
-            properties.Add("ecm:bnkStaff", clientData.Staff ?? string.Empty);
+            //properties.Add("ecm:bnkStaff",  clientData.Staff ?? string.Empty);
+            bool staf = clientData.Staff?.ToLowerInvariant() switch
+            {
+                "n" => false,
+                null => false,
+                "false" => false,
+                "0" => false,
+                _ => true
+            };
+            properties.Add("ecm:bnkStaff", staf);
             properties.Add("ecm:bnkBarclex", $"{clientData.BarCLEXGroupCode ?? string.Empty} {clientData.BarCLEXGroupName ?? string.Empty} ");
             properties.Add("ecm:bnkContributor", $"{clientData.BarCLEXCode ?? string.Empty} {clientData.BarCLEXName ?? string.Empty} ");
 

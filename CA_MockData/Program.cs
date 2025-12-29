@@ -38,7 +38,7 @@ public static class Program
             BaseUrl = "http://localhost:8080/",
             Username =  "admin",
             Password = "admin",
-            RootParentId = "b56a7bdf-2095-4281-aa7b-df2095028111",
+            RootParentId = "b1ad0f7d-faf2-4dab-ad0f-7dfaf28dab9a",
             FolderCount = 50,
             DocsPerFolder = 3,
             DegreeOfParallelism = 8,
@@ -53,7 +53,7 @@ public static class Program
             // KDP document generation settings
             // To generate ~5000 KDP documents: Set FolderCount=500 and KdpDocumentsPerFolder=10
             // Or: Set FolderCount=250 and KdpDocumentsPerFolder=20
-            GenerateOnlyKdpDocuments = true,       // Set to true to generate only KDP documents
+            GenerateOnlyKdpDocuments = false,       // Set to true to generate only KDP documents
             KdpDocumentsPerFolder = 100              // Number of KDP documents per folder
         };
 
@@ -357,7 +357,7 @@ public static class Program
         var url = $"alfresco/api/-default-/public/alfresco/versions/1/nodes/{parentId}/children";
 
         object payload;
-        var requiredAspects = new[] { "ecm:dossierMetadata", "cm:titled" };
+        var requiredAspects = new[] { "ecm:dossierMetadata", "cm:titled" }; //
         if (properties != null && properties.Count > 0)
         {
             // Create payload with properties using custom ecm:clientFolder type
@@ -489,7 +489,7 @@ public static class Program
         // Build update payload with aspects and properties
         var payload = new
         {
-           aspectNames = new[] { "ecm:dossierMetadata", "cm:titled" },
+           aspectNames = new[] { "ecm:dossierMetadata", "cm:titled" }, // "ecm:dossierMetadata",
             properties
         };
 

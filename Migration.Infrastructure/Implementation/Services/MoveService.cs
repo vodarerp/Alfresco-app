@@ -621,6 +621,21 @@ namespace Migration.Infrastructure.Implementation.Services
                     _fileLogger.LogDebug("Will update ecm:docDossierId and ecm:folderId to '{DestinationFolderId}' for document {DocId}", doc.DestinationFolderId, doc.Id);
                 }
 
+                if (!string.IsNullOrWhiteSpace(doc.DossierDestFolderId))
+                {
+                    string type = doc.DossierDestFolderId switch
+                    {
+                        var s when s.StartsWith("ACC-", StringComparison.OrdinalIgnoreCase) => "ACC",
+                        var s when s.StartsWith("PI-", StringComparison.OrdinalIgnoreCase) => "PI",
+                        var s when s.StartsWith("LE-", StringComparison.OrdinalIgnoreCase) => "LE",
+                        var s when s.StartsWith("DE-", StringComparison.OrdinalIgnoreCase) => "DE",
+                        _ => ""
+                    };
+
+                    propertiesToUpdate["ecm:docDossierType"] = type;
+                }
+                   
+
                 //propertiesToUpdate["ecm:active"] = doc.IsActive;
                 //_fileLogger.LogDebug("Will update ecm:active to '{Active}' for document {DocId}", doc.IsActive.ToString(), doc.Id);
 

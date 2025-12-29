@@ -150,7 +150,7 @@ namespace Migration.Infrastructure.Implementation.Services
                 _logger.LogInformation("Migration pipeline completed successfully!");
                 _uiLogger.LogInformation("✅ Migracija uspešno završena!");
 
-                // Log final error metrics
+                // Log final error metrics -- NIKOLA
                 var metrics = _errorTracker.GetMetrics();
                 _logger.LogInformation(
                     "📊 Migration Error Summary: Timeouts: {TimeoutCount}, Retry Failures: {RetryFailureCount}, Total: {TotalErrors}",
@@ -456,7 +456,7 @@ namespace Migration.Infrastructure.Implementation.Services
         private async Task MarkPhaseAsFailed(MigrationPhase phase, string errorMessage, CancellationToken ct)
         {
             try
-            {
+            { //NIKOLA
                 await ExecuteCheckpointOperationAsync(async (uow) =>
                 {
                     var sql = @"UPDATE PhaseCheckpoints
@@ -483,7 +483,7 @@ namespace Migration.Infrastructure.Implementation.Services
         private async Task<T> ExecuteCheckpointOperationAsync<T>(Func<IUnitOfWork, Task<T>> operation, CancellationToken ct)
         {
             // Create a new scope with a dedicated UnitOfWork instance
-            // This UnitOfWork is completely independent from phase services
+            // This UnitOfWork is completely independent from phase services NIKOLA
             await using var scope = _scopeFactory.CreateAsyncScope();
             var uow = scope.ServiceProvider.GetRequiredService<IUnitOfWork>();
 
