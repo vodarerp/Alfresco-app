@@ -34,6 +34,10 @@ namespace Alfresco.App.UserControls
         private readonly IClientApi _clientApi;
         private readonly IUnitOfWork _unitOfWork;
 
+        // Track if migration is currently running to avoid unnecessary DB calls
+        // Only query migration status while migration is active
+        private bool _isMigrationRunning = false;
+
         #region Properties
 
         private string _statusMessage = "Ready to start migration";
@@ -185,6 +189,12 @@ namespace Alfresco.App.UserControls
 
         private async Task UpdateStatusAsync()
         {
+            // Only query migration status if migration is actually running
+            if (!_isMigrationRunning)
+            {
+                return;
+            }
+
             try
             {
                 var status = await _migrationWorker.GetStatusAsync();
@@ -348,6 +358,9 @@ namespace Alfresco.App.UserControls
 
                 StatusMessage = "Starting migration pipeline...";
 
+                // Set migration running flag to enable status updates
+                _isMigrationRunning = true;
+
                 // Run migration in background
                 _ = Task.Run(async () =>
                 {
@@ -361,7 +374,6 @@ namespace Alfresco.App.UserControls
                             btnStart.IsEnabled = true;
                             btnStop.IsEnabled = false;
                             MessageBox.Show($"Migration of documents with docDesc '{DocDescriptions}' finished!");
-
                         });
                     }
                     catch (OperationCanceledException)
@@ -502,6 +514,12 @@ namespace Alfresco.App.UserControls
                                 MessageBoxImage.Error);
                         });
                     }
+                    finally
+                    {
+                        // Migration finished (either completed, cancelled, or failed)
+                        // Stop querying migration status
+                        _isMigrationRunning = false;
+                    }
                 });
             }
             catch (Exception ex)
@@ -509,6 +527,7 @@ namespace Alfresco.App.UserControls
                 MessageBox.Show($"Failed to start migration: {ex.Message}", "Error", MessageBoxButton.OK, MessageBoxImage.Error);
                 btnStart.IsEnabled = true;
                 btnStop.IsEnabled = false;
+                _isMigrationRunning = false; // Reset flag if migration failed to start
             }
         }
 
@@ -538,6 +557,7 @@ namespace Alfresco.App.UserControls
 
                 if (result == MessageBoxResult.Yes)
                 {
+                    _isMigrationRunning = false; // Stop querying status
                     await _migrationWorker.ResetAsync();
                     StatusMessage = "Migration reset to initial state";
                     await UpdateStatusAsync();
