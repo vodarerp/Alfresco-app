@@ -407,7 +407,10 @@ namespace Alfresco.Client.Implementation
                     }
                     catch (Exception ex) when (ex is not AlfrescoTimeoutException && ex is not AlfrescoRetryExhaustedException)
                     {
-                        _fileLogger.LogError(ex, "Error moving node {NodeId} to folder {TargetFolderId}", nodeId, targetFolderId);
+                        _fileLogger.LogError("[{Method}] Error moving node {NodeId} to folder {TargetFolderId} - {ErrorType}: {Message}",
+                            nameof(MoveDocumentAsync), nodeId, targetFolderId, ex.GetType().Name, ex.Message);
+                        _dbLogger.LogError(ex, "[{Method}] Error moving node {NodeId} to folder {TargetFolderId}",
+                            nameof(MoveDocumentAsync), nodeId, targetFolderId);
                         throw;
                     }
                 }
@@ -507,7 +510,10 @@ namespace Alfresco.Client.Implementation
             }
             catch (Exception ex)
             {
-                _fileLogger.LogError(ex, "Error copying node {NodeId} to folder {TargetFolderId}", nodeId, targetFolderId);
+                _fileLogger.LogError("[{Method}] Error copying node {NodeId} to folder {TargetFolderId} - {ErrorType}: {Message}",
+                    nameof(CopyDocumentAsync), nodeId, targetFolderId, ex.GetType().Name, ex.Message);
+                _dbLogger.LogError(ex, "[{Method}] Error copying node {NodeId} to folder {TargetFolderId}",
+                    nameof(CopyDocumentAsync), nodeId, targetFolderId);
                 throw;
             }
         }
@@ -611,7 +617,10 @@ namespace Alfresco.Client.Implementation
             }
             catch (Exception ex)
             {
-                _fileLogger.LogError(ex, "Error updating properties for node {NodeId}", nodeId);
+                _fileLogger.LogError("[{Method}] Error updating properties for node {NodeId} - {ErrorType}: {Message}",
+                    nameof(UpdateNodePropertiesAsync), nodeId, ex.GetType().Name, ex.Message);
+                _dbLogger.LogError(ex, "[{Method}] Error updating properties for node {NodeId}",
+                    nameof(UpdateNodePropertiesAsync), nodeId);
                 throw;
             }
         }
@@ -671,7 +680,10 @@ namespace Alfresco.Client.Implementation
                 }
                 catch (Exception ex)
                 {
-                    _fileLogger.LogWarning(ex, "Error fetching node name for {NodeId}, using fallback name", nodeId);
+                    _fileLogger.LogWarning("[{Method}] Error fetching node name for {NodeId} - {ErrorType}: {Message}. Using fallback name.",
+                        nameof(GenerateNewNameWithSuffixAsync), nodeId, ex.GetType().Name, ex.Message);
+                    _dbLogger.LogWarning(ex, "[{Method}] Error fetching node name for {NodeId}, using fallback name",
+                        nameof(GenerateNewNameWithSuffixAsync), nodeId);
                     originalName = $"document_{nodeId}";
                 }
             }

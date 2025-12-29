@@ -168,9 +168,11 @@ namespace Migration.Infrastructure.Implementation.Services
                     }
                     catch (Exception ex)
                     {
-                        _fileLogger.LogError(ex,
-                            "Failed to create folder: {RootId}/{Path}",
-                            folder.DestinationRootId, folder.FolderPath);
+                        _fileLogger.LogError(
+                            "[{Method}] Failed to create folder: {RootId}/{Path} - {ErrorType}: {Message}",
+                            nameof(PrepareAllFoldersAsync), folder.DestinationRootId, folder.FolderPath, ex.GetType().Name, ex.Message);
+                        _dbLogger.LogError(ex, "[{Method}] Failed to create folder: {RootId}/{Path}",
+                            nameof(PrepareAllFoldersAsync), folder.DestinationRootId, folder.FolderPath);
                         _uiLogger.LogWarning("Folder creation error: {Path}", folder.FolderPath);
                         _errors.Add($"{folder.DestinationRootId}/{folder.FolderPath}: {ex.Message}");
 
@@ -220,7 +222,10 @@ namespace Migration.Infrastructure.Implementation.Services
             }
             catch (Exception ex)
             {
-                _fileLogger.LogError(ex, "❌ Fatal error in folder preparation");
+                _fileLogger.LogError("[{Method}] ❌ Fatal error in folder preparation: {ErrorType} - {Message}",
+                    nameof(PrepareAllFoldersAsync), ex.GetType().Name, ex.Message);
+                _dbLogger.LogError(ex, "[{Method}] Fatal error in folder preparation",
+                    nameof(PrepareAllFoldersAsync));
                 _uiLogger.LogError("Critical error in folder preparation: {Error}", ex.Message);
                 throw;
             }
@@ -280,7 +285,10 @@ namespace Migration.Infrastructure.Implementation.Services
             }
             catch (Exception ex)
             {
-                _fileLogger.LogError(ex, "Error getting unique folders from DocStaging");
+                _fileLogger.LogError("[{Method}] Error getting unique folders from DocStaging: {ErrorType} - {Message}",
+                    nameof(GetUniqueFoldersAsync), ex.GetType().Name, ex.Message);
+                _dbLogger.LogError(ex, "[{Method}] Error getting unique folders from DocStaging",
+                    nameof(GetUniqueFoldersAsync));
                 _uiLogger.LogError("Database error while getting folders");
                 throw;
             }
@@ -369,7 +377,10 @@ namespace Migration.Infrastructure.Implementation.Services
             }
             catch (Exception ex)
             {
-                _fileLogger.LogError(ex, "Error creating folder: {Path}", folder.FolderPath);
+                _fileLogger.LogError("[{Method}] Error creating folder: {Path} - {ErrorType}: {Message}",
+                    nameof(CreateFolderAsync), folder.FolderPath, ex.GetType().Name, ex.Message);
+                _dbLogger.LogError(ex, "[{Method}] Error creating folder: {Path}",
+                    nameof(CreateFolderAsync), folder.FolderPath);
                 _uiLogger.LogWarning("Failed to create folder {Path}", folder.FolderPath);
                 return (null, false, ex.Message);
             }
@@ -413,9 +424,12 @@ namespace Migration.Infrastructure.Implementation.Services
             }
             catch (Exception ex)
             {
-                _fileLogger.LogError(ex,
-                    "Failed to update DestinationFolderId for DossierDestFolderId='{DossierId}'. Folder ID: {FolderId}",
-                    dossierDestFolderId, alfrescoFolderId);
+                _fileLogger.LogError(
+                    "[{Method}] Failed to update DestinationFolderId for DossierDestFolderId='{DossierId}', Folder ID: {FolderId} - {ErrorType}: {Message}",
+                    nameof(UpdateDocumentDestinationFolderIdAsync), dossierDestFolderId, alfrescoFolderId, ex.GetType().Name, ex.Message);
+                _dbLogger.LogError(ex,
+                    "[{Method}] Failed to update DestinationFolderId for DossierDestFolderId='{DossierId}'. Folder ID: {FolderId}",
+                    nameof(UpdateDocumentDestinationFolderIdAsync), dossierDestFolderId, alfrescoFolderId);
                 _uiLogger.LogWarning("Could not update destination folder ID for {DossierId}", dossierDestFolderId);
                 // Don't throw - this is not critical for folder creation
                 // MoveService will fail gracefully if DestinationFolderId is null
@@ -445,7 +459,10 @@ namespace Migration.Infrastructure.Implementation.Services
             }
             catch (Exception ex)
             {
-                _fileLogger.LogError(ex, "Error getting checkpoint");
+                _fileLogger.LogError("[{Method}] Error getting checkpoint: {ErrorType} - {Message}",
+                    nameof(GetCheckpointAsync), ex.GetType().Name, ex.Message);
+                _dbLogger.LogError(ex, "[{Method}] Error getting checkpoint",
+                    nameof(GetCheckpointAsync));
                 return null;
             }
         }
@@ -481,7 +498,10 @@ namespace Migration.Infrastructure.Implementation.Services
             }
             catch (Exception ex)
             {
-                _fileLogger.LogWarning(ex, "Failed to save checkpoint");
+                _fileLogger.LogWarning("[{Method}] Failed to save checkpoint: {ErrorType} - {Message}",
+                    nameof(SaveCheckpointAsync), ex.GetType().Name, ex.Message);
+                _dbLogger.LogWarning(ex, "[{Method}] Failed to save checkpoint",
+                    nameof(SaveCheckpointAsync));
             }
         }
 
@@ -516,7 +536,10 @@ namespace Migration.Infrastructure.Implementation.Services
             }
             catch (Exception ex)
             {
-                _fileLogger.LogWarning(ex, "Failed to update total items in checkpoint");
+                _fileLogger.LogWarning("[{Method}] Failed to update total items in checkpoint: {ErrorType} - {Message}",
+                    nameof(UpdateTotalItemsAsync), ex.GetType().Name, ex.Message);
+                _dbLogger.LogWarning(ex, "[{Method}] Failed to update total items in checkpoint",
+                    nameof(UpdateTotalItemsAsync));
             }
         }
 
@@ -719,8 +742,10 @@ namespace Migration.Infrastructure.Implementation.Services
             }
             catch (Exception ex)
             {
-                _fileLogger.LogWarning(ex, "Failed to batch update FolderStaging");
-                _dbLogger.LogError(ex, "Failed to batch update FolderStaging");
+                _fileLogger.LogWarning("[{Method}] Failed to batch update FolderStaging: {ErrorType} - {Message}",
+                    nameof(BatchUpdateFolderStagingAsync), ex.GetType().Name, ex.Message);
+                _dbLogger.LogError(ex, "[{Method}] Failed to batch update FolderStaging",
+                    nameof(BatchUpdateFolderStagingAsync));
                 _uiLogger.LogInformation("Could not update folder status tracking");
                 // Don't throw - this is not critical
             }
@@ -752,7 +777,10 @@ namespace Migration.Infrastructure.Implementation.Services
             }
             catch (Exception ex)
             {
-                _fileLogger.LogError(ex, "Failed to check documents ready for move");
+                _fileLogger.LogError("[{Method}] Failed to check documents ready for move: {ErrorType} - {Message}",
+                    nameof(CheckDocumentsReadyForMoveAsync), ex.GetType().Name, ex.Message);
+                _dbLogger.LogError(ex, "[{Method}] Failed to check documents ready for move",
+                    nameof(CheckDocumentsReadyForMoveAsync));
                 return 0;
             }
         }

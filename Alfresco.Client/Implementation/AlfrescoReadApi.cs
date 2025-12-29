@@ -19,12 +19,14 @@ namespace Alfresco.Client.Implementation
         private readonly HttpClient _client;
         private readonly AlfrescoOptions _options;
         private readonly ILogger _fileLogger;
+        private readonly ILogger _dbLogger;
 
         public AlfrescoReadApi(HttpClient client, IOptions<AlfrescoOptions> options, ILoggerFactory logger)
         {
             _client = client;
             _options = options.Value;
             _fileLogger = logger.CreateLogger("FileLogger");
+            _dbLogger = logger.CreateLogger("DbLogger");
         }
 
         /// <summary>
@@ -91,7 +93,10 @@ namespace Alfresco.Client.Implementation
             }
             catch (Exception ex)
             {
-                _fileLogger.LogError(ex, "Error in GetFolderByRelative - ParentId: {ParentId}, Path: {Path}", inNodeId, inRelativePath);
+                _fileLogger.LogError("[{Method}] Error in GetFolderByRelative - ParentId: {ParentId}, Path: {Path} - {ErrorType}: {Message}",
+                    nameof(GetFolderByRelative), inNodeId, inRelativePath, ex.GetType().Name, ex.Message);
+                _dbLogger.LogError(ex, "[{Method}] Error in GetFolderByRelative - ParentId: {ParentId}, Path: {Path}",
+                    nameof(GetFolderByRelative), inNodeId, inRelativePath);
                 // Return empty string to maintain backward compatibility
             }
 

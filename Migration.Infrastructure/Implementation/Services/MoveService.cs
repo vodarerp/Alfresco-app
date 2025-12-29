@@ -444,7 +444,10 @@ namespace Migration.Infrastructure.Implementation.Services
             }
             catch (Exception ex)
             {
-                _fileLogger.LogWarning(ex, "Failed to save checkpoint");
+                _fileLogger.LogWarning("[{Method}] Failed to save checkpoint: {ErrorType} - {Message}",
+                    nameof(SaveCheckpointAsync), ex.GetType().Name, ex.Message);
+                _dbLogger.LogWarning(ex, "[{Method}] Failed to save checkpoint",
+                    nameof(SaveCheckpointAsync));
             }
         }
 
@@ -661,9 +664,12 @@ namespace Migration.Infrastructure.Implementation.Services
             }
             catch (Exception ex)
             {
-                _fileLogger.LogError(ex,
-                    "Failed to migrate document {DocId} (NodeId: {NodeId})",
-                    doc.Id, doc.NodeId);
+                _fileLogger.LogError(
+                    "[{Method}] Failed to migrate document {DocId} (NodeId: {NodeId}) - {ErrorType}: {Message}",
+                    nameof(MoveSingleDocumentAsync), doc.Id, doc.NodeId, ex.GetType().Name, ex.Message);
+                _dbLogger.LogError(ex,
+                    "[{Method}] Failed to migrate document {DocId} (NodeId: {NodeId})",
+                    nameof(MoveSingleDocumentAsync), doc.Id, doc.NodeId);
                 _uiLogger.LogError("Migration failed for document {DocId}: {Error}", doc.Id, ex.Message);
                 throw;
             }

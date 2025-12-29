@@ -1030,7 +1030,10 @@ namespace Migration.Infrastructure.Implementation.Services
             }
             catch (Exception ex)
             {
-                _fileLogger.LogError(ex, "Error applying document mapping for document {Name}", alfrescoEntry.Name);
+                _fileLogger.LogError("[{Method}] Error applying document mapping for document {Name}: {ErrorType} - {Message}",
+                    nameof(ApplyDocumentMappingAsync), alfrescoEntry.Name, ex.GetType().Name, ex.Message);
+                _dbLogger.LogError(ex, "[{Method}] Error applying document mapping for document {Name}",
+                    nameof(ApplyDocumentMappingAsync), alfrescoEntry.Name);
                 _uiLogger.LogWarning("Document mapping failed for {Name}, using defaults", alfrescoEntry.Name);
 
                 // Set safe defaults
@@ -1114,7 +1117,10 @@ namespace Migration.Infrastructure.Implementation.Services
             }
             catch (Exception ex)
             {
-                _fileLogger.LogWarning(ex, "Failed to save checkpoint progress");
+                _fileLogger.LogWarning("[{Method}] Failed to save checkpoint progress: {ErrorType} - {Message}",
+                    nameof(SaveCheckpointProgressAsync), ex.GetType().Name, ex.Message);
+                _dbLogger.LogWarning(ex, "[{Method}] Failed to save checkpoint progress",
+                    nameof(SaveCheckpointProgressAsync));
             }
         }
 
@@ -1154,7 +1160,10 @@ namespace Migration.Infrastructure.Implementation.Services
             }
             catch (Exception ex)
             {
-                _fileLogger.LogWarning(ex, "Failed to load checkpoint");
+                _fileLogger.LogWarning("[{Method}] Failed to load checkpoint: {ErrorType} - {Message}",
+                    nameof(LoadCheckpointAsync), ex.GetType().Name, ex.Message);
+                _dbLogger.LogWarning(ex, "[{Method}] Failed to load checkpoint",
+                    nameof(LoadCheckpointAsync));
             }
         }
 
@@ -1198,7 +1207,10 @@ namespace Migration.Infrastructure.Implementation.Services
             }
             catch (Exception ex)
             {
-                _fileLogger.LogWarning(ex, "Failed to update total items estimate");
+                _fileLogger.LogWarning("[{Method}] Failed to update total items estimate: {ErrorType} - {Message}",
+                    nameof(UpdateTotalItemsEstimateAsync), ex.GetType().Name, ex.Message);
+                _dbLogger.LogWarning(ex, "[{Method}] Failed to update total items estimate",
+                    nameof(UpdateTotalItemsEstimateAsync));
             }
         }
 
