@@ -37,16 +37,20 @@ namespace Alfresco.App.Helpers
                 {
                     // RETRY samo ako je cancellation došao od socket/network problema
                     // NE RETRY ako je user eksplicitno cancelovao operaciju
-                    if (ex.CancellationToken.IsCancellationRequested)
+                    if (ex.InnerException is IOException ||
+                        ex.InnerException is System.Net.Sockets.SocketException)
                     {
-                        // Eksterni cancellation (user stop, worker shutdown) - NE RETRY
+                        // Network error sa cancellation - ovo je TIMEOUT ili SOCKET ERROR
+                        // RETRY bez obzira na IsCancellationRequested status
+                        return true;
+                    }
+                    if (ex.InnerException == null && ex.CancellationToken.IsCancellationRequested)
+                    {
+                        // User cancellation - NE RETRY
                         return false;
                     }
 
-                    // Cancellation zbog network problema (socket abort) - RETRY
-                    // Proveri da li je inner exception SocketException ili IOException
-                    return ex.InnerException is IOException ||
-                           ex.InnerException is System.Net.Sockets.SocketException;
+                    return false;
                 })
                 .Or<IOException>(ex =>
                 {

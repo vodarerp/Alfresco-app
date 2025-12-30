@@ -11,6 +11,7 @@ using Migration.Abstraction.Models;
 using Migration.Extensions.SqlServer;
 using SqlServer.Abstraction.Interfaces;
 using System.Collections.Concurrent;
+using System.Text;
 
 namespace Migration.Infrastructure.Implementation.Services
 {
@@ -261,6 +262,8 @@ namespace Migration.Infrastructure.Implementation.Services
         {
             try
             {
+                _fileLogger.LogInformation("GetUniqueFoldersAsync: Starting query for unique destination folders from DocStaging");
+
                 await using var scope = _scopeFactory.CreateAsyncScope();
                 var uow = scope.ServiceProvider.GetRequiredService<IUnitOfWork>();
                 var docRepo = scope.ServiceProvider.GetRequiredService<IDocStagingRepository>();
@@ -275,18 +278,37 @@ namespace Migration.Infrastructure.Implementation.Services
 
                     await uow.CommitAsync(ct).ConfigureAwait(false);
 
+                    _fileLogger.LogInformation("GetUniqueFoldersAsync: Successfully retrieved {Count} unique folders from DocStaging", uniqueFolders.Count);
+
+                    // Log detailed breakdown of folders by root
+                    var foldersByRoot = uniqueFolders.GroupBy(f => f.DestinationRootId).ToList();
+                    foreach (var group in foldersByRoot)
+                    {
+                        _fileLogger.LogInformation("GetUniqueFoldersAsync: Root '{RootId}' has {Count} unique folders", group.Key, group.Count());
+                    }
+
+                    // Log first few folders as sample
+                    var sampleFolders = uniqueFolders.Take(5).ToList();
+                    foreach (var folder in sampleFolders)
+                    {
+                        _fileLogger.LogInformation("GetUniqueFoldersAsync: Sample folder - RootId: {RootId}, Path: {Path}, Properties: {PropCount}",
+                            folder.DestinationRootId, folder.FolderPath, folder.Properties?.Count ?? 0);
+                    }
+
                     return uniqueFolders;
                 }
-                catch
+                catch (Exception ex)
                 {
                     await uow.RollbackAsync(ct).ConfigureAwait(false);
+                    _fileLogger.LogError(ex, "GetUniqueFoldersAsync: Database transaction failed during query. ErrorType: {ErrorType}, Message: {Message}",
+                        ex.GetType().Name, ex.Message);
                     throw;
                 }
             }
             catch (Exception ex)
             {
-                _fileLogger.LogError("[{Method}] Error getting unique folders from DocStaging: {ErrorType} - {Message}",
-                    nameof(GetUniqueFoldersAsync), ex.GetType().Name, ex.Message);
+                _fileLogger.LogError("[{Method}] Error getting unique folders from DocStaging: {ErrorType} - {Message}, StackTrace: {StackTrace}",
+                    nameof(GetUniqueFoldersAsync), ex.GetType().Name, ex.Message, ex.StackTrace);
                 _dbLogger.LogError(ex, "[{Method}] Error getting unique folders from DocStaging",
                     nameof(GetUniqueFoldersAsync));
                 _uiLogger.LogError("Database error while getting folders");
@@ -298,7 +320,55 @@ namespace Migration.Infrastructure.Implementation.Services
         {
             try
             {
+                //_fileLogger.LogInformation("CreateFolderAsync: Starting folder creation - UniqueFolderInfo object details:");
+                //_fileLogger.LogInformation("  DestinationRootId: {DestinationRootId}", folder.DestinationRootId);
+                //_fileLogger.LogInformation("  FolderPath: {FolderPath}", folder.FolderPath);
+                //_fileLogger.LogInformation("  CacheKey: {CacheKey}", folder.CacheKey ?? "NULL");
+                //_fileLogger.LogInformation("  TipProizvoda: {TipProizvoda}", folder.TipProizvoda ?? "NULL");
+                //_fileLogger.LogInformation("  CoreId: {CoreId}", folder.CoreId ?? "NULL");
+                //_fileLogger.LogInformation("  CreationDate: {CreationDate}", folder.CreationDate?.ToString("yyyy-MM-dd HH:mm:ss") ?? "NULL");
+                //_fileLogger.LogInformation("  TargetDossierType: {TargetDossierType}", folder.TargetDossierType?.ToString() ?? "NULL");
+                //_fileLogger.LogInformation("  IsCreated: {IsCreated}", folder.IsCreated);
+                //_fileLogger.LogInformation("  Properties Count: {PropCount}", folder.Properties?.Count ?? 0);
+                _fileLogger.LogInformation(
+                        "CreateFolderAsync: Starting folder creation {@Folder}",
+                        new
+                        {
+                            folder.DestinationRootId,
+                            folder.FolderPath,
+                            CacheKey = folder.CacheKey ?? "NULL",
+                            TipProizvoda = folder.TipProizvoda ?? "NULL",
+                            CoreId = folder.CoreId ?? "NULL",
+                            CreationDate = folder.CreationDate?.ToString("yyyy-MM-dd HH:mm:ss") ?? "NULL",
+                            TargetDossierType = folder.TargetDossierType?.ToString() ?? "NULL",
+                            folder.IsCreated,
+                            PropertiesCount = folder.Properties?.Count ?? 0
+                        }
+                    );
 
+
+                // Log properties if they exist
+                if (folder.Properties != null && folder.Properties.Count > 0)
+                {
+                   
+                    _fileLogger.LogInformation("CreateFolderAsync: Folder properties for '{Path}':", folder.FolderPath);
+                    var sb = new StringBuilder();
+
+                    sb.AppendLine("Folder properties:");
+                    foreach (var kvp in folder.Properties)
+                    {
+                        sb.Append("  ")
+                      .Append(kvp.Key)
+                      .Append(" = ")
+                      .AppendLine(kvp.Value?.ToString() ?? "NULL");
+                    }
+                    _fileLogger.LogInformation("{Properties}", sb.ToString());
+                    sb = null;
+                }
+                else
+                {
+                    _fileLogger.LogInformation("CreateFolderAsync: No properties for folder '{Path}'", folder.FolderPath);
+                }
 
                 await using var scope = _scopeFactory.CreateAsyncScope();
                 var documentResolver = scope.ServiceProvider.GetRequiredService<IDocumentResolver>();
@@ -306,22 +376,31 @@ namespace Migration.Infrastructure.Implementation.Services
                 // STEP 1: Create parent dossier folder (e.g., DOSSIERS-ACC) under RootDestinationFolderId if it doesn't exist
                 // folder.DestinationRootId contains the name like "DOSSIERS-ACC", "DOSSIERS-LE", etc.
                 // We need to create this folder under _rootDestinationFolderId first
+                _fileLogger.LogInformation("CreateFolderAsync: STEP 1 - Resolving parent dossier folder '{ParentFolder}' under root '{RootId}'",
+                    folder.DestinationRootId, _rootDestinationFolderId);
+
                 var parentDossierFolderId = await documentResolver.ResolveAsync(
                     _rootDestinationFolderId,
                     folder.DestinationRootId, // e.g., "DOSSIERS-ACC"
                     null, // No special properties for parent folder
                     ct).ConfigureAwait(false);
 
+                _fileLogger.LogInformation("CreateFolderAsync: Parent dossier folder '{ParentFolder}' resolved to ID: {ParentDossierFolderId}",
+                    folder.DestinationRootId, parentDossierFolderId);
+
                 // STEP 2: Create the actual dossier hierarchy under the parent folder
                 // Split folder path into parts: "ACC-12345/2024/01" → ["ACC-12345", "2024", "01"]
                 var pathParts = folder.FolderPath.Split('/', StringSplitOptions.RemoveEmptyEntries);
 
+               
+
                 if (pathParts.Length == 0)
                 {
-                    _fileLogger.LogWarning("Empty folder path for {RootId}", folder.DestinationRootId);
+                    _fileLogger.LogWarning("CreateFolderAsync: Empty folder path for RootId: {RootId}", folder.DestinationRootId);
                     return (null, false, "Empty folder path");
                 }
-
+                _fileLogger.LogInformation("CreateFolderAsync: STEP 2 - Creating folder hierarchy with {Levels} levels: {PathParts}",
+                   pathParts.Length, string.Join(" -> ", pathParts));
                 // Create each level in hierarchy starting from the parent dossier folder
                 var currentParentId = parentDossierFolderId;
                 bool mainFolderIsCreated = false; // Track if main dossier folder was created
@@ -333,6 +412,9 @@ namespace Migration.Infrastructure.Implementation.Services
                     // Only add properties to the FIRST level (main dossier folder)
                     // Sub-folders (year/month) don't need special properties
                     var isMainDossierFolder = (i == 0);
+
+                    _fileLogger.LogInformation("CreateFolderAsync: Processing level {Level}/{Total} - FolderName: '{FolderName}', IsMainFolder: {IsMain}, CurrentParentId: {ParentId}",
+                        i + 1, pathParts.Length, folderName, isMainDossierFolder, currentParentId);
 
                     if (isMainDossierFolder)
                     {
@@ -347,38 +429,49 @@ namespace Migration.Infrastructure.Implementation.Services
                         currentParentId = folderId;
                         mainFolderIsCreated = isCreated;
 
-                        _fileLogger.LogDebug(
-                            "Main dossier folder '{FolderName}' resolved: FolderId={FolderId}, IsCreated={IsCreated}",
-                            folderName, folderId, isCreated);
+                        _fileLogger.LogInformation(
+                            "CreateFolderAsync: Main dossier folder '{FolderName}' resolved - FolderId: {FolderId}, IsCreated: {IsCreated}, Properties: {PropCount}",
+                            folderName, folderId, isCreated, folder.Properties?.Count ?? 0);
                     }
                     else
                     {
                         // Sub-folders created without special properties
+                        var previousParentId = currentParentId;
                         currentParentId = await documentResolver.ResolveAsync(
                             currentParentId,
                             folderName,
                             null, // No properties for sub-folders
                             ct).ConfigureAwait(false);
+
+                        _fileLogger.LogInformation(
+                            "CreateFolderAsync: Sub-folder '{FolderName}' resolved - FolderId: {FolderId}, ParentId: {ParentId}",
+                            folderName, currentParentId, previousParentId);
                     }
                 }
 
-                _fileLogger.LogDebug(
-                    "Created folder hierarchy: {RootDestinationFolderId}/{ParentFolder}/{Path} → {FinalId}",
-                    _rootDestinationFolderId, folder.DestinationRootId, folder.FolderPath, currentParentId);
+                _fileLogger.LogInformation(
+                    "CreateFolderAsync: Successfully created folder hierarchy - RootDestinationFolderId: {RootId}, ParentFolder: {ParentFolder}, Path: {Path}, FinalFolderId: {FinalId}, MainFolderCreated: {IsCreated}",
+                    _rootDestinationFolderId, folder.DestinationRootId, folder.FolderPath, currentParentId, mainFolderIsCreated);
 
                 // STEP 3: Update DocStaging.DestinationFolderId and DossierDestFolderIsCreated for all documents in this folder
+                _fileLogger.LogInformation("CreateFolderAsync: STEP 3 - Updating DocStaging for folder '{Path}' with FolderId: {FolderId}",
+                    folder.FolderPath, currentParentId);
+
                 await UpdateDocumentDestinationFolderIdAsync(
                     folder.FolderPath,
                     currentParentId,
                     mainFolderIsCreated,
                     ct).ConfigureAwait(false);
 
+                _fileLogger.LogInformation("CreateFolderAsync: Completed successfully for folder '{Path}' -> FolderId: {FolderId}",
+                    folder.FolderPath, currentParentId);
+
                 return (currentParentId, true, null);
             }
             catch (Exception ex)
             {
-                _fileLogger.LogError("[{Method}] Error creating folder: {Path} - {ErrorType}: {Message}",
-                    nameof(CreateFolderAsync), folder.FolderPath, ex.GetType().Name, ex.Message);
+                _fileLogger.LogError("[{Method}] Error creating folder: RootId: {RootId}, Path: {Path}, ErrorType: {ErrorType}, Message: {Message}, StackTrace: {StackTrace}",
+                    nameof(CreateFolderAsync), folder.DestinationRootId, folder.FolderPath, ex.GetType().Name, ex.Message, ex.StackTrace);
                 _dbLogger.LogError(ex, "[{Method}] Error creating folder: {Path}",
                     nameof(CreateFolderAsync), folder.FolderPath);
                 _uiLogger.LogWarning("Failed to create folder {Path}", folder.FolderPath);
@@ -394,6 +487,9 @@ namespace Migration.Infrastructure.Implementation.Services
         {
             try
             {
+                _fileLogger.LogInformation("UpdateDocumentDestinationFolderIdAsync: Starting update - DossierDestFolderId: '{DossierId}', AlfrescoFolderId: {FolderId}, IsCreated: {IsCreated}",
+                    dossierDestFolderId, alfrescoFolderId, isCreated);
+
                 await using var scope = _scopeFactory.CreateAsyncScope();
                 var uow = scope.ServiceProvider.GetRequiredService<IUnitOfWork>();
                 var docRepo = scope.ServiceProvider.GetRequiredService<IDocStagingRepository>();
@@ -401,6 +497,9 @@ namespace Migration.Infrastructure.Implementation.Services
                 await uow.BeginAsync(ct: ct).ConfigureAwait(false);
                 try
                 {
+                    _fileLogger.LogInformation("UpdateDocumentDestinationFolderIdAsync: Executing update query for DossierDestFolderId: '{DossierId}'",
+                        dossierDestFolderId);
+
                     var rowsUpdated = await docRepo.UpdateDestinationFolderIdAsync(
                         dossierDestFolderId,
                         alfrescoFolderId,
@@ -411,22 +510,30 @@ namespace Migration.Infrastructure.Implementation.Services
 
                     if (rowsUpdated > 0)
                     {
-                        _fileLogger.LogDebug(
-                            "Updated {Count} documents with DestinationFolderId={FolderId}, IsCreated={IsCreated} for DossierDestFolderId='{DossierId}'",
+                        _fileLogger.LogInformation(
+                            "UpdateDocumentDestinationFolderIdAsync: Successfully updated {Count} documents - DestinationFolderId: {FolderId}, IsCreated: {IsCreated}, DossierDestFolderId: '{DossierId}'",
                             rowsUpdated, alfrescoFolderId, isCreated, dossierDestFolderId);
                     }
+                    else
+                    {
+                        _fileLogger.LogWarning(
+                            "UpdateDocumentDestinationFolderIdAsync: No documents updated (0 rows affected) - DossierDestFolderId: '{DossierId}', AlfrescoFolderId: {FolderId}",
+                            dossierDestFolderId, alfrescoFolderId);
+                    }
                 }
-                catch
+                catch (Exception ex)
                 {
                     await uow.RollbackAsync(ct: ct).ConfigureAwait(false);
+                    _fileLogger.LogError(ex, "UpdateDocumentDestinationFolderIdAsync: Database transaction failed - DossierDestFolderId: '{DossierId}', AlfrescoFolderId: {FolderId}, ErrorType: {ErrorType}, Message: {Message}",
+                        dossierDestFolderId, alfrescoFolderId, ex.GetType().Name, ex.Message);
                     throw;
                 }
             }
             catch (Exception ex)
             {
                 _fileLogger.LogError(
-                    "[{Method}] Failed to update DestinationFolderId for DossierDestFolderId='{DossierId}', Folder ID: {FolderId} - {ErrorType}: {Message}",
-                    nameof(UpdateDocumentDestinationFolderIdAsync), dossierDestFolderId, alfrescoFolderId, ex.GetType().Name, ex.Message);
+                    "[{Method}] Failed to update DestinationFolderId - DossierDestFolderId: '{DossierId}', AlfrescoFolderId: {FolderId}, ErrorType: {ErrorType}, Message: {Message}, StackTrace: {StackTrace}",
+                    nameof(UpdateDocumentDestinationFolderIdAsync), dossierDestFolderId, alfrescoFolderId, ex.GetType().Name, ex.Message, ex.StackTrace);
                 _dbLogger.LogError(ex,
                     "[{Method}] Failed to update DestinationFolderId for DossierDestFolderId='{DossierId}'. Folder ID: {FolderId}",
                     nameof(UpdateDocumentDestinationFolderIdAsync), dossierDestFolderId, alfrescoFolderId);
@@ -645,6 +752,8 @@ namespace Migration.Infrastructure.Implementation.Services
         {
             try
             {
+                _fileLogger.LogInformation("InsertFoldersToStagingAsync: Starting insertion of {Count} folders into FolderStaging", uniqueFolders.Count);
+
                 await using var scope = _scopeFactory.CreateAsyncScope();
                 var uow = scope.ServiceProvider.GetRequiredService<IUnitOfWork>();
                 var folderRepo = scope.ServiceProvider.GetRequiredService<IFolderStagingRepository>();
@@ -662,21 +771,38 @@ namespace Migration.Infrastructure.Implementation.Services
                         UpdatedAt = DateTime.UtcNow
                     }).ToList();
 
+                    _fileLogger.LogInformation("InsertFoldersToStagingAsync: Prepared {Count} FolderStaging records for insertion", foldersToInsert.Count);
+
+                    // Log first few samples
+                    var sampleFolders = foldersToInsert.Take(5).ToList();
+                    foreach (var folder in sampleFolders)
+                    {
+                        _fileLogger.LogInformation("InsertFoldersToStagingAsync: Sample folder - Name: '{Name}', DestFolderId: '{DestFolderId}', DossierDestFolderId: '{DossierDestFolderId}', Status: {Status}",
+                            folder.Name, folder.DestFolderId, folder.DossierDestFolderId, folder.Status);
+                    }
+
                     // Use InsertManyIgnoreDuplicatesAsync to handle potential duplicates
+                    _fileLogger.LogInformation("InsertFoldersToStagingAsync: Executing bulk insert (ignoring duplicates)...");
+
                     var insertedCount = await folderRepo.InsertManyIgnoreDuplicatesAsync(foldersToInsert, ct).ConfigureAwait(false);
                     await uow.CommitAsync(ct: ct).ConfigureAwait(false);
 
-                    _fileLogger.LogInformation("Inserted {Count} folders into FolderStaging with Status='Pending'", insertedCount);
+                    var skippedCount = foldersToInsert.Count - insertedCount;
+                    _fileLogger.LogInformation("InsertFoldersToStagingAsync: Successfully inserted {InsertedCount} folders into FolderStaging (Skipped {SkippedCount} duplicates, Total: {TotalCount})",
+                        insertedCount, skippedCount, foldersToInsert.Count);
                 }
-                catch
+                catch (Exception ex)
                 {
                     await uow.RollbackAsync(ct: ct).ConfigureAwait(false);
+                    _fileLogger.LogError(ex, "InsertFoldersToStagingAsync: Database transaction failed during insertion - ErrorType: {ErrorType}, Message: {Message}",
+                        ex.GetType().Name, ex.Message);
                     throw;
                 }
             }
             catch (Exception ex)
             {
-                _fileLogger.LogError(ex, "Failed to insert folders into FolderStaging");
+                _fileLogger.LogError(ex, "InsertFoldersToStagingAsync: Failed to insert folders into FolderStaging - ErrorType: {ErrorType}, Message: {Message}, StackTrace: {StackTrace}",
+                    ex.GetType().Name, ex.Message, ex.StackTrace);
                 _dbLogger.LogError(ex, "Failed to insert folders into FolderStaging");
                 _uiLogger.LogWarning("Could not save folder tracking data");
                 // Don't throw - this is not critical, we can continue without FolderStaging tracking
@@ -691,8 +817,11 @@ namespace Migration.Infrastructure.Implementation.Services
                 var results = _folderResults.ToList();
                 if (results.Count == 0)
                 {
+                    _fileLogger.LogInformation("BatchUpdateFolderStagingAsync: No pending folder results to update");
                     return;
                 }
+
+                _fileLogger.LogInformation("BatchUpdateFolderStagingAsync: Starting batch update for {Count} folder results", results.Count);
 
                 // Clear processed results
                 while (_folderResults.TryTake(out _)) { }
@@ -711,7 +840,23 @@ namespace Migration.Infrastructure.Implementation.Services
                         NodeId: r.AlfrescoFolderId
                     )).ToList();
 
+                    var successCount = results.Count(r => r.Success);
+                    var failedCount = results.Count - successCount;
+
+                    _fileLogger.LogInformation("BatchUpdateFolderStagingAsync: Prepared {Total} updates - {Success} successful, {Failed} failed",
+                        updates.Count, successCount, failedCount);
+
+                    // Log sample updates
+                    var sampleUpdates = updates.Take(5).ToList();
+                    foreach (var update in sampleUpdates)
+                    {
+                        _fileLogger.LogInformation("BatchUpdateFolderStagingAsync: Sample update - DestFolderId: '{DestFolderId}', Status: {Status}, NodeId: {NodeId}",
+                            update.DestFolderId, update.Status, update.NodeId ?? "NULL");
+                    }
+
                     // Use repository extension method for batch update
+                    _fileLogger.LogInformation("BatchUpdateFolderStagingAsync: Executing batch update query...");
+
                     await folderRepo.BatchUpdateFoldersByDestFolderIdAsync(
                         uow.Connection,
                         uow.Transaction,
@@ -720,30 +865,34 @@ namespace Migration.Infrastructure.Implementation.Services
 
                     await uow.CommitAsync(ct: ct).ConfigureAwait(false);
 
-                    // Log errors
+                    // Log errors in detail
                     var failures = results.Where(r => !r.Success && !string.IsNullOrEmpty(r.Error)).ToList();
-                    foreach (var failure in failures)
+                    if (failures.Count > 0)
                     {
-                        _fileLogger.LogWarning("Folder {Path} failed: {Error}", failure.FolderPath, failure.Error);
+                        _fileLogger.LogWarning("BatchUpdateFolderStagingAsync: Found {Count} failed folders", failures.Count);
+                        foreach (var failure in failures)
+                        {
+                            _fileLogger.LogWarning("BatchUpdateFolderStagingAsync: Folder '{Path}' failed - Error: {Error}",
+                                failure.FolderPath, failure.Error);
+                        }
                     }
 
-                    var successCount = results.Count(r => r.Success);
-                    var failedCount = results.Count - successCount;
-
                     _fileLogger.LogInformation(
-                        "Batch updated {Total} folders in FolderStaging: {Success} succeeded, {Failed} failed",
+                        "BatchUpdateFolderStagingAsync: Successfully batch updated {Total} folders in FolderStaging - {Success} succeeded, {Failed} failed",
                         results.Count, successCount, failedCount);
                 }
-                catch
+                catch (Exception ex)
                 {
                     await uow.RollbackAsync(ct: ct).ConfigureAwait(false);
+                    _fileLogger.LogError(ex, "BatchUpdateFolderStagingAsync: Database transaction failed - ErrorType: {ErrorType}, Message: {Message}",
+                        ex.GetType().Name, ex.Message);
                     throw;
                 }
             }
             catch (Exception ex)
             {
-                _fileLogger.LogWarning("[{Method}] Failed to batch update FolderStaging: {ErrorType} - {Message}",
-                    nameof(BatchUpdateFolderStagingAsync), ex.GetType().Name, ex.Message);
+                _fileLogger.LogWarning("[{Method}] Failed to batch update FolderStaging: ErrorType: {ErrorType}, Message: {Message}, StackTrace: {StackTrace}",
+                    nameof(BatchUpdateFolderStagingAsync), ex.GetType().Name, ex.Message, ex.StackTrace);
                 _dbLogger.LogError(ex, "[{Method}] Failed to batch update FolderStaging",
                     nameof(BatchUpdateFolderStagingAsync));
                 _uiLogger.LogInformation("Could not update folder status tracking");

@@ -40,6 +40,9 @@ namespace Alfresco.Client.Implementation
 
             try
             {
+                _fileLogger.LogInformation("GetFolderByRelative: Starting search for folder. ParentId: {ParentId}, RelativePath: {RelativePath}",
+                    inNodeId, inRelativePath);
+
                 // Escape folder name for AFTS query (handle special characters)
                 var escapedFolderName = inRelativePath.Replace("\"", "\\\"");
 
@@ -48,6 +51,8 @@ namespace Alfresco.Client.Implementation
                 // - PARENT:"{parentId}" = only direct children of parent folder
                 // - =cm:name:"{folderName}" = exact match on folder name
                 var query = $"TYPE:\"cm:folder\" AND PARENT:\"{inNodeId}\" AND =cm:name:\"{escapedFolderName}\"";
+
+                _fileLogger.LogInformation("GetFolderByRelative: Built AFTS query: {Query}", query);
 
                 var searchRequest = new PostSearchRequest
                 {
@@ -74,7 +79,19 @@ namespace Alfresco.Client.Implementation
                     if (firstEntry?.Entry?.IsFolder == true)
                     {
                         toRet = firstEntry.Entry.Id;
+                        _fileLogger.LogInformation("GetFolderByRelative: Folder FOUND. ParentId: {ParentId}, RelativePath: {RelativePath}, FolderId: {FolderId}",
+                            inNodeId, inRelativePath, toRet);
                     }
+                    else
+                    {
+                        _fileLogger.LogInformation("GetFolderByRelative: Search returned non-folder result. ParentId: {ParentId}, RelativePath: {RelativePath}",
+                            inNodeId, inRelativePath);
+                    }
+                }
+                else
+                {
+                    _fileLogger.LogInformation("GetFolderByRelative: Folder NOT FOUND. ParentId: {ParentId}, RelativePath: {RelativePath}",
+                        inNodeId, inRelativePath);
                 }
             }
             catch (AlfrescoTimeoutException timeoutEx)
@@ -113,8 +130,15 @@ namespace Alfresco.Client.Implementation
         {
             try
             {
-                using var getResponse = await _client.GetAsync($"/alfresco/api/-default-/public/alfresco/versions/1/nodes/{nodeId}/children?include=properties", ct).ConfigureAwait(false);
+                var url = $"/alfresco/api/-default-/public/alfresco/versions/1/nodes/{nodeId}/children?include=properties";
+                _fileLogger.LogInformation("GetNodeChildrenAsync: REQUEST -> GET {Url}, NodeId: {NodeId}", url, nodeId);
+
+                using var getResponse = await _client.GetAsync(url, ct).ConfigureAwait(false);
                 var body = await getResponse.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
+
+                _fileLogger.LogInformation("GetNodeChildrenAsync: RESPONSE -> Status: {StatusCode}, Body: {ResponseBody}",
+                    (int)getResponse.StatusCode, body);
+
                 if (!getResponse.IsSuccessStatusCode)
                     throw new AlfrescoException("Neuspešan odgovor pri čitanju root čvora.", (int)getResponse.StatusCode, body);
 
@@ -139,11 +163,16 @@ namespace Alfresco.Client.Implementation
 
         public async Task<NodeChildrenResponse> GetNodeChildrenAsync(string nodeId, int skipCount, int maxItems, CancellationToken ct = default)
         {
-            using var getResponse = await _client.GetAsync(
-                $"/alfresco/api/-default-/public/alfresco/versions/1/nodes/{nodeId}/children?include=properties&skipCount={skipCount}&maxItems={maxItems}",
-                ct).ConfigureAwait(false);
+            var url = $"/alfresco/api/-default-/public/alfresco/versions/1/nodes/{nodeId}/children?include=properties&skipCount={skipCount}&maxItems={maxItems}";
+            _fileLogger.LogInformation("GetNodeChildrenAsync (Paging): REQUEST -> GET {Url}, NodeId: {NodeId}, SkipCount: {SkipCount}, MaxItems: {MaxItems}",
+                url, nodeId, skipCount, maxItems);
+
+            using var getResponse = await _client.GetAsync(url, ct).ConfigureAwait(false);
 
             var body = await getResponse.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
+
+            _fileLogger.LogInformation("GetNodeChildrenAsync (Paging): RESPONSE -> Status: {StatusCode}, Body: {ResponseBody}",
+                (int)getResponse.StatusCode, body);
 
             if (!getResponse.IsSuccessStatusCode)
                 throw new AlfrescoException($"Neuspešan odgovor pri čitanju čvora sa paginacijom. NodeId: {nodeId}, SkipCount: {skipCount}, MaxItems: {maxItems}",
@@ -155,8 +184,16 @@ namespace Alfresco.Client.Implementation
 
         public async Task<bool> PingAsync(CancellationToken ct = default)
         {
-            //using var response = await _client.GetAsync("/alfresco/api/-default-/public/alfresco/versions/1/probes/-live-", ct).ConfigureAwait(false);
-            using var response = await _client.GetAsync("/alfresco/api/discovery", ct).ConfigureAwait(false);
+            var url = "/alfresco/api/discovery";
+            _fileLogger.LogInformation("PingAsync: REQUEST -> GET {Url}", url);
+
+            using var response = await _client.GetAsync(url, ct).ConfigureAwait(false);
+
+            var body = await response.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
+
+            _fileLogger.LogInformation("PingAsync: RESPONSE -> Status: {StatusCode}, Body: {ResponseBody}",
+                (int)response.StatusCode, body);
+
             return response.IsSuccessStatusCode;
         }
         //{
@@ -191,19 +228,25 @@ namespace Alfresco.Client.Implementation
 
                 var json = JsonConvert.SerializeObject(inRequest, jsonSerializerSettings);
 
+                var url = "/alfresco/api/-default-/public/search/versions/1/search";
+                _fileLogger.LogInformation("SearchAsync: REQUEST -> POST {Url}, Query: {Query}, RequestBody: {RequestBody}",
+                    url, inRequest?.Query?.Query, json);
+
                 using var bodyRequest = new StringContent(json, Encoding.UTF8, "application/json");
 
                 // DIAGNOSTIKA: Log start vremena
                 var startTime = DateTime.UtcNow;
-                _fileLogger.LogDebug("🔍 Starting Alfresco search: {Query}", inRequest?.Query?.Query);
 
-                using var postResponse = await _client.PostAsync($"/alfresco/api/-default-/public/search/versions/1/search", bodyRequest, ct).ConfigureAwait(false);
+                using var postResponse = await _client.PostAsync(url, bodyRequest, ct).ConfigureAwait(false);
 
                 // DIAGNOSTIKA: Log trajanje poziva
                 var elapsed = DateTime.UtcNow - startTime;
-                _fileLogger.LogDebug("✅ Alfresco search completed in {Elapsed}s", elapsed.TotalSeconds);
 
                 var stringResponse = await postResponse.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
+
+                _fileLogger.LogInformation("SearchAsync: RESPONSE -> Status: {StatusCode}, Elapsed: {Elapsed}s",
+                    (int)postResponse.StatusCode, elapsed.TotalSeconds);
+
                 var toRet = JsonConvert.DeserializeObject<NodeChildrenResponse>(stringResponse);
 
                 return toRet;
@@ -245,14 +288,15 @@ namespace Alfresco.Client.Implementation
 
         public async Task<NodeResponse> GetNodeByIdAsync(string nodeId, CancellationToken ct = default)
         {
-            // Remove workspace://SpacesStore/ prefix if present
-            //var cleanNodeId = nodeId.Replace("workspace://SpacesStore/", "");
+            var url = $"/alfresco/api/-default-/public/alfresco/versions/1/nodes/{nodeId}";
+            _fileLogger.LogInformation("GetNodeByIdAsync: REQUEST -> GET {Url}, NodeId: {NodeId}", url, nodeId);
 
-            using var getResponse = await _client.GetAsync(
-                $"/alfresco/api/-default-/public/alfresco/versions/1/nodes/{nodeId}",
-                ct).ConfigureAwait(false);
+            using var getResponse = await _client.GetAsync(url, ct).ConfigureAwait(false);
 
             var body = await getResponse.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
+
+            _fileLogger.LogInformation("GetNodeByIdAsync: RESPONSE -> Status: {StatusCode}, Body: {ResponseBody}",
+                (int)getResponse.StatusCode, body);
 
             if (!getResponse.IsSuccessStatusCode)
             {
@@ -270,17 +314,22 @@ namespace Alfresco.Client.Implementation
         {
             try
             {
-                // Get children of the parent folder
-                using var getResponse = await _client.GetAsync(
-                    $"/alfresco/api/-default-/public/alfresco/versions/1/nodes/{parentFolderId}/children?where=(isFolder=true)",
-                    ct).ConfigureAwait(false);
+                var url = $"/alfresco/api/-default-/public/alfresco/versions/1/nodes/{parentFolderId}/children?where=(isFolder=true)";
+                _fileLogger.LogInformation("FolderExistsAsync: REQUEST -> GET {Url}, ParentFolderId: {ParentFolderId}, FolderName: {FolderName}",
+                    url, parentFolderId, folderName);
+
+                using var getResponse = await _client.GetAsync(url, ct).ConfigureAwait(false);
+
+                var body = await getResponse.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
+
+                _fileLogger.LogInformation("FolderExistsAsync: RESPONSE -> Status: {StatusCode}, Body: {ResponseBody}",
+                    (int)getResponse.StatusCode, body);
 
                 if (!getResponse.IsSuccessStatusCode)
                 {
                     return false;
                 }
 
-                var body = await getResponse.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
                 var response = JsonConvert.DeserializeObject<NodeChildrenResponse>(body);
 
                 if (response?.List?.Entries == null)
@@ -289,12 +338,19 @@ namespace Alfresco.Client.Implementation
                 }
 
                 // Check if any child folder has the matching name
-                return response.List.Entries.Any(entry =>
+                var exists = response.List.Entries.Any(entry =>
                     entry.Entry?.IsFolder == true &&
                     string.Equals(entry.Entry.Name, folderName, StringComparison.OrdinalIgnoreCase));
+
+                _fileLogger.LogInformation("FolderExistsAsync: Folder '{FolderName}' {Exists} in parent '{ParentFolderId}'",
+                    folderName, exists ? "EXISTS" : "NOT FOUND", parentFolderId);
+
+                return exists;
             }
-            catch
+            catch (Exception ex)
             {
+                _fileLogger.LogError(ex, "FolderExistsAsync: Error checking folder existence. ParentFolderId: {ParentFolderId}, FolderName: {FolderName}",
+                    parentFolderId, folderName);
                 return false;
             }
         }
@@ -303,21 +359,30 @@ namespace Alfresco.Client.Implementation
         {
             try
             {
-                // Get children of the parent folder with properties included
-                using var getResponse = await _client.GetAsync(
-                    $"/alfresco/api/-default-/public/alfresco/versions/1/nodes/{parentFolderId}/children?where=(isFolder=true)&include=properties",
-                    ct).ConfigureAwait(false);
+                var url = $"/alfresco/api/-default-/public/alfresco/versions/1/nodes/{parentFolderId}/children?where=(isFolder=true)&include=properties";
+                _fileLogger.LogInformation("GetFolderByNameAsync: REQUEST -> GET {Url}, ParentFolderId: {ParentFolderId}, FolderName: {FolderName}",
+                    url, parentFolderId, folderName);
+
+                using var getResponse = await _client.GetAsync(url, ct).ConfigureAwait(false);
+
+                var body = await getResponse.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
+
+                _fileLogger.LogInformation("GetFolderByNameAsync: RESPONSE -> Status: {StatusCode}, Body: {ResponseBody}",
+                    (int)getResponse.StatusCode, body);
 
                 if (!getResponse.IsSuccessStatusCode)
                 {
+                    _fileLogger.LogWarning("GetFolderByNameAsync: Failed to get folder. ParentFolderId: {ParentFolderId}, FolderName: {FolderName}, Status: {StatusCode}",
+                        parentFolderId, folderName, (int)getResponse.StatusCode);
                     return null;
                 }
 
-                var body = await getResponse.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
                 var response = JsonConvert.DeserializeObject<NodeChildrenResponse>(body);
 
                 if (response?.List?.Entries == null)
                 {
+                    _fileLogger.LogInformation("GetFolderByNameAsync: No entries found. ParentFolderId: {ParentFolderId}, FolderName: {FolderName}",
+                        parentFolderId, folderName);
                     return null;
                 }
 
@@ -328,14 +393,21 @@ namespace Alfresco.Client.Implementation
 
                 if (folderEntry?.Entry == null)
                 {
+                    _fileLogger.LogInformation("GetFolderByNameAsync: Folder '{FolderName}' NOT FOUND in parent '{ParentFolderId}'",
+                        folderName, parentFolderId);
                     return null;
                 }
+
+                _fileLogger.LogInformation("GetFolderByNameAsync: Folder '{FolderName}' FOUND in parent '{ParentFolderId}', FolderId: {FolderId}",
+                    folderName, parentFolderId, folderEntry.Entry.Id);
 
                 // Return as NodeResponse
                 return new NodeResponse { Entry = folderEntry.Entry };
             }
-            catch
+            catch (Exception ex)
             {
+                _fileLogger.LogError(ex, "GetFolderByNameAsync: Error getting folder by name. ParentFolderId: {ParentFolderId}, FolderName: {FolderName}",
+                    parentFolderId, folderName);
                 return null;
             }
         }

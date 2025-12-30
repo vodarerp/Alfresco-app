@@ -53,11 +53,19 @@ namespace Alfresco.Client.Implementation
                 };
 
                 var json = JsonConvert.SerializeObject(body, jsonSerializerSettings);
+
+                var url = $"/alfresco/api/-default-/public/alfresco/versions/1/nodes/{parentFolderId}/children";
+                _fileLogger.LogInformation("CreateFileAsync: REQUEST -> POST {Url}, ParentFolderId: {ParentFolderId}, FileName: {FileName}, Body: {RequestBody}",
+                    url, parentFolderId, newFileName, json);
+
                 using var bodyRequest = new StringContent(json, Encoding.UTF8, "application/json");
 
-                using var r = await _client.PostAsync($"/alfresco/api/-default-/public/alfresco/versions/1/nodes/{parentFolderId}/children", bodyRequest, ct).ConfigureAwait(false);
+                using var r = await _client.PostAsync(url, bodyRequest, ct).ConfigureAwait(false);
 
                 var tpRet = await r.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
+
+                _fileLogger.LogInformation("CreateFileAsync: RESPONSE -> Status: {StatusCode}, Body: {ResponseBody}",
+                    (int)r.StatusCode, tpRet);
 
                 var toRet = JsonConvert.DeserializeObject<ListEntry>(tpRet, jsonSerializerSettings);
 
@@ -215,6 +223,7 @@ namespace Alfresco.Client.Implementation
             JsonSerializerSettings jsonSerializerSettings,
             CancellationToken ct)
         {
+            _fileLogger.LogInformation($"USAO CreateFolderInternalAsync for {parentFolderId}:");
             // Build body with optional properties
             dynamic body = new System.Dynamic.ExpandoObject();
             body.name = newFolderName;
@@ -228,6 +237,10 @@ namespace Alfresco.Client.Implementation
             }
 
             var json = JsonConvert.SerializeObject(body, jsonSerializerSettings);
+
+            
+
+            _fileLogger.LogInformation($"CreateFolderInternalAsync: JSON Create folder body for {parentFolderId}:: {json} ");
             using var bodyRequest = new StringContent(json, Encoding.UTF8, "application/json");
 
             using var response = await _client.PostAsync(
@@ -235,8 +248,15 @@ namespace Alfresco.Client.Implementation
                 bodyRequest,
                 ct).ConfigureAwait(false);
 
+            //_fileLogger.LogInformation($"response: {json} ");
             var responseContent = await response.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
-
+            _fileLogger.LogInformation(
+                "CreateFolderInternalAsync: HTTP {Method} {Url} -> {StatusCode}",
+                response.RequestMessage?.Method,
+                response.RequestMessage?.RequestUri,
+                (int)response.StatusCode
+);
+            _fileLogger.LogInformation($"CreateFolderInternalAsync: Response conten for {parentFolderId}: {responseContent}");
             // Check for errors
             if (!response.IsSuccessStatusCode)
             {
@@ -292,7 +312,7 @@ namespace Alfresco.Client.Implementation
                         response.StatusCode, responseContent);
                 }
 
-                // Generic HTTP error
+                // Generic HTTP errort
                 response.EnsureSuccessStatusCode();
             }
 
@@ -342,11 +362,30 @@ namespace Alfresco.Client.Implementation
                         }
 
                         var json = JsonConvert.SerializeObject(body, jsonSerializerSettings);
+
+                        var url = $"/alfresco/api/-default-/public/alfresco/versions/1/nodes/{nodeId}/move";
+
+                        string requestBody = json?.ToString();
+
+                        _fileLogger.LogInformation(
+                            "MoveDocumentAsync: REQUEST -> POST {Url}, NodeId: {NodeId}, TargetFolderId: {TargetFolderId}, Attempt: {Attempt}, Body: {RequestBody}",
+                            url,
+                            nodeId,
+                            targetFolderId,
+                            attemptNumber + 1,
+                            requestBody
+                        );
+
+                        //_fileLogger.LogInformation("MoveDocumentAsync: REQUEST -> POST {Url}, NodeId: {NodeId}, TargetFolderId: {TargetFolderId}, Attempt: {Attempt}, Body: {RequestBody}",
+                        //    url, nodeId, targetFolderId, attemptNumber + 1, json?.toString());
+
                         using var content = new StringContent(json, Encoding.UTF8, "application/json");
-                        using var res = await _client.PostAsync(
-                            $"/alfresco/api/-default-/public/alfresco/versions/1/nodes/{nodeId}/move",
-                            content,
-                            ct).ConfigureAwait(false);
+                        using var res = await _client.PostAsync(url, content, ct).ConfigureAwait(false);
+
+                        var errorContent = await res.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
+
+                        _fileLogger.LogInformation("MoveDocumentAsync: RESPONSE -> Status: {StatusCode}, Body: {ResponseBody}",
+                            (int)res.StatusCode, errorContent);
 
                         if (res.IsSuccessStatusCode)
                         {
@@ -358,13 +397,12 @@ namespace Alfresco.Client.Implementation
                             }
                             else
                             {
-                                _fileLogger.LogDebug("Successfully moved node {NodeId} to folder {TargetFolderId}", nodeId, targetFolderId);
+                                _fileLogger.LogInformation("Successfully moved node {NodeId} to folder {TargetFolderId}", nodeId, targetFolderId);
                             }
                             return true;
                         }
 
                         // Handle error response
-                        var errorContent = await res.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
 
                         // Try to parse error response
                         try
@@ -446,7 +484,7 @@ namespace Alfresco.Client.Implementation
         {
             try
             {
-                _fileLogger.LogDebug("Copying node {NodeId} to folder {TargetFolderId}", nodeId, targetFolderId);
+                _fileLogger.LogInformation("CopyDocumentAsync: Starting copy for NodeId: {NodeId}, TargetFolderId: {TargetFolderId}", nodeId, targetFolderId);
 
                 var jsonSerializerSettings = new JsonSerializerSettings
                 {
@@ -459,17 +497,25 @@ namespace Alfresco.Client.Implementation
                 };
                 var json = JsonConvert.SerializeObject(body, jsonSerializerSettings);
 
+                var url = $"/alfresco/api/-default-/public/alfresco/versions/1/nodes/{nodeId}/copy";
+                _fileLogger.LogInformation("CopyDocumentAsync: REQUEST -> POST {Url}, NodeId: {NodeId}, TargetFolderId: {TargetFolderId}, Body: {RequestBody}",
+                    url, nodeId, targetFolderId, json);
+
                 using var content = new StringContent(json, Encoding.UTF8, "application/json");
-                using var res = await _client.PostAsync($"/alfresco/api/-default-/public/alfresco/versions/1/nodes/{nodeId}/copy", content, ct).ConfigureAwait(false);
+                using var res = await _client.PostAsync(url, content, ct).ConfigureAwait(false);
+
+                var errorContent = await res.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
+
+                _fileLogger.LogInformation("CopyDocumentAsync: RESPONSE -> Status: {StatusCode}, Body: {ResponseBody}",
+                    (int)res.StatusCode, errorContent);
 
                 if (res.IsSuccessStatusCode)
                 {
-                    _fileLogger.LogDebug("Successfully copied node {NodeId} to folder {TargetFolderId}", nodeId, targetFolderId);
+                    _fileLogger.LogInformation("Successfully copied node {NodeId} to folder {TargetFolderId}", nodeId, targetFolderId);
                     return true;
                 }
 
                 // Handle error response
-                var errorContent = await res.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
 
                 _fileLogger.LogWarning(
                     "Failed to copy node {NodeId} to folder {TargetFolderId}: {StatusCode} - {Error}",
@@ -528,7 +574,7 @@ namespace Alfresco.Client.Implementation
         {
             try
             {
-                _fileLogger.LogDebug("Updating properties for node {NodeId} ({Count} properties)", nodeId, properties.Count);
+                _fileLogger.LogInformation("UpdateNodePropertiesAsync: Starting update for NodeId: {NodeId}, PropertyCount: {Count}", nodeId, properties.Count);
 
                 var jsonSerializerSettings = new JsonSerializerSettings
                 {
@@ -545,22 +591,26 @@ namespace Alfresco.Client.Implementation
                 };
 
                 var json = JsonConvert.SerializeObject(body, jsonSerializerSettings);
-                _fileLogger.LogTrace("Update properties request body: {Json}", json);
+
+                var url = $"/alfresco/api/-default-/public/alfresco/versions/1/nodes/{nodeId}";
+                _fileLogger.LogInformation("UpdateNodePropertiesAsync: REQUEST -> PUT {Url}, NodeId: {NodeId}, Body: {RequestBody}",
+                    url, nodeId, json);
 
                 using var content = new StringContent(json, Encoding.UTF8, "application/json");
-                using var response = await _client.PutAsync(
-                    $"/alfresco/api/-default-/public/alfresco/versions/1/nodes/{nodeId}",
-                    content,
-                    ct).ConfigureAwait(false);
+                using var response = await _client.PutAsync(url, content, ct).ConfigureAwait(false);
+
+                var errorContent = await response.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
+
+                _fileLogger.LogInformation("UpdateNodePropertiesAsync: RESPONSE -> Status: {StatusCode}, Body: {ResponseBody}",
+                    (int)response.StatusCode, errorContent);
 
                 if (response.IsSuccessStatusCode)
                 {
-                    _fileLogger.LogDebug("Successfully updated properties for node {NodeId}", nodeId);
+                    _fileLogger.LogInformation("Successfully updated properties for node {NodeId}", nodeId);
                     return true;
                 }
 
                 // Handle error response
-                var errorContent = await response.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
 
                 _fileLogger.LogWarning(
                     "Failed to update properties for node {NodeId}: {StatusCode} - {Error}",
@@ -657,13 +707,19 @@ namespace Alfresco.Client.Implementation
             {
                 try
                 {
-                    using var response = await _client.GetAsync(
-                        $"/alfresco/api/-default-/public/alfresco/versions/1/nodes/{nodeId}",
-                        ct).ConfigureAwait(false);
+                    var url = $"/alfresco/api/-default-/public/alfresco/versions/1/nodes/{nodeId}";
+                    _fileLogger.LogInformation("GenerateNewNameWithSuffixAsync: REQUEST -> GET {Url}, NodeId: {NodeId}",
+                        url, nodeId);
+
+                    using var response = await _client.GetAsync(url, ct).ConfigureAwait(false);
+
+                    var content = await response.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
+
+                    _fileLogger.LogInformation("GenerateNewNameWithSuffixAsync: RESPONSE -> Status: {StatusCode}, Body: {ResponseBody}",
+                        (int)response.StatusCode, content);
 
                     if (response.IsSuccessStatusCode)
                     {
-                        var content = await response.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
                         var jsonSerializerSettings = new JsonSerializerSettings
                         {
                             NullValueHandling = NullValueHandling.Ignore,
