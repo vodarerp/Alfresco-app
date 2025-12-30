@@ -8,6 +8,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using Migration.Abstraction.Interfaces;
 using Migration.Abstraction.Interfaces.Services;
 using Migration.Abstraction.Interfaces.Wrappers;
 using SqlServer.Abstraction.Interfaces;
@@ -32,6 +33,7 @@ namespace Migration.Infrastructure.Implementation.Services
         private readonly IDocumentSearchService? _documentSearch;
         private readonly IFolderPreparationService _folderPreparation;
         private readonly IMoveService _moveService;
+        private readonly IMigrationPreparationService _migrationPreparation;
         private readonly IPhaseCheckpointRepository _phaseCheckpointRepo;
         private readonly ILogger _logger;
         private readonly ILogger _uiLogger;
@@ -46,6 +48,7 @@ namespace Migration.Infrastructure.Implementation.Services
             IDocumentDiscoveryService documentDiscovery,
             IFolderPreparationService folderPreparation,
             IMoveService moveService,
+            IMigrationPreparationService migrationPreparation,
             IPhaseCheckpointRepository phaseCheckpointRepo,
             ILoggerFactory logger,
             IOptions<global::Alfresco.Contracts.SqlServer.SqlServerOptions> sqlOptions,
@@ -59,6 +62,7 @@ namespace Migration.Infrastructure.Implementation.Services
             _documentSearch = documentSearch; // Optional - only used in MigrationByDocument mode
             _folderPreparation = folderPreparation ?? throw new ArgumentNullException(nameof(folderPreparation));
             _moveService = moveService ?? throw new ArgumentNullException(nameof(moveService));
+            _migrationPreparation = migrationPreparation ?? throw new ArgumentNullException(nameof(migrationPreparation));
             _phaseCheckpointRepo = phaseCheckpointRepo ?? throw new ArgumentNullException(nameof(phaseCheckpointRepo));
             _logger = logger.CreateLogger("FileLogger");
             _uiLogger = logger.CreateLogger("UiLogger");
@@ -76,6 +80,34 @@ namespace Migration.Infrastructure.Implementation.Services
                 _errorTracker.Reset();
                 _logger.LogInformation("Migration pipeline started - Error tracker reset");
                 _uiLogger.LogInformation("Migracija pokrenuta");
+
+                // ====================================================================
+                // PREPARE DATABASE: Delete incomplete items before migration starts
+                // ====================================================================
+                _logger.LogInformation("Preparing database - deleting incomplete items...");
+                var prepResult = await _migrationPreparation.PrepareForMigrationAsync(ct);
+
+                if (!prepResult.Success)
+                {
+                    _logger.LogError("Database preparation failed: {Error}", prepResult.ErrorMessage);
+                    _uiLogger.LogError("Priprema baze nije uspela: {Error}", prepResult.ErrorMessage);
+                    return;
+                }
+
+                _logger.LogInformation(
+                    "Database prepared successfully: Deleted {DocCount} documents, {FolderCount} folders (Total: {Total})",
+                    prepResult.DeletedDocuments, prepResult.DeletedFolders, prepResult.TotalDeleted);
+
+                if (prepResult.TotalDeleted > 0)
+                {
+                    _uiLogger.LogInformation(
+                        "Baza očišćena: Uklonjeno {Total} nekompletnih stavki ({DocCount} dokumenata, {FolderCount} foldera)",
+                        prepResult.TotalDeleted, prepResult.DeletedDocuments, prepResult.DeletedFolders);
+                }
+                else
+                {
+                    _uiLogger.LogInformation("Baza je već čista - nema nekompletnih stavki");
+                }
 
                 // Determine migration mode
                 if (_migrationOptions.MigrationByDocument)

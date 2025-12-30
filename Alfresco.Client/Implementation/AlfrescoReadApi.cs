@@ -75,18 +75,30 @@ namespace Alfresco.Client.Implementation
                 // Extract folder ID from search results
                 if (searchResult?.List?.Entries != null && searchResult.List.Entries.Count > 0)
                 {
-                    var firstEntry = searchResult.List.Entries[0];
-                    if (firstEntry?.Entry?.IsFolder == true)
+                    var x = searchResult.List.Entries.FirstOrDefault(o => o.Entry.Name == escapedFolderName);
+                    if (x != null)
                     {
-                        toRet = firstEntry.Entry.Id;
+                        toRet = x.Entry.Id;
                         _fileLogger.LogInformation("GetFolderByRelative: Folder FOUND. ParentId: {ParentId}, RelativePath: {RelativePath}, FolderId: {FolderId}",
-                            inNodeId, inRelativePath, toRet);
+                         inNodeId, inRelativePath, toRet);
                     }
                     else
                     {
                         _fileLogger.LogInformation("GetFolderByRelative: Search returned non-folder result. ParentId: {ParentId}, RelativePath: {RelativePath}",
                             inNodeId, inRelativePath);
                     }
+                    //var firstEntry = searchResult.List.Entries[0];
+                    //if (firstEntry?.Entry?.IsFolder == true)
+                    //{
+                    //    toRet = firstEntry.Entry.Id;
+                    //    _fileLogger.LogInformation("GetFolderByRelative: Folder FOUND. ParentId: {ParentId}, RelativePath: {RelativePath}, FolderId: {FolderId}",
+                    //        inNodeId, inRelativePath, toRet);
+                    //}
+                    //else
+                    //{
+                    //    _fileLogger.LogInformation("GetFolderByRelative: Search returned non-folder result. ParentId: {ParentId}, RelativePath: {RelativePath}",
+                    //        inNodeId, inRelativePath);
+                    //}
                 }
                 else
                 {

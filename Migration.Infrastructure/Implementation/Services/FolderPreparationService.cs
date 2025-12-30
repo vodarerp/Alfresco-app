@@ -157,8 +157,8 @@ namespace Migration.Infrastructure.Implementation.Services
 
                         var current = Interlocked.Increment(ref _foldersCreated);
 
-                        // Batch update FolderStaging every 500 folders
-                        if (current % 500 == 0)
+                        // ✅ Batch update FolderStaging every 100 folders (reduced from 500 for better crash recovery)
+                        if (current % 100 == 0)
                         {
                             await BatchUpdateFolderStagingAsync(ct).ConfigureAwait(false);
                         }
@@ -325,16 +325,6 @@ namespace Migration.Infrastructure.Implementation.Services
         {
             try
             {
-                //_fileLogger.LogInformation("CreateFolderAsync: Starting folder creation - UniqueFolderInfo object details:");
-                //_fileLogger.LogInformation("  DestinationRootId: {DestinationRootId}", folder.DestinationRootId);
-                //_fileLogger.LogInformation("  FolderPath: {FolderPath}", folder.FolderPath);
-                //_fileLogger.LogInformation("  CacheKey: {CacheKey}", folder.CacheKey ?? "NULL");
-                //_fileLogger.LogInformation("  TipProizvoda: {TipProizvoda}", folder.TipProizvoda ?? "NULL");
-                //_fileLogger.LogInformation("  CoreId: {CoreId}", folder.CoreId ?? "NULL");
-                //_fileLogger.LogInformation("  CreationDate: {CreationDate}", folder.CreationDate?.ToString("yyyy-MM-dd HH:mm:ss") ?? "NULL");
-                //_fileLogger.LogInformation("  TargetDossierType: {TargetDossierType}", folder.TargetDossierType?.ToString() ?? "NULL");
-                //_fileLogger.LogInformation("  IsCreated: {IsCreated}", folder.IsCreated);
-                //_fileLogger.LogInformation("  Properties Count: {PropCount}", folder.Properties?.Count ?? 0);
                 _fileLogger.LogInformation(
                         "CreateFolderAsync: Starting folder creation {@Folder}",
                         new
@@ -490,61 +480,96 @@ namespace Migration.Infrastructure.Implementation.Services
             bool isCreated,
             CancellationToken ct)
         {
-            try
+            const int MAX_RETRIES = 3;
+            int attempt = 0;
+
+            while (attempt < MAX_RETRIES)
             {
-                _fileLogger.LogInformation("UpdateDocumentDestinationFolderIdAsync: Starting update - DossierDestFolderId: '{DossierId}', AlfrescoFolderId: {FolderId}, IsCreated: {IsCreated}",
-                    dossierDestFolderId, alfrescoFolderId, isCreated);
-
-                await using var scope = _scopeFactory.CreateAsyncScope();
-                var uow = scope.ServiceProvider.GetRequiredService<IUnitOfWork>();
-                var docRepo = scope.ServiceProvider.GetRequiredService<IDocStagingRepository>();
-
-                await uow.BeginAsync(ct: ct).ConfigureAwait(false);
                 try
                 {
-                    _fileLogger.LogInformation("UpdateDocumentDestinationFolderIdAsync: Executing update query for DossierDestFolderId: '{DossierId}'",
-                        dossierDestFolderId);
-
-                    var rowsUpdated = await docRepo.UpdateDestinationFolderIdAsync(
-                        dossierDestFolderId,
-                        alfrescoFolderId,
-                        isCreated,
-                        ct).ConfigureAwait(false);
-
-                    await uow.CommitAsync(ct: ct).ConfigureAwait(false);
-
-                    if (rowsUpdated > 0)
+                    if (attempt > 0)
                     {
                         _fileLogger.LogInformation(
-                            "UpdateDocumentDestinationFolderIdAsync: Successfully updated {Count} documents - DestinationFolderId: {FolderId}, IsCreated: {IsCreated}, DossierDestFolderId: '{DossierId}'",
-                            rowsUpdated, alfrescoFolderId, isCreated, dossierDestFolderId);
+                            "UpdateDocumentDestinationFolderIdAsync: Retry attempt {Attempt}/{Max} - DossierDestFolderId: '{DossierId}'",
+                            attempt, MAX_RETRIES, dossierDestFolderId);
                     }
-                    else
+
+                    await using var scope = _scopeFactory.CreateAsyncScope();
+                    var uow = scope.ServiceProvider.GetRequiredService<IUnitOfWork>();
+                    var docRepo = scope.ServiceProvider.GetRequiredService<IDocStagingRepository>();
+
+                    await uow.BeginAsync(ct: ct).ConfigureAwait(false);
+                    try
                     {
-                        _fileLogger.LogWarning(
-                            "UpdateDocumentDestinationFolderIdAsync: No documents updated (0 rows affected) - DossierDestFolderId: '{DossierId}', AlfrescoFolderId: {FolderId}",
-                            dossierDestFolderId, alfrescoFolderId);
+                        var rowsUpdated = await docRepo.UpdateDestinationFolderIdAsync(
+                            dossierDestFolderId,
+                            alfrescoFolderId,
+                            isCreated,
+                            ct).ConfigureAwait(false);
+
+                        await uow.CommitAsync(ct: ct).ConfigureAwait(false);
+
+                        if (rowsUpdated > 0)
+                        {
+                            _fileLogger.LogInformation(
+                                "✅ UpdateDocumentDestinationFolderIdAsync: Successfully updated {Count} documents - " +
+                                "DestinationFolderId: {FolderId}, IsCreated: {IsCreated}, DossierDestFolderId: '{DossierId}'",
+                                rowsUpdated, alfrescoFolderId, isCreated, dossierDestFolderId);
+                            return; // ✅ SUCCESS - exit retry loop
+                        }
+                        else
+                        {
+                            _fileLogger.LogWarning(
+                                "⚠️ UpdateDocumentDestinationFolderIdAsync: No documents updated (0 rows affected) - " +
+                                "DossierDestFolderId: '{DossierId}', AlfrescoFolderId: {FolderId}",
+                                dossierDestFolderId, alfrescoFolderId);
+                            return; // OK - možda nema dokumenata za taj folder
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        await uow.RollbackAsync(ct: ct).ConfigureAwait(false);
+                        throw; // Rethrow za retry logiku
                     }
                 }
                 catch (Exception ex)
                 {
-                    await uow.RollbackAsync(ct: ct).ConfigureAwait(false);
-                    _fileLogger.LogError(ex, "UpdateDocumentDestinationFolderIdAsync: Database transaction failed - DossierDestFolderId: '{DossierId}', AlfrescoFolderId: {FolderId}, ErrorType: {ErrorType}, Message: {Message}",
-                        dossierDestFolderId, alfrescoFolderId, ex.GetType().Name, ex.Message);
-                    throw;
+                    attempt++;
+
+                    if (attempt >= MAX_RETRIES)
+                    {
+                        // ❌ FINAL FAILURE - after all retries exhausted
+                        _fileLogger.LogError(ex,
+                            "❌ CRITICAL: UpdateDocumentDestinationFolderIdAsync FAILED after {Attempts} attempts - " +
+                            "DossierDestFolderId: '{DossierId}', AlfrescoFolderId: {FolderId}, ErrorType: {ErrorType}, Message: {Message}",
+                            MAX_RETRIES, dossierDestFolderId, alfrescoFolderId, ex.GetType().Name, ex.Message);
+
+                        _dbLogger.LogError(ex,
+                            "Failed to update DestinationFolderId after {Attempts} retries for DossierDestFolderId='{DossierId}'",
+                            MAX_RETRIES, dossierDestFolderId);
+
+                        _uiLogger.LogError(
+                            "Kritična greška: Folder {DossierId} kreiran ali dokumenti nisu update-ovani!",
+                            dossierDestFolderId);
+
+                        // 🔴 THROW - ovo je kritično, folder je kreiran ali dokumenti nemaju DestinationFolderId
+                        // Move faza će failovati za te dokumente
+                        throw new InvalidOperationException(
+                            $"Failed to update DestinationFolderId for '{dossierDestFolderId}' after {MAX_RETRIES} retries. " +
+                            $"Folder created (ID: {alfrescoFolderId}) but documents not linked!",
+                            ex);
+                    }
+
+                    // Exponential backoff: 2^attempt seconds (1s, 2s, 4s)
+                    var delay = TimeSpan.FromSeconds(Math.Pow(2, attempt));
+
+                    _fileLogger.LogWarning(
+                        "⚠️ UpdateDocumentDestinationFolderIdAsync: Retry {Attempt}/{Max} after {Delay}s - " +
+                        "DossierDestFolderId: '{DossierId}', Error: {Error}",
+                        attempt, MAX_RETRIES, delay.TotalSeconds, dossierDestFolderId, ex.Message);
+
+                    await Task.Delay(delay, ct).ConfigureAwait(false);
                 }
-            }
-            catch (Exception ex)
-            {
-                _fileLogger.LogError(
-                    "[{Method}] Failed to update DestinationFolderId - DossierDestFolderId: '{DossierId}', AlfrescoFolderId: {FolderId}, ErrorType: {ErrorType}, Message: {Message}, StackTrace: {StackTrace}",
-                    nameof(UpdateDocumentDestinationFolderIdAsync), dossierDestFolderId, alfrescoFolderId, ex.GetType().Name, ex.Message, ex.StackTrace);
-                _dbLogger.LogError(ex,
-                    "[{Method}] Failed to update DestinationFolderId for DossierDestFolderId='{DossierId}'. Folder ID: {FolderId}",
-                    nameof(UpdateDocumentDestinationFolderIdAsync), dossierDestFolderId, alfrescoFolderId);
-                _uiLogger.LogWarning("Could not update destination folder ID for {DossierId}", dossierDestFolderId);
-                // Don't throw - this is not critical for folder creation
-                // MoveService will fail gracefully if DestinationFolderId is null
             }
         }
 

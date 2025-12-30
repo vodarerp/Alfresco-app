@@ -189,11 +189,11 @@ namespace Migration.Infrastructure.Implementation.Document
                         properties.Count, customNodeType ?? "cm:folder");
 
                     // Log all properties before creation
-                    _fileLogger.LogInformation("ResolveAsync: Final properties before folder creation:");
-                    foreach (var kvp in properties)
-                    {
-                        _fileLogger.LogInformation("  {Key} = {Value}", kvp.Key, kvp.Value ?? "NULL");
-                    }
+                    //_fileLogger.LogInformation("ResolveAsync: Final properties before folder creation:");
+                    //foreach (var kvp in properties)
+                    //{
+                    //    _fileLogger.LogInformation("  {Key} = {Value}", kvp.Key, kvp.Value ?? "NULL");
+                    //}
 
                     try
                     {

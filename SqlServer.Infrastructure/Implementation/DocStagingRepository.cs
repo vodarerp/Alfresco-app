@@ -1,8 +1,10 @@
+using Alfresco.Contracts.Enums;
+using Alfresco.Contracts.Models;
 using Alfresco.Contracts.Oracle.Models;
 using Dapper;
+using Microsoft.Data.SqlClient;
 using Migration.Abstraction.Models;
 using SqlServer.Abstraction.Interfaces;
-using Microsoft.Data.SqlClient;
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
@@ -10,7 +12,6 @@ using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 using System.Transactions;
-using Alfresco.Contracts.Models;
 
 namespace SqlServer.Infrastructure.Implementation
 {
@@ -64,10 +65,45 @@ namespace SqlServer.Infrastructure.Implementation
 
         public async Task<IReadOnlyList<DocStaging>> TakeReadyForProcessingAsync(int take, CancellationToken ct)
         {
-            // SQL Server uses WITH (ROWLOCK, UPDLOCK, READPAST) for similar behavior to Oracle's FOR UPDATE SKIP LOCKED
-            var sql = @"SELECT TOP (@take) *
-                        FROM DocStaging WITH (ROWLOCK, UPDLOCK, READPAST)
-                        WHERE status = 'READY'";
+            // ✅ ATOMIC SELECT+UPDATE - prevents race conditions in parallel processes
+            // Takes READY documents with DestinationFolderId populated (folder already created) and marks them as IN_PROGRESS
+            // Uses CTE to select TOP N rows, then UPDATE + OUTPUT in single statement
+            //var x = MigrationStatus.InProgress.ToDbString()
+            var sql = @"
+                WITH SelectedDocs AS (
+                    SELECT TOP (@take) Id
+                    FROM DocStaging WITH (ROWLOCK, UPDLOCK, READPAST)
+                    WHERE status = 'READY'
+                      AND DestinationFolderId IS NOT NULL
+                    ORDER BY Id ASC  -- Deterministic ordering for consistency
+                )
+                UPDATE d
+                SET d.status = 'IN PROGRESS',
+                    d.updatedAt = SYSDATETIMEOFFSET()
+                OUTPUT
+                    INSERTED.Id,
+                    INSERTED.NodeId,
+                    INSERTED.Status,
+                    INSERTED.FromPath,
+                    INSERTED.ToPath,
+                    INSERTED.DestinationFolderId,
+                    INSERTED.DocumentType,
+                    INSERTED.IsActive,
+                    INSERTED.Version,
+                    INSERTED.IsSigned,
+                    INSERTED.NewAlfrescoStatus,
+                    INSERTED.DocDescription,
+                    INSERTED.CoreId,
+                    INSERTED.ProductType,
+                    INSERTED.ContractNumber,
+                    INSERTED.AccountNumbers,
+                    INSERTED.CategoryCode,
+                    INSERTED.CategoryName,
+                    INSERTED.OriginalCreatedAt,
+                    INSERTED.DossierDestFolderId,
+                    INSERTED.DossierDestFolderIsCreated
+                FROM DocStaging d
+                INNER JOIN SelectedDocs s ON d.Id = s.Id";
 
             var dp = new DynamicParameters();
             dp.Add("@take", take);
@@ -81,7 +117,8 @@ namespace SqlServer.Infrastructure.Implementation
         public async Task<long> CountReadyForProcessingAsync(CancellationToken ct)
         {
             var sql = @"SELECT COUNT(*) FROM DocStaging
-                        WHERE status = 'READY'";
+                        WHERE status = 'READY'
+                          AND DestinationFolderId IS NOT NULL";
 
             var cmd = new CommandDefinition(sql, transaction: Tx, cancellationToken: ct);
 
@@ -172,13 +209,14 @@ namespace SqlServer.Infrastructure.Implementation
             bool isCreated,
             CancellationToken ct = default)
         {
+            // Updates DestinationFolderId after folder is created
+            // Status remains READY - documents will be picked up by MoveService
             var sql = @"
                 UPDATE DocStaging
                 SET DestinationFolderId = @AlfrescoFolderId,
                     DossierDestFolderIsCreated = @IsCreated,
                     UpdatedAt = GETUTCDATE()
-                WHERE DossierDestFolderId = @DossierDestFolderId
-                  AND DestinationFolderId IS NULL";  // Only update if not already set
+                WHERE DossierDestFolderId = @DossierDestFolderId";
 
             var parameters = new DynamicParameters();
             parameters.Add("@DossierDestFolderId", dossierDestFolderId);

@@ -859,24 +859,15 @@ namespace Migration.Infrastructure.Implementation.Services
             await uow.BeginAsync(ct: ct).ConfigureAwait(false);
             try
             {
+                // ✅ TakeReadyForProcessingAsync now atomically updates status to IN_PROGRESS
+                // No need for separate batch update - it's done in single SQL statement
                 var folders = await folderRepo.TakeReadyForProcessingAsync(batch, ct).ConfigureAwait(false);
-                _fileLogger.LogDebug("Retrieved {Count} folders from database", folders.Count);
-
-                // Batch update instead of N individual updates
-                var updates = folders.Select(f => (
-                    f.Id,
-                    MigrationStatus.InProgress.ToDbString(),
-                    (string?)null
-                ));
-
-                await folderRepo.BatchSetFolderStatusAsync_v1(
-                    uow.Connection,
-                    uow.Transaction,
-                    updates,
-                    ct).ConfigureAwait(false);
 
                 await uow.CommitAsync(ct: ct).ConfigureAwait(false);
-                _fileLogger.LogDebug("Marked {Count} folders as IN PROGRESS", folders.Count);
+
+                _fileLogger.LogDebug(
+                    "Acquired {Count} folders for processing (status atomically set to IN_PROGRESS)",
+                    folders.Count);
 
                 return folders;
 

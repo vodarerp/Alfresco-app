@@ -274,7 +274,8 @@ namespace Alfresco.App
                     services.AddTransient<IMoveReader, MoveReader>();
                     services.AddTransient<IMoveExecutor, MoveExecutor>();
                     services.AddSingleton<IMoveService, MoveService>();                  
-                    services.AddSingleton<IFolderPreparationService, FolderPreparationService>();                    
+                    services.AddSingleton<IFolderPreparationService, FolderPreparationService>();
+                    services.AddSingleton<IMigrationPreparationService, MigrationPreparationService>();
                     services.AddSingleton<GlobalErrorTracker>();
                     services.AddSingleton<IMigrationWorker, MigrationWorker>();
                     services.AddSingleton<IAlfrescoDbReader, AlfrescoDbReader>();

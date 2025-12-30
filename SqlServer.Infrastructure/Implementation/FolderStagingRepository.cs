@@ -64,10 +64,21 @@ namespace SqlServer.Infrastructure.Implementation
 
         public async Task<IReadOnlyList<FolderStaging>> TakeReadyForProcessingAsync(int take, CancellationToken ct)
         {
-            // SQL Server uses WITH (ROWLOCK, UPDLOCK, READPAST) for similar behavior to Oracle's FOR UPDATE SKIP LOCKED
-            var sql = @$"SELECT TOP (@take) *
-                         FROM FolderStaging WITH (ROWLOCK, UPDLOCK, READPAST)
-                         WHERE status = '{MigrationStatus.Ready.ToDbString()}'";
+            // ✅ ATOMIC SELECT+UPDATE - prevents race conditions in parallel processes
+            // Uses CTE to select TOP N rows, then UPDATE + OUTPUT in single statement
+            var sql = @$"
+                WITH SelectedFolders AS (
+                    SELECT TOP (@take) Id
+                    FROM FolderStaging WITH (ROWLOCK, UPDLOCK, READPAST)
+                    WHERE status = '{MigrationStatus.Ready.ToDbString()}'
+                    ORDER BY Id ASC  -- Deterministic ordering for consistency
+                )
+                UPDATE f
+                SET f.status = '{MigrationStatus.InProgress.ToDbString()}',
+                    f.updatedAt = SYSDATETIMEOFFSET()
+                OUTPUT INSERTED.*
+                FROM FolderStaging f
+                INNER JOIN SelectedFolders s ON f.Id = s.Id";
 
             var dp = new DynamicParameters();
             dp.Add("@take", take);

@@ -16,9 +16,7 @@ namespace SqlServer.Abstraction.Interfaces
         Task SetStatusAsync(long id, string status, string? error, CancellationToken ct);
         Task FailAsync(long id, string error, CancellationToken ct);
 
- 
         Task<List<UniqueFolderInfo>> GetUniqueDestinationFoldersAsync(CancellationToken ct = default);
-
 
         Task<int> UpdateDestinationFolderIdAsync(
             string dossierDestFolderId,

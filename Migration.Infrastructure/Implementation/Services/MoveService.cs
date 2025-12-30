@@ -465,17 +465,17 @@ namespace Migration.Infrastructure.Implementation.Services
                 var documents = await docRepo.TakeReadyForProcessingAsync(batch, ct).ConfigureAwait(false);
                 _fileLogger.LogDebug("Retrieved {Count} documents from database", documents.Count);
                 
-                var updates = documents.Select(d => (
-                    d.Id,
-                    MigrationStatus.InProgress.ToDbString(),
-                    (string?)null
-                ));
+                //var updates = documents.Select(d => (
+                //    d.Id,
+                //    MigrationStatus.InProgress.ToDbString(),
+                //    (string?)null
+                //));
 
-                await docRepo.BatchSetDocumentStatusAsync_v1(
-                    uow.Connection,
-                    uow.Transaction,
-                    updates,
-                    ct).ConfigureAwait(false);
+                //await docRepo.BatchSetDocumentStatusAsync_v1(
+                //    uow.Connection,
+                //    uow.Transaction,
+                //    updates,
+                //    ct).ConfigureAwait(false);
 
                 await uow.CommitAsync().ConfigureAwait(false);
                 _fileLogger.LogDebug("Marked {Count} documents as IN PROGRESS", documents.Count);

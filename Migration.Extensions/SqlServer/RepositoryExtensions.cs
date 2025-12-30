@@ -10,6 +10,18 @@ using System.Threading.Tasks;
 
 namespace Migration.Extensions.SqlServer
 {
+    /// <summary>
+    /// Status constants for DocStaging table.
+    /// Represents the document migration lifecycle.
+    /// </summary>
+    public static class DocStagingStatus
+    {
+        public const string READY = "READY";               // DocumentSearch populates - FolderPreparation updates DestinationFolderId, then ready for move
+        public const string IN_PROGRESS = "IN_PROGRESS";   // Move service processing - moving document
+        public const string DONE = "DONE";                 // Move completed successfully
+        public const string ERROR = "ERROR";               // Error occurred during any phase
+    }
+
     public static class RepositoryExtensions
     {
         #region Document extension
@@ -171,6 +183,90 @@ namespace Migration.Extensions.SqlServer
 
             var cmd = new CommandDefinition(sql, parameters, transaction: tran, cancellationToken: ct);
             await conn.ExecuteAsync(cmd).ConfigureAwait(false);
+        }
+
+        #endregion
+
+        #region Migration Preparation Extensions
+
+        /// <summary>
+        /// Deletes all incomplete documents from DocStaging table.
+        /// Incomplete = Status is NOT 'DONE' (includes READY, PREPARATION, PREPARED, IN_PROGRESS, ERROR, NULL).
+        /// Use this before starting migration to ensure clean state.
+        /// </summary>
+        public static async Task<int> DeleteIncompleteDocumentsAsync(
+            this IDocStagingRepository repo,
+            IDbConnection conn,
+            IDbTransaction tran,
+            CancellationToken ct = default)
+        {
+            var sql = @"
+                DELETE FROM DocStaging
+                WHERE Status != 'DONE'
+                   OR Status IS NULL";
+
+            var cmd = new CommandDefinition(sql, transaction: tran, cancellationToken: ct);
+            return await conn.ExecuteAsync(cmd).ConfigureAwait(false);
+        }
+
+        /// <summary>
+        /// Deletes all incomplete folders from FolderStaging table.
+        /// Incomplete = Status does NOT start with 'DONE' (includes READY, IN_PROGRESS, ERROR, RESETED, NULL).
+        /// Use this before starting migration to ensure clean state.
+        /// </summary>
+        public static async Task<int> DeleteIncompleteFoldersAsync(
+            this IFolderStagingRepository repo,
+            IDbConnection conn,
+            IDbTransaction tran,
+            CancellationToken ct = default)
+        {
+            var sql = @"
+                DELETE FROM FolderStaging
+                WHERE Status NOT LIKE 'DONE%'
+                   OR Status IS NULL";
+
+            var cmd = new CommandDefinition(sql, transaction: tran, cancellationToken: ct);
+            return await conn.ExecuteAsync(cmd).ConfigureAwait(false);
+        }
+
+        /// <summary>
+        /// Gets count of incomplete documents in DocStaging.
+        /// Useful for logging before deletion.
+        /// </summary>
+        public static async Task<long> CountIncompleteDocumentsAsync(
+            this IDocStagingRepository repo,
+            IDbConnection conn,
+            IDbTransaction tran,
+            CancellationToken ct = default)
+        {
+            var sql = @"
+                SELECT COUNT(*)
+                FROM DocStaging
+                WHERE Status != 'DONE'
+                   OR Status IS NULL";
+
+            var cmd = new CommandDefinition(sql, transaction: tran, cancellationToken: ct);
+            return await conn.ExecuteScalarAsync<long>(cmd).ConfigureAwait(false);
+        }
+
+        /// <summary>
+        /// Gets count of incomplete folders in FolderStaging.
+        /// Useful for logging before deletion.
+        /// </summary>
+        public static async Task<long> CountIncompleteFoldersAsync(
+            this IFolderStagingRepository repo,
+            IDbConnection conn,
+            IDbTransaction tran,
+            CancellationToken ct = default)
+        {
+            var sql = @"
+                SELECT COUNT(*)
+                FROM FolderStaging
+                WHERE Status NOT LIKE 'DONE%'
+                   OR Status IS NULL";
+
+            var cmd = new CommandDefinition(sql, transaction: tran, cancellationToken: ct);
+            return await conn.ExecuteScalarAsync<long>(cmd).ConfigureAwait(false);
         }
 
         #endregion
