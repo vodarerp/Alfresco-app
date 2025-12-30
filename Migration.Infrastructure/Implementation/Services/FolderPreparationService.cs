@@ -30,7 +30,7 @@ namespace Migration.Infrastructure.Implementation.Services
 
         private readonly string _rootDestinationFolderId;
 
-        private const int MAX_PARALLELISM = 50; // 30-50 concurrent folder creations
+        private readonly int _maxParallelism; // Configurable concurrent folder creations (default: 50)
         private const int CHECKPOINT_INTERVAL = 1000; // Save checkpoint every 1000 folders
 
         private long _foldersCreated = 0;
@@ -50,13 +50,18 @@ namespace Migration.Infrastructure.Implementation.Services
             _dbLogger = logger.CreateLogger("DbLogger");
             _uiLogger = logger.CreateLogger("UiLogger");
             _rootDestinationFolderId = migrationOptions?.Value?.RootDestinationFolderId ?? throw new ArgumentNullException(nameof(migrationOptions));
+
+            // Use MaxDegreeOfParallelism from config or default to 50
+            _maxParallelism = migrationOptions.Value.MaxDegreeOfParallelism > 0
+                ? migrationOptions.Value.MaxDegreeOfParallelism
+                : 50;
         }
 
         public async Task PrepareAllFoldersAsync(CancellationToken ct = default)
         {
             try
             {
-                _fileLogger.LogInformation("🏗️  Starting parallel folder preparation with {MaxParallelism} concurrent tasks", MAX_PARALLELISM);
+                _fileLogger.LogInformation("🏗️  Starting parallel folder preparation with {MaxParallelism} concurrent tasks", _maxParallelism);
 
                 // ====================================================================
                 // STEP 0: Reset stuck items from previous crashed run
@@ -133,7 +138,7 @@ namespace Migration.Infrastructure.Implementation.Services
                 // ====================================================================
                 // STEP 3: Parallel folder creation with SemaphoreSlim throttling
                 // ====================================================================
-                var semaphore = new SemaphoreSlim(MAX_PARALLELISM, MAX_PARALLELISM);
+                var semaphore = new SemaphoreSlim(_maxParallelism, _maxParallelism);
                 var foldersToProcess = uniqueFolders.Skip(startIndex).ToList();
 
                 _fileLogger.LogInformation(
