@@ -41,7 +41,8 @@
       "Bash(Select-String -Pattern \"Migration.Infrastructure|error|warning CS|Build succeeded|Build FAILED\" -Context 1,1)",
       "Bash(Get-Content \"C:\\\\Users\\\\Nikola Preradov\\\\source\\\\repos\\\\Alfresco\\\\Alfresco.App\\\\appsettings.json\")",
       "Bash(Select-String -Pattern \"MaxDocuments|UseCopy\" -Context 2,2)",
-      "Bash(Select-String -Pattern \"Build succeeded|Build FAILED|error|warning\" -Context 1,1)"
+      "Bash(Select-String -Pattern \"Build succeeded|Build FAILED|error|warning\" -Context 1,1)",
+      "Bash(Select-String -Pattern \"error|Build succeeded|Build FAILED\" -Context 2,2)"
     ],
     "deny": [],
     "ask": []

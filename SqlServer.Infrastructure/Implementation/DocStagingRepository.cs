@@ -65,12 +65,13 @@ namespace SqlServer.Infrastructure.Implementation
 
         public async Task<IReadOnlyList<DocStaging>> TakeReadyForProcessingAsync(int take, CancellationToken ct)
         {
-            
+            // ✅ Takes documents with Status='PREPARED' (folder already created by FolderPreparationService)
+            // Updates them to 'IN PROGRESS' for move operation
             var sql = @"
                 WITH SelectedDocs AS (
                     SELECT TOP (@take) Id
                     FROM DocStaging WITH (ROWLOCK, UPDLOCK, READPAST)
-                    WHERE status = 'READY'
+                    WHERE status = 'PREPARED'
                       AND DestinationFolderId IS NOT NULL
                     ORDER BY Id ASC  -- Deterministic ordering for consistency
                 )
@@ -113,8 +114,9 @@ namespace SqlServer.Infrastructure.Implementation
 
         public async Task<long> CountReadyForProcessingAsync(CancellationToken ct)
         {
+            // ✅ Counts documents with Status='PREPARED' (ready for move operation)
             var sql = @"SELECT COUNT(*) FROM DocStaging
-                        WHERE status = 'READY'
+                        WHERE status = 'PREPARED'
                           AND DestinationFolderId IS NOT NULL";
 
             var cmd = new CommandDefinition(sql, transaction: Tx, cancellationToken: ct);
@@ -126,40 +128,52 @@ namespace SqlServer.Infrastructure.Implementation
 
         public async Task<List<UniqueFolderInfo>> GetUniqueDestinationFoldersAsync(CancellationToken ct = default)
         {
-            // Query DocStaging for all DISTINCT combinations of (TargetDossierType, DossierDestFolderId)
-            // These represent unique destination folders that need to be created
-            // Only include documents that are READY for processing
-            // Also fetch first document per folder to extract properties needed for folder creation
-            var sql = @"
-                WITH FirstDocPerFolder AS (
-                    SELECT
-                        TargetDossierType,
-                        DossierDestFolderId,
-                        ProductType,
-                        CoreId,
-                        OriginalCreatedAt,
-                        ROW_NUMBER() OVER (PARTITION BY TargetDossierType, DossierDestFolderId ORDER BY Id) AS RowNum
-                    FROM DocStaging
-                    WHERE Status = 'READY'
-                      AND TargetDossierType IS NOT NULL
-                      AND DossierDestFolderId IS NOT NULL
-                )
-                SELECT
-                    TargetDossierType,
-                    DossierDestFolderId,
-                    ProductType,
-                    CoreId,
-                    OriginalCreatedAt
-                FROM FirstDocPerFolder
-                WHERE RowNum = 1
-                ORDER BY TargetDossierType, DossierDestFolderId";
+            // ✅ THREAD-SAFE: CTE + UPDATE + OUTPUT pattern
+            // Selects all documents that belong to unique folders, then updates them to PREPARED
+            // Returns ALL updated documents, then filters in C# to get only first per folder
+            var sql = @"WITH Ranked AS (
+      SELECT
+          d.TargetDossierType,
+          d.DossierDestFolderId,
+          ROW_NUMBER() OVER (
+              PARTITION BY d.TargetDossierType, d.DossierDestFolderId
+              ORDER BY d.Id ASC
+          ) AS rn
+      FROM DocStaging d WITH (ROWLOCK, UPDLOCK, READPAST)
+      WHERE d.Status = 'READY'
+        AND d.TargetDossierType IS NOT NULL
+        AND d.DossierDestFolderId IS NOT NULL
+  ),
+  SelectedFolders AS (
+      SELECT TargetDossierType, DossierDestFolderId
+      FROM Ranked
+      WHERE rn = 1  -- Samo unique folderi
+  )
+  UPDATE d
+  SET d.Status = 'PREPARED',
+      d.UpdatedAt = SYSDATETIMEOFFSET()
+  OUTPUT
+      INSERTED.TargetDossierType,
+      INSERTED.DossierDestFolderId,
+      INSERTED.ProductType,
+      INSERTED.CoreId,
+      INSERTED.OriginalCreatedAt
+  FROM DocStaging d
+  INNER JOIN SelectedFolders sf
+      ON d.TargetDossierType = sf.TargetDossierType
+      AND d.DossierDestFolderId = sf.DossierDestFolderId
+  WHERE d.Status = 'READY'";
+
 
             var cmd = new CommandDefinition(sql, transaction: Tx, cancellationToken: ct);
 
             var results = await Conn.QueryAsync<dynamic>(cmd).ConfigureAwait(false);
 
-            // Map to UniqueFolderInfo
-            var folders = results.Select(r => new UniqueFolderInfo
+            // Filter to only first document per folder (GroupBy in C#)
+            var folders = results
+                .GroupBy(r => new { TargetDossierType = (int?)r.TargetDossierType, DossierDestFolderId = r.DossierDestFolderId?.ToString() })
+                .Select(g => g.OrderBy(r => r.Id).First())
+                .Select(r => new UniqueFolderInfo
             {
                 // TargetDossierType maps to root folder (e.g., 500 → PI folder)
                 // This should be resolved by MigrationWorker/FolderPreparationService

@@ -19,6 +19,11 @@ namespace Alfresco.Contracts.Enums
         Ready = 1,
 
         /// <summary>
+        /// Destination folder prepared, ready for document move
+        /// </summary>
+        Prepared = 6,
+
+        /// <summary>
         /// Currently being processed (locked by worker)
         /// </summary>
         InProgress = 2,
@@ -49,6 +54,7 @@ namespace Alfresco.Contracts.Enums
                 {
                     MigrationStatus.New => "NEW",
                     MigrationStatus.Ready => "READY",
+                    MigrationStatus.Prepared => "PREPARED",
                     MigrationStatus.InProgress => "IN PROGRESS",
                     MigrationStatus.Done => "DONE",
                     MigrationStatus.Processed => "PROCESSED",
@@ -66,6 +72,7 @@ namespace Alfresco.Contracts.Enums
                 {
                     "NEW" => MigrationStatus.New,
                     "READY" => MigrationStatus.Ready,
+                    "PREPARED" => MigrationStatus.Prepared,
                     "IN PROGRESS" => MigrationStatus.InProgress,
                     "DONE" => MigrationStatus.Done,
                     "PROCESSED" => MigrationStatus.Processed,

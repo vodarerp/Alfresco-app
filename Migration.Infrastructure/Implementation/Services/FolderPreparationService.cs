@@ -139,7 +139,8 @@ namespace Migration.Infrastructure.Implementation.Services
                 // STEP 3: Parallel folder creation with SemaphoreSlim throttling
                 // ====================================================================
                 var semaphore = new SemaphoreSlim(_maxParallelism, _maxParallelism);
-                var foldersToProcess = uniqueFolders.Skip(startIndex).ToList();
+                //var foldersToProcess = uniqueFolders.Skip(startIndex).ToList();
+                var foldersToProcess = uniqueFolders.ToList();
 
                 _fileLogger.LogInformation(
                     "Starting parallel folder creation: {Remaining} folders remaining",

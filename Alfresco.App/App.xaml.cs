@@ -420,7 +420,7 @@ namespace Alfresco.App
         {
             try
             {
-                const string appVersion = "4.9.2"; // Manual version - update as needed
+                const string appVersion = "4.9.3"; // Manual version - update as needed
 
                 var loggerFactory = AppHost.Services.GetRequiredService<ILoggerFactory>();
                 var logger = loggerFactory.CreateLogger("FileLogger");
