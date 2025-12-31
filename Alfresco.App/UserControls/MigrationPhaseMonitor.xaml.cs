@@ -172,14 +172,25 @@ namespace Alfresco.App.UserControls
 
         private void UserControl_Loaded(object sender, RoutedEventArgs e)
         {
-            _updateTimer.Start();
-            _ = UpdateStatusAsync(); // Initial update
+            // Restart timer when user returns to this tab (in case it was stopped in Unloaded)
+            if (!_updateTimer.IsEnabled)
+            {
+                _updateTimer.Start();
+            }
+            _ = UpdateStatusAsync(); // Refresh status display
         }
 
         private void UserControl_Unloaded(object sender, RoutedEventArgs e)
         {
+            // Stop the UI update timer when control is not visible (performance optimization)
             _updateTimer.Stop();
-            _migrationCts?.Cancel();
+
+            // DO NOT cancel migration here!
+            // Migration should continue running in background even when user switches tabs.
+            // Migration is only canceled when user explicitly clicks Stop button (btnStop_Click).
+            //
+            // Previous bug: _migrationCts?.Cancel() was called here, causing TaskCanceledException
+            // when user switched from Migration Pipeline tab to LiveLogger tab during migration.
         }
 
         private async void UpdateTimer_Tick(object? sender, EventArgs e)
