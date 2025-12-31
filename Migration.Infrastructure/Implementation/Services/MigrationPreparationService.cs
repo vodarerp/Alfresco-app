@@ -47,7 +47,36 @@ namespace Migration.Infrastructure.Implementation.Services
                 var docRepo = scope.ServiceProvider.GetRequiredService<IDocStagingRepository>();
                 var folderRepo = scope.ServiceProvider.GetRequiredService<IFolderStagingRepository>();
 
-                await uow.BeginAsync(ct: ct).ConfigureAwait(false);
+                _fileLogger.LogDebug("Attempting to begin database transaction for preparation...");
+
+                try
+                {
+                    await uow.BeginAsync(ct: ct).ConfigureAwait(false);
+                }
+                catch (OperationCanceledException ocEx)
+                {
+                    _fileLogger.LogError(ocEx,
+                        "❌ Database transaction was canceled during preparation. " +
+                        "This typically indicates: (1) Application is shutting down, (2) Network connectivity issues, " +
+                        "(3) SQL Server is not accessible, or (4) Connection timeout. Message: {Message}",
+                        ocEx.Message);
+
+                    _uiLogger.LogError(
+                        "Povezivanje sa bazom otkazano. Proverite da li je SQL Server dostupan i da li je mrežna veza aktivna.");
+
+                    throw;
+                }
+                catch (InvalidOperationException ioEx)
+                {
+                    _fileLogger.LogError(ioEx,
+                        "❌ Failed to connect to database during preparation. Message: {Message}",
+                        ioEx.Message);
+
+                    _uiLogger.LogError(
+                        "Greška pri povezivanju na bazu podataka. Proverite konfiguraciju SQL Servera.");
+
+                    throw;
+                }
 
                 try
                 {
