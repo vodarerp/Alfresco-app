@@ -100,6 +100,27 @@ namespace Migration.Infrastructure.Implementation.Services
             var batchSize = _options.Value.DocumentTypeDiscovery.BatchSize;
             var docDescriptions = _docDescriptionsOverride ?? _options.Value.DocumentTypeDiscovery.DocTypes;
 
+            // Adjust batchSize based on MaxDocumentsToProcess to avoid fetching more than needed
+            var maxDocs = _options.Value.MaxDocumentsToProcess;
+            if (maxDocs > 0)
+            {
+                var remainingToProcess = maxDocs - _totalDocumentsProcessed;
+                if (remainingToProcess <= 0)
+                {
+                    _fileLogger.LogInformation("Max documents limit already reached, skipping batch");
+                    return result;
+                }
+
+                // If we need fewer documents than batchSize, reduce the batch size
+                if (remainingToProcess < batchSize)
+                {
+                    _fileLogger.LogInformation(
+                        "Adjusting batchSize from {OriginalBatchSize} to {AdjustedBatchSize} (MaxDocuments: {MaxDocs}, Already processed: {Processed}, Remaining: {Remaining})",
+                        batchSize, remainingToProcess, maxDocs, _totalDocumentsProcessed, remainingToProcess);
+                    batchSize = (int)remainingToProcess;
+                }
+            }
+
             _fileLogger.LogInformation("DocumentSearch batch started - BatchSize: {BatchSize}, DocDescriptions: {DocDescriptions}",
                 batchSize, string.Join(", ", docDescriptions));
 
@@ -198,8 +219,8 @@ namespace Migration.Infrastructure.Implementation.Services
 
             _fileLogger.LogInformation("Found {Count} documents in DOSSIER-{Type}", finalDocuments.Count, currentType);
 
-            // Check if we need to limit the number of documents to process
-            var maxDocs = _options.Value.MaxDocumentsToProcess;
+            // Safety check: ensure we don't process more than MaxDocumentsToProcess allows
+            // (This should normally not trigger since batchSize was already adjusted, but it's a safety net)
             var documentsToProcess = finalDocuments;
 
             if (maxDocs > 0)
@@ -207,16 +228,16 @@ namespace Migration.Infrastructure.Implementation.Services
                 var remainingDocs = maxDocs - _totalDocumentsProcessed;
                 if (remainingDocs <= 0)
                 {
-                    _fileLogger.LogInformation("Max documents limit reached, skipping document processing");
+                    _fileLogger.LogWarning("Max documents limit already reached in safety check - this should have been caught earlier");
                     return result;
                 }
 
                 if (finalDocuments.Count > remainingDocs)
                 {
+                    _fileLogger.LogWarning(
+                        "Safety check triggered: Limiting documents from {Total} to {Remaining} - batchSize adjustment may need review",
+                        finalDocuments.Count, remainingDocs);
                     documentsToProcess = finalDocuments.Take((int)remainingDocs).ToList();
-                    _fileLogger.LogInformation(
-                        "Limiting documents to process from {Total} to {Remaining} (max limit: {MaxDocs}, already processed: {Processed})",
-                        finalDocuments.Count, remainingDocs, maxDocs, _totalDocumentsProcessed);
                 }
             }
 
