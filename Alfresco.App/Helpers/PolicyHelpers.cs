@@ -3,7 +3,8 @@ using Alfresco.Contracts.Options;        // ← PollyPolicyOptions
 using Microsoft.Extensions.Logging;     // ← ILogger
 using Migration.Infrastructure.Implementation.Services;
 using Polly;                             // ← Policy, AsyncRetryPolicy
-using Polly.CircuitBreaker;              // ← AsyncCircuitBreakerPolicy
+using Polly.Bulkhead;                    // ← BulkheadRejectedException
+using Polly.CircuitBreaker;              // ← AsyncCircuitBreakerPolicy, BrokenCircuitException
 using Polly.Extensions.Http;
 using Polly.Retry;                       // ← AsyncRetryPolicy
 using Polly.Timeout;                     // ← AsyncTimeoutPolicy, TimeoutRejectedException
@@ -32,6 +33,8 @@ namespace Alfresco.App.Helpers
                     (int)r.StatusCode >= 500)
                 .Or<HttpRequestException>()
                 .Or<TimeoutRejectedException>() // Retry timeout exceptions - server može da se oporavi
+                .Or<BrokenCircuitException>() // Retry when circuit breaker is open - možda će se zatvoriti
+                .Or<BulkheadRejectedException>() // Retry when bulkhead is full - možda će se osloboditi slot
                 // Handle network failures caused by server-side connection abort
                 .Or<TaskCanceledException>(ex =>
                 {
@@ -91,8 +94,9 @@ namespace Alfresco.App.Helpers
                         {
                             fileLogger?.LogWarning(
                                 "⚠️ Retry {RetryAttempt}/{MaxRetries} for operation '{Operation}' - TIMEOUT. " +
-                                "Waiting {Delay}s before next attempt.",
-                                retryAttempt, retryCount, operation, timespan.TotalSeconds);
+                                "Waiting {Delay}s before next attempt." +
+                                "Full Exceprion : {Exception}. ",
+                                retryAttempt, retryCount, operation, timespan.TotalSeconds, outcome.Exception?.Message ?? "Unknown");
 
                             uiLogger?.LogWarning(
                                 "Retry pokušaj {RetryAttempt} od {MaxRetries} - Timeout na operaciji '{Operation}'",
@@ -113,12 +117,37 @@ namespace Alfresco.App.Helpers
 
                             fileLogger?.LogWarning(
                                 "⚠️ Retry {RetryAttempt}/{MaxRetries} for operation '{Operation}' - NETWORK ERROR: {ExceptionType} " +
-                                "(Inner: {InnerType}{SocketError} - {InnerMsg}). Waiting {Delay}s before next attempt.",
-                                retryAttempt, retryCount, operation, exceptionType, innerExType, socketErrorCode, innerExMsg, timespan.TotalSeconds);
+                                "(Inner: {InnerType}{SocketError} - {InnerMsg}). Waiting {Delay}s before next attempt." +
+                                "Full Exceprion : {Exception}. ",
+                                retryAttempt, retryCount, operation, exceptionType, innerExType, socketErrorCode, innerExMsg, timespan.TotalSeconds, outcome.Exception?.Message ?? "Unknown");
 
                             uiLogger?.LogWarning(
                                 "Retry pokušaj {RetryAttempt} od {MaxRetries} - Mrežna greška na operaciji '{Operation}' ({ExceptionType})",
                                 retryAttempt, retryCount, operation, exceptionType);
+                        }
+                        else if (outcome.Exception is BrokenCircuitException)
+                        {
+                            fileLogger?.LogWarning(
+                                "⚠️ Retry {RetryAttempt}/{MaxRetries} for operation '{Operation}' - CIRCUIT BREAKER OPEN. " +
+                                "Waiting {Delay}s before next attempt." +
+                                "Full Exceprion : {Exception}. ",
+                                retryAttempt, retryCount, operation, timespan.TotalSeconds, outcome.Exception?.Message ?? "Unknown");
+
+                            uiLogger?.LogWarning(
+                                "Retry pokušaj {RetryAttempt} od {MaxRetries} - Circuit breaker otvoren na operaciji '{Operation}'",
+                                retryAttempt, retryCount, operation);
+                        }
+                        else if (outcome.Exception is BulkheadRejectedException)
+                        {
+                            fileLogger?.LogWarning(
+                                "⚠️ Retry {RetryAttempt}/{MaxRetries} for operation '{Operation}' - BULKHEAD FULL. " +
+                                "Waiting {Delay}s before next attempt." +
+                                "Full Exceprion : {Exception}. ",
+                                retryAttempt, retryCount, operation, timespan.TotalSeconds, outcome.Exception?.Message ?? "Unknown");
+
+                            uiLogger?.LogWarning(
+                                "Retry pokušaj {RetryAttempt} od {MaxRetries} - Bulkhead pun na operaciji '{Operation}'",
+                                retryAttempt, retryCount, operation);
                         }
                         else if (outcome.Exception != null)
                         {
@@ -157,8 +186,9 @@ namespace Alfresco.App.Helpers
                     {
                         fileLogger?.LogError(
                             " Circuit breaker OPENED for {Duration}s due to failures. " +
-                            "All requests will fail immediately until reset.",
-                            duration.TotalSeconds);
+                            "All requests will fail immediately until reset." +
+                            "Full Exceprion : {Exception}. ",
+                            duration.TotalSeconds, outcome?.Exception?.Message ?? "Unknown");
                     },
                     onReset: () =>
                     {
@@ -246,8 +276,9 @@ namespace Alfresco.App.Helpers
                             fileLogger?.LogError(
                                 "❌ FINAL FAILURE - Operation '{Operation}' timed out. " +
                                 "Configured max retries: {MaxRetries}, Executed retries: {ExecutedRetries}. " +
-                                "Throwing AlfrescoTimeoutException.",
-                                operation, maxRetryCount, executedRetries);
+                                "Throwing AlfrescoTimeoutException. " +
+                                "Full Exceprion : {Exception}. ",
+                                operation, maxRetryCount, executedRetries, outcome.Exception?.Message ?? "Unknown");
 
                             uiLogger?.LogError(
                                 "GREŠKA: Operacija '{Operation}' je istekla nakon {ExecutedRetries} pokušaja " +
@@ -294,8 +325,9 @@ namespace Alfresco.App.Helpers
                         var executedRetries = context.ContainsKey("RetryAttempts") ? (int)context["RetryAttempts"] : 0;
 
                         fileLogger?.LogWarning(
-                            "⚠️ Fallback triggered for operation '{Operation}' - Executed retries: {ExecutedRetries}",
-                            operation, executedRetries);
+                            "⚠️ Fallback triggered for operation '{Operation}' - Executed retries: {ExecutedRetries}" +
+                            "Full Exception: {Exception}.",
+                            operation, executedRetries, outcome.Exception?.Message ?? "Unknown");
 
                         return Task.CompletedTask;
                     });
@@ -329,8 +361,9 @@ namespace Alfresco.App.Helpers
                             fileLogger?.LogError(
                                 "❌ FINAL FAILURE - Client API operation '{Operation}' timed out. " +
                                 "Configured max retries: {MaxRetries}, Executed retries: {ExecutedRetries}. " +
-                                "Throwing ClientApiTimeoutException.",
-                                operation, maxRetryCount, executedRetries);
+                                "Throwing ClientApiTimeoutException." +
+                                "Full Exception: {Exception}. ",
+                                operation, maxRetryCount, executedRetries, outcome.Exception?.Message ?? "Unknown");
 
                             uiLogger?.LogError(
                                 "GREŠKA: Client API operacija '{Operation}' je istekla nakon {ExecutedRetries} pokušaja " +
@@ -377,8 +410,9 @@ namespace Alfresco.App.Helpers
                         var executedRetries = context.ContainsKey("RetryAttempts") ? (int)context["RetryAttempts"] : 0;
 
                         fileLogger?.LogWarning(
-                            "⚠️ Client API Fallback triggered for operation '{Operation}' - Executed retries: {ExecutedRetries}",
-                            operation, executedRetries);
+                            "⚠️ Client API Fallback triggered for operation '{Operation}' - Executed retries: {ExecutedRetries}" +
+                            "Full Exception: {Exception}",
+                            operation, executedRetries, outcome.Exception?.Message ?? "Unknown");
 
                         return Task.CompletedTask;
                     });

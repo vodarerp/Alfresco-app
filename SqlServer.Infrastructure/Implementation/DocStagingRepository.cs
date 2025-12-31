@@ -65,10 +65,7 @@ namespace SqlServer.Infrastructure.Implementation
 
         public async Task<IReadOnlyList<DocStaging>> TakeReadyForProcessingAsync(int take, CancellationToken ct)
         {
-            // ✅ ATOMIC SELECT+UPDATE - prevents race conditions in parallel processes
-            // Takes READY documents with DestinationFolderId populated (folder already created) and marks them as IN_PROGRESS
-            // Uses CTE to select TOP N rows, then UPDATE + OUTPUT in single statement
-            //var x = MigrationStatus.InProgress.ToDbString()
+            
             var sql = @"
                 WITH SelectedDocs AS (
                     SELECT TOP (@take) Id
