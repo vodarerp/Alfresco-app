@@ -26,26 +26,29 @@ namespace Migration.Infrastructure.Implementation.Document
         private readonly IAlfrescoReadApi _read;
         private readonly IAlfrescoWriteApi _write;
         private readonly IClientApi _clientApi;
+        private readonly ICurrentUserService _currentUserService;
         private readonly ILogger _fileLogger;
         private readonly ILogger _dbLogger;
         private readonly FolderNodeTypeMappingConfig _nodeTypeMapping;
 
-       
+
         private readonly ConcurrentDictionary<string, (string FolderId, bool IsCreated)> _folderCache = new();
 
-       
+
         private readonly LockStriping _lockStriping = new(1024);
 
-        public DocumentResolver(           
+        public DocumentResolver(
             IAlfrescoReadApi read,
-            IAlfrescoWriteApi write,            
+            IAlfrescoWriteApi write,
             IClientApi clientApi,
+            ICurrentUserService currentUserService,
             IServiceProvider serviceProvider,
             IOptions<FolderNodeTypeMappingConfig> nodeTypeMapping)
-        {           
+        {
             _read = read;
-            _write = write;           
+            _write = write;
             _clientApi = clientApi ?? throw new ArgumentNullException(nameof(clientApi));
+            _currentUserService = currentUserService ?? throw new ArgumentNullException(nameof(currentUserService));
             var loggerFactory = serviceProvider.GetRequiredService<ILoggerFactory>();
             _fileLogger = loggerFactory.CreateLogger("FileLogger");
             _dbLogger = loggerFactory.CreateLogger("DbLogger");
@@ -482,6 +485,19 @@ namespace Migration.Infrastructure.Implementation.Document
                 properties["ecm:coreId"] = folderInfo.CoreId;
                 properties["ecm:bnkClientId"] = folderInfo.CoreId;
                 _fileLogger.LogInformation("EnrichPropertiesWithEcmData: Added ecm:coreId and ecm:bnkClientId = '{CoreId}'", folderInfo.CoreId);
+            }
+
+            // Add current user information (who created the dossier folder)
+            if (!string.IsNullOrEmpty(_currentUserService.UserId))
+            {
+                properties["ecm:kreiraoId"] = _currentUserService.UserId;
+                _fileLogger.LogInformation("EnrichPropertiesWithEcmData: Added ecm:kreiraoId = '{UserId}'", _currentUserService.UserId);
+            }
+
+            if (!string.IsNullOrEmpty(_currentUserService.DisplayName))
+            {
+                properties["ecm:createdByName"] = _currentUserService.DisplayName;
+                _fileLogger.LogInformation("EnrichPropertiesWithEcmData: Added ecm:createdByName = '{DisplayName}'", _currentUserService.DisplayName);
             }
 
             // Add deposit-specific properties if this is a deposit dossier (700)

@@ -38,7 +38,7 @@ public static class Program
             BaseUrl = "http://localhost:8080/",
             Username =  "admin",
             Password = "admin",
-            RootParentId = "4fb6fab5-7f2a-4fd7-b6fa-b57f2adfd797",
+            RootParentId = "8b86b760-7752-42db-86b7-60775202db14",
             FolderCount = 200,
             DocsPerFolder = 3,
             DegreeOfParallelism = 8,
@@ -53,8 +53,8 @@ public static class Program
             // KDP document generation settings
             // To generate ~5000 KDP documents: Set FolderCount=500 and KdpDocumentsPerFolder=10
             // Or: Set FolderCount=250 and KdpDocumentsPerFolder=20
-            GenerateOnlyKdpDocuments = false,       // Set to true to generate only KDP documents
-            KdpDocumentsPerFolder = 200              // Number of KDP documents per folder
+            GenerateOnlyKdpDocuments = true,       // Set to true to generate only KDP documents
+            KdpDocumentsPerFolder = 50              // Number of KDP documents per folder
         };
 
 

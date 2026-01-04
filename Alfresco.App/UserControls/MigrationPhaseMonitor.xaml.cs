@@ -178,8 +178,8 @@ namespace Alfresco.App.UserControls
 
         private void UserControl_Unloaded(object sender, RoutedEventArgs e)
         {
-            _updateTimer.Stop();
-            _migrationCts?.Cancel();
+            //_updateTimer.Stop();
+            //_migrationCts?.Cancel();
         }
 
         private async void UpdateTimer_Tick(object? sender, EventArgs e)

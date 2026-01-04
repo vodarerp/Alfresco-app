@@ -1,3 +1,4 @@
+using Alfresco.Abstraction.Interfaces;
 using Alfresco.Abstraction.Models;
 using Alfresco.Contracts.Enums;
 using Alfresco.Contracts.Options;
@@ -35,6 +36,7 @@ namespace Migration.Infrastructure.Implementation.Services
         private readonly IMoveService _moveService;
         private readonly IMigrationPreparationService _migrationPreparation;
         private readonly IPhaseCheckpointRepository _phaseCheckpointRepo;
+        private readonly ICurrentUserService _currentUserService;
         private readonly ILogger _logger;
         private readonly ILogger _uiLogger;
         private readonly IServiceScopeFactory _scopeFactory;
@@ -50,6 +52,7 @@ namespace Migration.Infrastructure.Implementation.Services
             IMoveService moveService,
             IMigrationPreparationService migrationPreparation,
             IPhaseCheckpointRepository phaseCheckpointRepo,
+            ICurrentUserService currentUserService,
             ILoggerFactory logger,
             IOptions<global::Alfresco.Contracts.SqlServer.SqlServerOptions> sqlOptions,
             IServiceScopeFactory scopeFactory,
@@ -64,6 +67,7 @@ namespace Migration.Infrastructure.Implementation.Services
             _moveService = moveService ?? throw new ArgumentNullException(nameof(moveService));
             _migrationPreparation = migrationPreparation ?? throw new ArgumentNullException(nameof(migrationPreparation));
             _phaseCheckpointRepo = phaseCheckpointRepo ?? throw new ArgumentNullException(nameof(phaseCheckpointRepo));
+            _currentUserService = currentUserService ?? throw new ArgumentNullException(nameof(currentUserService));
             _logger = logger.CreateLogger("FileLogger");
             _uiLogger = logger.CreateLogger("UiLogger");
             _connectionString = sqlOptions?.Value?.ConnectionString ?? throw new ArgumentNullException(nameof(sqlOptions));
@@ -108,6 +112,16 @@ namespace Migration.Infrastructure.Implementation.Services
                 {
                     _uiLogger.LogInformation("Baza je već čista - nema nekompletnih stavki");
                 }
+
+                // ====================================================================
+                // FETCH CURRENT USER: Initialize CurrentUserService before migration
+                // ====================================================================
+                _logger.LogInformation("Fetching current user information from Alfresco...");
+                await _currentUserService.InitializeAsync(ct);
+                _logger.LogInformation(
+                    "Current user initialized: {DisplayName} ({UserId}, {Email})",
+                    _currentUserService.DisplayName, _currentUserService.UserId, _currentUserService.Email);
+                _uiLogger.LogInformation("Ulogovan korisnik: {DisplayName}", _currentUserService.DisplayName);
 
                 // Determine migration mode
                 if (_migrationOptions.MigrationByDocument)
