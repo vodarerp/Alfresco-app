@@ -156,18 +156,7 @@ namespace Migration.Infrastructure.Implementation
                 {
                     mapping = await mappingService.FindByOriginalCodeAsync(docCode, ct).ConfigureAwait(false);                    
                 }
-                // Try all search methods
-               // var mapping = await mappingService.FindByOriginalNameAsync(opisDokumenta, ct).ConfigureAwait(false);
-
-                //if (mapping == null)
-                //{
-                //    mapping = await mappingService.FindBySerbianNameAsync(opisDokumenta, ct).ConfigureAwait(false);
-                //}
-
-                //if (mapping == null)
-                //{
-                //    mapping = await mappingService.FindByMigratedNameAsync(opisDokumenta, ct).ConfigureAwait(false);
-                //}
+               
 
                 await uow.CommitAsync(ct: ct).ConfigureAwait(false);
                 return mapping;

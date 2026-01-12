@@ -548,20 +548,39 @@ namespace Migration.Infrastructure.Implementation.Services
                     doc.Id, useCopy ? "copied" : "moved", doc.DestinationFolderId);
 
                 // ========================================
-                // STEP 2: Lookup DocumentMapping to get migrated docType and naziv
+                // STEP 2: Get migrated docType and naziv from DocStaging with FALLBACK to DocumentMappingService
                 // ========================================
-                _fileLogger.LogDebug("Looking up DocumentMapping for document {DocId} with ecm:docDesc='{DocDesc}'",
-                    doc.Id, doc.DocDescription);
+                string? migratedDocType = doc.NewDocumentCode;
+                string? migratedNaziv = doc.NewDocumentName;
 
-                await using var mappingScope = _scopeFactory.CreateAsyncScope();
-                var uow = mappingScope.ServiceProvider.GetRequiredService<IUnitOfWork>();
-                var mappingService = mappingScope.ServiceProvider.GetRequiredService<IDocumentMappingService>();
+                // FALLBACK: If DocStaging fields are not populated, lookup from DocumentMappingService
+                if (string.IsNullOrWhiteSpace(migratedNaziv) || string.IsNullOrWhiteSpace(migratedDocType))
+                {
+                    _fileLogger.LogWarning(
+                        "Document {DocId} has missing mapping fields (NewDocumentName='{NewName}', NewDocumentCode='{NewCode}'). Using fallback lookup via IDocumentMappingService.",
+                        doc.Id, migratedNaziv ?? "NULL", migratedDocType ?? "NULL");
 
-                string? migratedDocType = null;
-                string? migratedNaziv = null;
+                    await using var mappingScope = _scopeFactory.CreateAsyncScope();
+                    var mappingService = mappingScope.ServiceProvider.GetRequiredService<IDocumentMappingService>();
 
-                migratedDocType = doc.NewDocumentCode;
-                migratedNaziv = doc.NewDocumentName;
+                    // Try to get migrated name from DocDescription
+                    if (string.IsNullOrWhiteSpace(migratedNaziv) && !string.IsNullOrWhiteSpace(doc.DocDescription))
+                    {
+                        migratedNaziv = await mappingService.GetMigratedNameAsync(doc.DocDescription, ct).ConfigureAwait(false);
+                        _fileLogger.LogInformation(
+                            "Fallback: Retrieved migratedNaziv='{Naziv}' for document {DocId} from DocDescription='{DocDesc}'",
+                            migratedNaziv, doc.Id, doc.DocDescription);
+                    }
+
+                    // Try to get migrated code from OriginalDocumentCode
+                    if (string.IsNullOrWhiteSpace(migratedDocType) && !string.IsNullOrWhiteSpace(doc.OriginalDocumentCode))
+                    {
+                        migratedDocType = await mappingService.GetMigratedCodeAsync(doc.OriginalDocumentCode, ct).ConfigureAwait(false);
+                        _fileLogger.LogInformation(
+                            "Fallback: Retrieved migratedDocType='{DocType}' for document {DocId} from OriginalDocumentCode='{OrigCode}'",
+                            migratedDocType, doc.Id, doc.OriginalDocumentCode);
+                    }
+                }
                
                 _fileLogger.LogDebug("Updating properties for document {DocId} (NodeId: {NodeId})", doc.Id, doc.NodeId);
 
@@ -586,17 +605,28 @@ namespace Migration.Infrastructure.Implementation.Services
                     _fileLogger.LogDebug("Will update ecm:docType to '{DocType}' (from DocStaging fallback) for document {DocId}", doc.DocumentType, doc.Id);
                 }
 
-                // Update ecm:naziv if we have mapping
+                // Update ecm:docTypeName (migrated document type name)
                 if (!string.IsNullOrWhiteSpace(migratedNaziv))
                 {
-                    //propertiesToUpdate["ecm:naziv"] = migratedNaziv;
                     propertiesToUpdate["ecm:docTypeName"] = migratedNaziv;
-                    _fileLogger.LogDebug("Will update ecm:naziv to '{Naziv}' for document {DocId}", migratedNaziv, doc.Id);
+                    _fileLogger.LogDebug("Will update ecm:docTypeName to '{Naziv}' for document {DocId}", migratedNaziv, doc.Id);
                 }
-                 if (!string.IsNullOrWhiteSpace(doc.DocDescription))
+                else if (!string.IsNullOrWhiteSpace(doc.DocDescription))
+                {
+                    // FALLBACK: If migratedNaziv is still empty after lookup, use DocDescription
+                    propertiesToUpdate["ecm:docTypeName"] = doc.DocDescription;
+                    _fileLogger.LogWarning("Will update ecm:docTypeName to '{Naziv}' (from DocDescription fallback) for document {DocId}", doc.DocDescription, doc.Id);
+                }
+                else
+                {
+                    _fileLogger.LogError("Cannot set ecm:docTypeName for document {DocId} - both migratedNaziv and DocDescription are empty!", doc.Id);
+                }
+
+                // Update ecm:naziv (document description - original field)
+                if (!string.IsNullOrWhiteSpace(doc.DocDescription))
                 {
                     propertiesToUpdate["ecm:naziv"] = doc.DocDescription;
-                    _fileLogger.LogDebug("Will update ecm:naziv to '{Naziv}' (from DocStaging fallback) for document {DocId}", doc.DocDescription, doc.Id);
+                    _fileLogger.LogDebug("Will update ecm:naziv to '{Naziv}' for document {DocId}", doc.DocDescription, doc.Id);
                 }
 
                 if (!string.IsNullOrWhiteSpace(doc.Status))
