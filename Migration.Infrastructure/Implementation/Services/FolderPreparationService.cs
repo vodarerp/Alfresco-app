@@ -400,6 +400,7 @@ namespace Migration.Infrastructure.Implementation.Services
                 // Create each level in hierarchy starting from the parent dossier folder
                 var currentParentId = parentDossierFolderId;
                 bool mainFolderIsCreated = false; // Track if main dossier folder was created
+                string clinetType = string.Empty;
 
                 for (int i = 0; i < pathParts.Length; i++)
                 {
@@ -415,19 +416,22 @@ namespace Migration.Infrastructure.Implementation.Services
                     if (isMainDossierFolder)
                     {
                         // Use ResolveWithStatusAsync to get both folderId and isCreated flag
-                        var (folderId, isCreated) = await documentResolver.ResolveWithStatusAsync(
+                        var (returnFolder, isCreated) = await documentResolver.ResolveWithStatusAsync(
                             currentParentId,
                             folderName,
                             folder.Properties, // May be null
                             folder,
                             ct).ConfigureAwait(false);
 
-                        currentParentId = folderId;
+                        currentParentId = returnFolder.Id;
                         mainFolderIsCreated = isCreated;
-
+                        if (returnFolder != null && returnFolder.Properties != null && returnFolder.Properties.TryGetValue("ecm:bnkClientType", out var value))
+                        {
+                            clinetType = value?.ToString();
+                        }
                         _fileLogger.LogInformation(
                             "CreateFolderAsync: Main dossier folder '{FolderName}' resolved - FolderId: {FolderId}, IsCreated: {IsCreated}, Properties: {PropCount}",
-                            folderName, folderId, isCreated, folder.Properties?.Count ?? 0);
+                            folderName, returnFolder.Id, isCreated, folder.Properties?.Count ?? 0);
                     }
                     else
                     {
@@ -457,6 +461,7 @@ namespace Migration.Infrastructure.Implementation.Services
                     folder.FolderPath,
                     currentParentId,
                     mainFolderIsCreated,
+                    clinetType,
                     ct).ConfigureAwait(false);
 
                 _fileLogger.LogInformation("CreateFolderAsync: Completed successfully for folder '{Path}' -> FolderId: {FolderId}",
@@ -479,6 +484,7 @@ namespace Migration.Infrastructure.Implementation.Services
             string dossierDestFolderId,
             string alfrescoFolderId,
             bool isCreated,
+            string clinetType,
             CancellationToken ct)
         {
             const int MAX_RETRIES = 3;
@@ -506,6 +512,7 @@ namespace Migration.Infrastructure.Implementation.Services
                             dossierDestFolderId,
                             alfrescoFolderId,
                             isCreated,
+                            clinetType,
                             ct).ConfigureAwait(false);
 
                         await uow.CommitAsync(ct: ct).ConfigureAwait(false);

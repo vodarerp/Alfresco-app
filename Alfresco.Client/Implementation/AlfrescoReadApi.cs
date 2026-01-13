@@ -1,5 +1,6 @@
 ﻿using Alfresco.Abstraction.Interfaces;
 using Alfresco.Abstraction.Models;
+using Alfresco.Contracts.Models;
 using Alfresco.Contracts.Request;
 using Alfresco.Contracts.Response;
 using Microsoft.Extensions.Logging;
@@ -29,11 +30,80 @@ namespace Alfresco.Client.Implementation
             _dbLogger = logger.CreateLogger("DbLogger");
         }
 
-        /// <summary>
-        /// Gets a folder by its relative path
-        /// </summary>
-        /// <exception cref="AlfrescoTimeoutException">Thrown when operation times out after all retries</exception>
-        /// <exception cref="AlfrescoRetryExhaustedException">Thrown when all retry attempts are exhausted</exception>
+        public async Task<Entry> GetFolderByRelative_v1(string inNodeId, string inRelativePath, CancellationToken ct = default)
+        {
+            Entry toRet = new Entry();
+            try
+            {
+                _fileLogger.LogInformation("GetFolderByRelative: Starting search for folder. ParentId: {ParentId}, RelativePath: {RelativePath}",
+                    inNodeId, inRelativePath);
+              
+                var escapedFolderName = inRelativePath.Replace("\"", "\\\"");
+
+                // Build AFTS query:
+                // - TYPE:"cm:folder" = only folders
+                // - PARENT:"{parentId}" = only direct children of parent folder
+                // - =cm:name:"{folderName}" = exact match on folder name
+                var query = $"TYPE:\"cm:folder\" AND PARENT:\"{inNodeId}\" AND =cm:name:\"{escapedFolderName}\"";
+
+                _fileLogger.LogInformation("GetFolderByRelative: Built AFTS query: {Query}", query);
+
+                var searchRequest = new PostSearchRequest
+                {
+                    Query = new QueryRequest
+                    {
+                        Language = "afts",
+                        Query = query
+                    },
+                    Paging = new PagingRequest
+                    {
+                        MaxItems = 1, // We only need the first result
+                        SkipCount = 0
+                    },
+                    Include = null // Don't include extra data, just need the ID
+                };
+
+                // Execute search
+                var searchResult = await SearchAsync(searchRequest, ct).ConfigureAwait(false);
+
+                // Extract folder ID from search results
+                if (searchResult?.List?.Entries != null && searchResult.List.Entries.Count > 0)
+                {
+                    toRet = searchResult?.List?.Entries?.FirstOrDefault(o => o.Entry?.Name == escapedFolderName).Entry;
+                }
+                else
+                {
+                    _fileLogger.LogInformation("GetFolderByRelative: Folder NOT FOUND. ParentId: {ParentId}, RelativePath: {RelativePath}",
+                        inNodeId, inRelativePath);
+                }
+            }
+            catch (AlfrescoTimeoutException timeoutEx)
+            {
+                _fileLogger.LogError(
+                    "⏱️ TIMEOUT: GetFolderByRelative - ParentId: {ParentId}, Path: {Path}, Timeout: {Timeout}s",
+                    inNodeId, inRelativePath, timeoutEx.TimeoutDuration.TotalSeconds);
+                throw;
+            }
+            catch (AlfrescoRetryExhaustedException retryEx)
+            {
+                _fileLogger.LogError(
+                    "❌ RETRY EXHAUSTED: GetFolderByRelative - ParentId: {ParentId}, Path: {Path}, Retries: {RetryCount}",
+                    inNodeId, inRelativePath, retryEx.RetryCount);
+                throw;
+            }
+            catch (Exception ex)
+            {
+                _fileLogger.LogError("[{Method}] Error in GetFolderByRelative - ParentId: {ParentId}, Path: {Path} - {ErrorType}: {Message}",
+                    nameof(GetFolderByRelative), inNodeId, inRelativePath, ex.GetType().Name, ex.Message);
+                _dbLogger.LogError(ex, "[{Method}] Error in GetFolderByRelative - ParentId: {ParentId}, Path: {Path}",
+                    nameof(GetFolderByRelative), inNodeId, inRelativePath);
+                // Return empty string to maintain backward compatibility
+            }
+
+            return toRet;
+
+        }
+
         public async Task<string> GetFolderByRelative(string inNodeId, string inRelativePath, CancellationToken ct = default)
         {
             var toRet = string.Empty;
@@ -132,12 +202,7 @@ namespace Alfresco.Client.Implementation
             return toRet;
         }
 
-        /// <summary>
-        /// Gets all children of a node
-        /// </summary>
-        /// <exception cref="AlfrescoTimeoutException">Thrown when operation times out after all retries</exception>
-        /// <exception cref="AlfrescoRetryExhaustedException">Thrown when all retry attempts are exhausted</exception>
-        /// <exception cref="AlfrescoException">Thrown when the response is not successful</exception>
+       
         public async Task<NodeChildrenResponse> GetNodeChildrenAsync(string nodeId, CancellationToken ct = default)
         {
             try
@@ -208,17 +273,7 @@ namespace Alfresco.Client.Implementation
 
             return response.IsSuccessStatusCode;
         }
-        //{
-        //    using var toRet = await _client.GetAsync("/alfresco/api/-default-/public/alfresco/versions/1/probes/-live-", ct);
-
-        //    return toRet.IsSuccessStatusCode;
-        //}
-
-        /// <summary>
-        /// Executes a search query against Alfresco
-        /// </summary>
-        /// <exception cref="AlfrescoTimeoutException">Thrown when operation times out after all retries</exception>
-        /// <exception cref="AlfrescoRetryExhaustedException">Thrown when all retry attempts are exhausted</exception>
+       
         public async Task<NodeChildrenResponse> SearchAsync(PostSearchRequest inRequest, CancellationToken ct = default)
         {
             try

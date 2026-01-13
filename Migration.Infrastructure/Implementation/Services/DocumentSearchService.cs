@@ -795,66 +795,7 @@ namespace Migration.Infrastructure.Implementation.Services
             }
         }
 
-        /// <summary>
-        /// Enriches folders with ClientAPI data
-        /// </summary>
-        private async Task EnrichFoldersAsync(List<FolderStaging> folders, CancellationToken ct)
-        {
-            if (_clientApi == null)
-            {
-                _fileLogger.LogInformation("ClientAPI not configured, skipping folder enrichment");
-                return;
-            }
-
-            foreach (var folder in folders)
-            {
-                if (string.IsNullOrWhiteSpace(folder.CoreId))
-                    continue;
-
-                try
-                {
-                    var clientData = await _clientApi.GetClientDataAsync(folder.CoreId, ct).ConfigureAwait(false);
-
-                    if (clientData != null)
-                    {
-                        folder.ClientName = clientData.ClientName;
-                        folder.MbrJmbg = clientData.MbrJmbg;
-                        folder.Segment = clientData.Segment;
-                        folder.Residency = clientData.Residency;
-                        // Add other enrichments as needed
-                    }
-                }
-                catch (ClientApiTimeoutException timeoutEx)
-                {
-                    _fileLogger.LogError("DocumentSearch stopped - Client API Timeout: {Message}", timeoutEx.Message);
-                    _uiLogger.LogError("Document Search stopped - Client API Timeout: {Operation}", timeoutEx.Operation);
-                    throw; // Re-throw to stop migration
-                }
-                catch (ClientApiRetryExhaustedException retryEx)
-                {
-                    _fileLogger.LogError("DocumentSearch stopped - Client API Retry Exhausted: {Message}", retryEx.Message);
-                    _uiLogger.LogError("Document Search stopped - Client API Retry Exhausted: {Operation}", retryEx.Operation);
-                    throw; // Re-throw to stop migration
-                }
-                catch (ClientApiException clientEx)
-                {
-                    _fileLogger.LogError("DocumentSearch stopped - Client API Error: {Message}", clientEx.Message);
-                    _uiLogger.LogError("Document Search stopped - Client API Error (Status: {StatusCode})", clientEx.StatusCode);
-                    throw; // Re-throw to stop migration
-                }
-                catch (Exception ex)
-                {
-                    _fileLogger.LogWarning("Failed to enrich folder {Name} with ClientAPI: {Error}",
-                        folder.Name, ex.Message);
-                    // Non-breaking error - just log as info to UI
-                    _uiLogger.LogInformation("Could not enrich folder {Name} with client data", folder.Name);
-                }
-            }
-        }
-
-        /// <summary>
-        /// Inserts documents into DocStaging
-        /// </summary>
+    
         private async Task<int> InsertDocumentsAsync(List<DocStaging> documents, CancellationToken ct)
         {
             if (documents.Count == 0)

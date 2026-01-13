@@ -99,7 +99,8 @@ namespace SqlServer.Infrastructure.Implementation
                     INSERTED.CategoryName,
                     INSERTED.OriginalCreatedAt,
                     INSERTED.DossierDestFolderId,
-                    INSERTED.DossierDestFolderIsCreated
+                    INSERTED.DossierDestFolderIsCreated,
+                    INSERTED.FinalDocumentType
                 FROM DocStaging d
                 INNER JOIN SelectedDocs s ON d.Id = s.Id";
 
@@ -218,6 +219,7 @@ namespace SqlServer.Infrastructure.Implementation
             string dossierDestFolderId,
             string alfrescoFolderId,
             bool isCreated,
+            string finalDocumentType,
             CancellationToken ct = default)
         {
             // Updates DestinationFolderId after folder is created
@@ -226,13 +228,15 @@ namespace SqlServer.Infrastructure.Implementation
                 UPDATE DocStaging
                 SET DestinationFolderId = @AlfrescoFolderId,
                     DossierDestFolderIsCreated = @IsCreated,
-                    UpdatedAt = GETUTCDATE()
+                    UpdatedAt = GETUTCDATE(),
+                    FinalDocumentType = @FinalDocumentType
                 WHERE DossierDestFolderId = @DossierDestFolderId";
 
             var parameters = new DynamicParameters();
             parameters.Add("@DossierDestFolderId", dossierDestFolderId);
             parameters.Add("@AlfrescoFolderId", alfrescoFolderId);
             parameters.Add("@IsCreated", isCreated);
+            parameters.Add("@FinalDocumentType", finalDocumentType);
 
             var cmd = new CommandDefinition(sql, parameters, Tx, cancellationToken: ct);
 

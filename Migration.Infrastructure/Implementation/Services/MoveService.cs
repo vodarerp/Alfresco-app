@@ -584,13 +584,7 @@ namespace Migration.Infrastructure.Implementation.Services
                
                 _fileLogger.LogDebug("Updating properties for document {DocId} (NodeId: {NodeId})", doc.Id, doc.NodeId);
 
-                // Read current document properties from Alfresco
-                //var existingNode = await _read.GetNodeByIdAsync(doc.NodeId, ct).ConfigureAwait(false);
-                //var existingProperties = existingNode?.Entry?.Properties ?? new Dictionary<string, object>();
-
-                //_fileLogger.LogDebug("Document {DocId} has {Count} existing properties", doc.Id, existingProperties.Count);
-
-                // Prepare properties to update - only ecm:docType and ecm:naziv
+                
                 var propertiesToUpdate = new Dictionary<string, object>();
 
                 // Update ecm:docType if we have mapping
@@ -603,6 +597,18 @@ namespace Migration.Infrastructure.Implementation.Services
                 {
                     propertiesToUpdate["ecm:docType"] = doc.DocumentType;
                     _fileLogger.LogDebug("Will update ecm:docType to '{DocType}' (from DocStaging fallback) for document {DocId}", doc.DocumentType, doc.Id);
+                }
+
+                if (!string.IsNullOrWhiteSpace(doc.FinalDocumentType))
+                {
+                    propertiesToUpdate["ecm:docClientType"] = doc.FinalDocumentType;
+                    _fileLogger.LogDebug("Will update ecm:docClientType to '{FinalDocumentType}' for document {DocId}", doc.FinalDocumentType, doc.Id);
+                }
+
+                if (!string.IsNullOrWhiteSpace(doc.CoreId))
+                {
+                    propertiesToUpdate["ecm:coreId"] = doc.CoreId;
+                    _fileLogger.LogDebug("Will update ecm:coreId to '{CoreId}' for document {DocId}", doc.CoreId, doc.Id);
                 }
 
                 // Update ecm:docTypeName (migrated document type name)
