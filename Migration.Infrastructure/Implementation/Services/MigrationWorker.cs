@@ -15,6 +15,7 @@ using Migration.Abstraction.Interfaces.Wrappers;
 using SqlServer.Abstraction.Interfaces;
 using System;
 using System.Data;
+using System.Diagnostics;
 
 namespace Migration.Infrastructure.Implementation.Services
 {
@@ -78,6 +79,8 @@ namespace Migration.Infrastructure.Implementation.Services
 
         public async Task RunAsync(CancellationToken ct = default)
         {
+            var sw = Stopwatch.StartNew();
+            var swT = Stopwatch.StartNew();
             try
             {
                 // Reset error tracker at the start of migration
@@ -99,24 +102,9 @@ namespace Migration.Infrastructure.Implementation.Services
                 }
 
                 _logger.LogInformation(
-                    "Database prepared successfully: Deleted {DocCount} documents, {FolderCount} folders (Total: {Total})",
-                    prepResult.DeletedDocuments, prepResult.DeletedFolders, prepResult.TotalDeleted);
+                    "Database prepared successfully: Deleted {DocCount} documents, {FolderCount} folders (Total: {Total}). TotalTime: {Time}",
+                    prepResult.DeletedDocuments, prepResult.DeletedFolders, prepResult.TotalDeleted, sw.Elapsed);
 
-                if (prepResult.TotalDeleted > 0)
-                {
-                    _uiLogger.LogInformation(
-                        "Baza očišćena: Uklonjeno {Total} nekompletnih stavki ({DocCount} dokumenata, {FolderCount} foldera)",
-                        prepResult.TotalDeleted, prepResult.DeletedDocuments, prepResult.DeletedFolders);
-                }
-                else
-                {
-                    _uiLogger.LogInformation("Baza je već čista - nema nekompletnih stavki");
-                }
-
-                // ====================================================================
-                // FETCH CURRENT USER: Initialize CurrentUserService before migration
-                // ====================================================================
-                _logger.LogInformation("Fetching current user information from Alfresco...");
                 await _currentUserService.InitializeAsync(ct);
                 _logger.LogInformation(
                     "Current user initialized: {DisplayName} ({UserId}, {Email})",
@@ -140,60 +128,52 @@ namespace Migration.Infrastructure.Implementation.Services
                     // Check if DocDescriptions have changed and reset checkpoint if needed
                     await ValidateAndResetDocDescriptionsCheckpointAsync(ct);
 
-                    // ====================================================================
-                    // FAZA 1: DocumentSearch (searches by ecm:docDesc, populates both tables)
-                    // ====================================================================
+                    sw.Restart();
+
                     await ExecutePhaseAsync(
                         MigrationPhase.FolderDiscovery,
                         "FAZA 1: DocumentSearch (by ecm:docDesc)",
                         async (token) => await _documentSearch.RunLoopAsync(token),
                         ct);
 
-                    // Skip DocumentDiscovery phase - it's already done by DocumentSearch
-                    _logger.LogInformation("Skipping DocumentDiscovery phase (handled by DocumentSearch)");
+                    _logger.LogInformation("DocumentSearch phase completed in {Time}", sw.Elapsed);
                 }
                 else
                 {
-                    _logger.LogInformation("Migration mode: MigrationByFolder (FolderDiscovery -> DocumentDiscovery -> FolderPreparation -> Move)");
-
-                    // ====================================================================
-                    // FAZA 1: FolderDiscovery
-                    // ====================================================================
+                   sw.Restart();
                     await ExecutePhaseAsync(
                         MigrationPhase.FolderDiscovery,
                         "FAZA 1: FolderDiscovery",
                         async (token) => await _folderDiscovery.RunLoopAsync(token),
                         ct);
 
-                    // ====================================================================
-                    // FAZA 2: DocumentDiscovery
-                    // ====================================================================
+                    _logger.LogInformation("FolderDiscovery phase completed in {Time}", sw.Elapsed);
+                    sw.Restart();
                     await ExecutePhaseAsync(
                         MigrationPhase.DocumentDiscovery,
                         "FAZA 2: DocumentDiscovery",
                         async (token) => await _documentDiscovery.RunLoopAsync(token),
                         ct);
+                    _logger.LogInformation("DocumentDiscovery phase completed in {Time}", sw.Elapsed);
                 }
 
-                // ====================================================================
-                // FAZA 3: FolderPreparation (common for both modes)
-                // ====================================================================
+               
+                sw.Restart();
                 await ExecutePhaseAsync(
                     MigrationPhase.FolderPreparation,
                     "FAZA 3: FolderPreparation (parallel folder creation)",
                     async (token) => await _folderPreparation.PrepareAllFoldersAsync(token),
                     ct);
-
-                // ====================================================================
-                // FAZA 4: Move (common for both modes)
-                // ====================================================================
+                _logger.LogInformation("FolderPreparation phase completed in {Time}", sw.Elapsed);
+                sw.Restart();
                 await ExecutePhaseAsync(
                     MigrationPhase.Move,
                     "FAZA 4: Move (parallel document moves)",
                     async (token) => await _moveService.RunLoopAsync(token),
                     ct);
+                _logger.LogInformation("Move phase completed in {Time}", sw.Elapsed);
 
-                _logger.LogInformation("Migration pipeline completed successfully!");
+                _logger.LogInformation("Migration pipeline completed successfully! Time: {Time}", swT.Elapsed);
                 _uiLogger.LogInformation("✅ Migracija uspešno završena!");
 
                 // Log final error metrics -- NIKOLA

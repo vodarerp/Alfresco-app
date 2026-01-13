@@ -38,8 +38,8 @@ public static class Program
             BaseUrl = "http://localhost:8080/",
             Username =  "admin",
             Password = "admin",
-            RootParentId = "d02c27d6-83c9-41af-ac27-d683c931af9c",
-            FolderCount = 3000,
+            RootParentId = "c3cb9e11-839d-4f69-8b9e-11839ddf6925",
+            FolderCount = 500,
             DocsPerFolder = 3,
             DegreeOfParallelism = 8,
             MaxRetries = 5,
@@ -53,7 +53,7 @@ public static class Program
             // KDP document generation settings
             // To generate ~5000 KDP documents: Set FolderCount=500 and KdpDocumentsPerFolder=10
             // Or: Set FolderCount=250 and KdpDocumentsPerFolder=20
-            GenerateOnlyKdpDocuments = false,       // Set to true to generate only KDP documents
+            GenerateOnlyKdpDocuments = true,       // Set to true to generate only KDP documents
             KdpDocumentsPerFolder = 15              // Number of KDP documents per folder
         };
 
@@ -909,8 +909,11 @@ public static class Program
             string tipDosiea = clientType == "PI" ? "Dosije klijenta FL" : "Dosije klijenta PL";
             props["ecm:docDossierType"] = tipDosiea;
 
-            // Client segment
-            props["ecm:docClientType"] = clientType;
+            // Client segment - 50% chance to include this property
+            if (random.Next(2) == 1)
+            {
+                props["ecm:docClientType"] = clientType;
+            }
 
             // Source
             props["ecm:source"] = "Heimdall";
@@ -1004,8 +1007,11 @@ public static class Program
             // Dossier type - Dosije depozita
             props["ecm:docDossierType"] = "Dosije depozita";
 
-            // Client type
-            props["ecm:docClientType"] = clientType;
+            // Client type - 50% chance to include this property
+            if (random.Next(2) == 1)
+            {
+                props["ecm:docClientType"] = clientType;
+            }
 
             // Source - DUT for deposit documents (TC 7)
             props["ecm:source"] = "DUT";
@@ -1222,8 +1228,11 @@ public static class Program
         // This comes from TipDosiea field in HeimdallDocumentMapper
         properties["ecm:docDossierType"] = tipDosijea;
 
-        // Client segment (CRITICAL for migration)
-        properties["ecm:docClientType"] = clientType;
+        // Client segment (CRITICAL for migration) - 50% chance to include this property
+        if (random.Next(2) == 1)
+        {
+            properties["ecm:docClientType"] = clientType;
+        }
 
         // Source (will be set by migration, but can add for reference)
         // Note: Migration will set this based on destination folder

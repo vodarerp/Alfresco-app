@@ -27,8 +27,11 @@ namespace Migration.Infrastructure.Implementation
         private readonly ClientApiOptions _options;
         private readonly IMemoryCache _cache;
 
+        // ✅ Semaphore za kontrolu concurrent API poziva (max 10 istovremeno)
+        private readonly SemaphoreSlim _apiSemaphore;
+
         // Cache configuration
-        private static readonly TimeSpan CacheDuration = TimeSpan.FromMinutes(5);
+        private readonly TimeSpan _cacheDuration;
         private const string CacheKeyPrefix = "ClientApi_";
 
         public ClientApi(
@@ -44,6 +47,16 @@ namespace Migration.Infrastructure.Implementation
             _dbLogger = loggerFactory.CreateLogger("DbLogger");
             _options = options?.Value ?? throw new ArgumentNullException(nameof(options));
             _cache = cache ?? throw new ArgumentNullException(nameof(cache));
+
+            // ✅ Konfigurabilni cache duration (default 24h za batch operacije)
+            _cacheDuration = TimeSpan.FromHours(_options.CacheDurationHours);
+
+            // ✅ Inicijalizuj semaphore za throttling (default max 10 concurrent poziva)
+            _apiSemaphore = new SemaphoreSlim(_options.MaxConcurrentRequests, _options.MaxConcurrentRequests);
+
+            _fileLogger.LogInformation(
+                "ClientApi initialized - CacheDuration: {CacheDuration}h, MaxConcurrentRequests: {MaxConcurrent}",
+                _options.CacheDurationHours, _options.MaxConcurrentRequests);
         }
 
         public async Task<ClientData> GetClientDataAsync(string coreId, CancellationToken ct = default)
@@ -64,8 +77,18 @@ namespace Migration.Infrastructure.Implementation
 
             _fileLogger.LogDebug("Cache MISS for client data CoreId: {CoreId}, fetching from API", coreId);
 
+            // ✅ Throttle concurrent API requests
+            await _apiSemaphore.WaitAsync(ct).ConfigureAwait(false);
+
             try
             {
+                // ✅ Double-check cache after acquiring semaphore (another thread might have fetched it)
+                if (_cache.TryGetValue(cacheKey, out cachedData) && cachedData != null)
+                {
+                    _fileLogger.LogDebug("Cache HIT after semaphore wait for CoreId: {CoreId}", coreId);
+                    return cachedData;
+                }
+
                 _fileLogger.LogDebug("Fetching client data for CoreId: {CoreId}", coreId);
 
                 // Use GetClientDetailExtended endpoint which has most comprehensive data
@@ -110,9 +133,9 @@ namespace Migration.Infrastructure.Implementation
                     "Successfully retrieved client data for CoreId: {CoreId}, ClientName: {ClientName}, ClientType: {ClientType}",
                     coreId, clientData.ClientName, clientData.ClientType);
 
-                // Cache the result
-                _cache.Set(cacheKey, clientData, CacheDuration);
-                _fileLogger.LogDebug("Cached client data for CoreId: {CoreId} with TTL: {Duration}", coreId, CacheDuration);
+                // ✅ Cache the result with configured duration
+                _cache.Set(cacheKey, clientData, _cacheDuration);
+                _fileLogger.LogDebug("Cached client data for CoreId: {CoreId} with TTL: {Duration}", coreId, _cacheDuration);
 
                 return clientData;
             }
@@ -147,6 +170,11 @@ namespace Migration.Infrastructure.Implementation
                     statusCode: 500,
                     responseBody: ex.Message,
                     innerException: ex);
+            }
+            finally
+            {
+                // ✅ Release semaphore
+                _apiSemaphore.Release();
             }
         }
 
@@ -244,8 +272,18 @@ namespace Migration.Infrastructure.Implementation
 
             _fileLogger.LogDebug("Cache MISS for client validation CoreId: {CoreId}, checking API", coreId);
 
+            // ✅ Throttle concurrent API requests
+            await _apiSemaphore.WaitAsync(ct).ConfigureAwait(false);
+
             try
             {
+                // ✅ Double-check cache after acquiring semaphore
+                if (_cache.TryGetValue(cacheKey, out cachedExists))
+                {
+                    _fileLogger.LogDebug("Cache HIT after semaphore wait for CoreId: {CoreId}", coreId);
+                    return cachedExists;
+                }
+
                 _fileLogger.LogDebug("Validating client exists for CoreId: {CoreId}", coreId);
 
                 // Use GetClientDetail endpoint to check if client exists
@@ -259,9 +297,9 @@ namespace Migration.Infrastructure.Implementation
                     "Client validation for CoreId: {CoreId} result: {Exists}",
                     coreId, exists);
 
-                // Cache the result
-                _cache.Set(cacheKey, exists, CacheDuration);
-                _fileLogger.LogDebug("Cached client validation for CoreId: {CoreId} with TTL: {Duration}", coreId, CacheDuration);
+                // ✅ Cache the result with configured duration
+                _cache.Set(cacheKey, exists, _cacheDuration);
+                _fileLogger.LogDebug("Cached client validation for CoreId: {CoreId} with TTL: {Duration}", coreId, _cacheDuration);
 
                 return exists;
             }
@@ -293,6 +331,11 @@ namespace Migration.Infrastructure.Implementation
                     responseBody: ex.Message,
                     innerException: ex);
             }
+            finally
+            {
+                // ✅ Release semaphore
+                _apiSemaphore.Release();
+            }
         }
 
         public async Task<ClientDetailResponse> GetClientDetailAsync(string coreId, CancellationToken ct = default)
@@ -313,8 +356,18 @@ namespace Migration.Infrastructure.Implementation
 
             _fileLogger.LogDebug("Cache MISS for client detail CoreId: {CoreId}, fetching from API", coreId);
 
+            // ✅ Throttle concurrent API requests
+            await _apiSemaphore.WaitAsync(ct).ConfigureAwait(false);
+
             try
             {
+                // ✅ Double-check cache after acquiring semaphore
+                if (_cache.TryGetValue(cacheKey, out cachedDetail) && cachedDetail != null)
+                {
+                    _fileLogger.LogDebug("Cache HIT after semaphore wait for CoreId: {CoreId}", coreId);
+                    return cachedDetail;
+                }
+
                 _fileLogger.LogDebug("Fetching client detail for CoreId: {CoreId}", coreId);
 
                 var endpoint = $"{_options.GetClientDetailEndpoint}/{coreId}";
@@ -346,9 +399,9 @@ namespace Migration.Infrastructure.Implementation
                     "Successfully retrieved client detail for CoreId: {CoreId}, Name: {Name}, ClientID: {ClientID}, ResidentIndicator: {ResidentIndicator}",
                     coreId, clientDetailResponse.Name, clientDetailResponse.ClientGeneral.ClientID, clientDetailResponse.ClientGeneral.ResidentIndicator);
 
-                // Cache the result
-                _cache.Set(cacheKey, clientDetailResponse, CacheDuration);
-                _fileLogger.LogDebug("Cached client detail for CoreId: {CoreId} with TTL: {Duration}", coreId, CacheDuration);
+                // ✅ Cache the result with configured duration
+                _cache.Set(cacheKey, clientDetailResponse, _cacheDuration);
+                _fileLogger.LogDebug("Cached client detail for CoreId: {CoreId} with TTL: {Duration}", coreId, _cacheDuration);
 
                 return clientDetailResponse;
             }
@@ -379,6 +432,11 @@ namespace Migration.Infrastructure.Implementation
                     statusCode: 500,
                     responseBody: ex.Message,
                     innerException: ex);
+            }
+            finally
+            {
+                // ✅ Release semaphore
+                _apiSemaphore.Release();
             }
         }
 
@@ -663,5 +721,16 @@ namespace Migration.Infrastructure.Implementation
         /// Retry count for failed requests (default: 3)
         /// </summary>
         public int RetryCount { get; set; } = 3;
+
+        /// <summary>
+        /// ✅ Cache duration in hours for batch operations (default: 24 hours)
+        /// During migration, client data doesn't change frequently, so longer cache is beneficial.
+        /// </summary>
+        public int CacheDurationHours { get; set; } = 24;
+
+        /// <summary>
+        /// ✅ Maximum concurrent API requests to prevent overwhelming the Client API server (default: 10)
+        /// </summary>
+        public int MaxConcurrentRequests { get; set; } = 10;
     }
 }

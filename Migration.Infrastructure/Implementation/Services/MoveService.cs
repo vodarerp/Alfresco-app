@@ -1,6 +1,7 @@
 ﻿using Alfresco.Abstraction.Interfaces;
 using Alfresco.Abstraction.Models;
 using Alfresco.Contracts.Enums;
+using Alfresco.Contracts.Models;
 using Alfresco.Contracts.Options;
 using Alfresco.Contracts.Oracle.Models;
 using Microsoft.Extensions.DependencyInjection;
@@ -519,7 +520,7 @@ namespace Migration.Infrastructure.Implementation.Services
                     doc.DestinationFolderId, doc.Id);
 
                 // ========================================
-                // STEP 1: Move or Copy document to destination folder
+                // STEP 1: Move or Copy document to destination folder - Returns Entry object
                 // ========================================
                 var useCopy = _options.Value.MoveService.UseCopy;
                 var operationName = useCopy ? "Copying" : "Moving";
@@ -527,25 +528,26 @@ namespace Migration.Infrastructure.Implementation.Services
                 _fileLogger.LogDebug("{Operation} document {DocId} (NodeId: {NodeId}) to folder {FolderId}",
                     operationName, doc.Id, doc.NodeId, doc.DestinationFolderId);
 
-                bool success;
+                Entry? movedEntry;
                 if (useCopy)
                 {
-                    success = await _moveExecutor.CopyAsync(doc.NodeId, doc.DestinationFolderId, ct).ConfigureAwait(false);
+                    movedEntry = await _moveExecutor.CopyAsync(doc.NodeId, doc.DestinationFolderId, ct).ConfigureAwait(false);
                 }
                 else
                 {
-                    success = await _moveExecutor.MoveAsync(doc.NodeId, doc.DestinationFolderId, ct).ConfigureAwait(false);
+                    movedEntry = await _moveExecutor.MoveAsync(doc.NodeId, doc.DestinationFolderId, ct).ConfigureAwait(false);
                 }
 
-                if (!success)
+                if (movedEntry == null)
                 {
                     _uiLogger.LogWarning("Document {DocId} {Operation} operation failed", doc.Id, useCopy ? "copy" : "move");
                     throw new InvalidOperationException(
-                        $"{(useCopy ? "Copy" : "Move")} operation returned false for document {doc.Id} (NodeId: {doc.NodeId})");
+                        $"{(useCopy ? "Copy" : "Move")} operation returned null for document {doc.Id} (NodeId: {doc.NodeId})");
                 }
 
-                _fileLogger.LogInformation("Document {DocId} successfully {Operation} to {FolderId}",
-                    doc.Id, useCopy ? "copied" : "moved", doc.DestinationFolderId);
+                _fileLogger.LogInformation(
+                    "Document {DocId} successfully {Operation} to {FolderId}. Entry has {PropCount} properties.",
+                    doc.Id, useCopy ? "copied" : "moved", doc.DestinationFolderId, movedEntry.Properties?.Count ?? 0);
 
                 // ========================================
                 // STEP 2: Get migrated docType and naziv from DocStaging with FALLBACK to DocumentMappingService
@@ -581,10 +583,51 @@ namespace Migration.Infrastructure.Implementation.Services
                             migratedDocType, doc.Id, doc.OriginalDocumentCode);
                     }
                 }
-               
+
                 _fileLogger.LogDebug("Updating properties for document {DocId} (NodeId: {NodeId})", doc.Id, doc.NodeId);
 
-                
+                // ========================================
+                // STEP 2.5: Check if ecm:docClientType exists in moved Entry - if not, fetch from ClientAPI
+                // ========================================
+                string? docClientTypeFromApi = null;
+
+                // Check if property already exists on document (from Alfresco)
+                if (!movedEntry.Properties?.ContainsKey("ecm:docClientType") ?? true)
+                {
+                    _fileLogger.LogInformation(
+                        "Document {DocId} missing ecm:docClientType property - will fetch from ClientAPI",
+                        doc.Id);
+
+                    // Extract CoreId from folder or document
+                    var coreId = doc.CoreId; //?? DossierIdFormatter.ExtractCoreId(doc.DossierDestFolderId);
+
+                    if (!string.IsNullOrWhiteSpace(coreId))
+                    {
+                        try
+                        {
+                            await using var clientApiScope = _scopeFactory.CreateAsyncScope();
+                            var clientApi = clientApiScope.ServiceProvider.GetRequiredService<IClientApi>();
+
+                            // ✅ Fetch ClientData (will use MemoryCache from FAZA 3!)
+                            _fileLogger.LogDebug("Fetching ClientData for CoreId {CoreId} to determine ecm:docClientType", coreId);
+                            var clientData = await clientApi.GetClientDataAsync(coreId, ct).ConfigureAwait(false);
+
+                            // Determine ecm:docClientType from ClientData
+                            if (clientData != null)
+                                docClientTypeFromApi = clientData.Segment;
+                        }
+                        catch (ClientApiException ex)
+                        {
+                            _fileLogger.LogWarning(
+                                "ClientAPI error while fetching data for CoreId {CoreId}, document {DocId}: {Error}. Continuing without ecm:docClientType.",
+                                coreId, doc.Id, ex.Message);
+                            // Continue without the property - don't fail the migration
+                        }
+                    }
+                }
+               
+
+
                 var propertiesToUpdate = new Dictionary<string, object>();
 
                 // Update ecm:docType if we have mapping
@@ -599,10 +642,16 @@ namespace Migration.Infrastructure.Implementation.Services
                     _fileLogger.LogDebug("Will update ecm:docType to '{DocType}' (from DocStaging fallback) for document {DocId}", doc.DocumentType, doc.Id);
                 }
 
-                if (!string.IsNullOrWhiteSpace(doc.FinalDocumentType))
+                // ✅ Priority: 1) From ClientAPI (if fetched), 2) From DocStaging.FinalDocumentType
+                if (!string.IsNullOrWhiteSpace(docClientTypeFromApi))
+                {
+                    propertiesToUpdate["ecm:docClientType"] = docClientTypeFromApi;
+                    _fileLogger.LogDebug("Will update ecm:docClientType to '{Type}' (from ClientAPI) for document {DocId}", docClientTypeFromApi, doc.Id);
+                }
+                else if (!string.IsNullOrWhiteSpace(doc.FinalDocumentType))
                 {
                     propertiesToUpdate["ecm:docClientType"] = doc.FinalDocumentType;
-                    _fileLogger.LogDebug("Will update ecm:docClientType to '{FinalDocumentType}' for document {DocId}", doc.FinalDocumentType, doc.Id);
+                    _fileLogger.LogDebug("Will update ecm:docClientType to '{FinalDocumentType}' (from DocStaging) for document {DocId}", doc.FinalDocumentType, doc.Id);
                 }
 
                 if (!string.IsNullOrWhiteSpace(doc.CoreId))

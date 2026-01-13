@@ -1,4 +1,6 @@
 ﻿using Alfresco.Abstraction.Interfaces;
+using Alfresco.Abstraction.Models;
+using Alfresco.Contracts.Models;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Migration.Abstraction.Interfaces;
@@ -30,24 +32,24 @@ namespace Migration.Infrastructure.Implementation.Move
             _dbLogger = loggerFactory.CreateLogger("DbLogger");
         }
 
-        public async Task<bool> MoveAsync(string DocumentId, string DestFolderId, CancellationToken ct)
+        public async Task<Entry?> MoveAsync(string DocumentId, string DestFolderId, CancellationToken ct)
         {
             try
             {
                 _fileLogger.LogDebug("Moving document {DocumentId} to folder {DestFolderId}", DocumentId, DestFolderId);
 
-                var toRet = await _write.MoveDocumentAsync(DocumentId, DestFolderId, null, ct).ConfigureAwait(false);
+                var entry = await _write.MoveDocumentAsync(DocumentId, DestFolderId, null, ct).ConfigureAwait(false);
 
-                if (toRet)
+                if (entry != null)
                 {
                     _fileLogger.LogDebug("Successfully moved document {DocumentId} to {DestFolderId}", DocumentId, DestFolderId);
                 }
                 else
                 {
-                    _fileLogger.LogWarning("Move operation returned false for document {DocumentId} to {DestFolderId}", DocumentId, DestFolderId);
+                    _fileLogger.LogWarning("Move operation returned null for document {DocumentId} to {DestFolderId}", DocumentId, DestFolderId);
                 }
 
-                return toRet;
+                return entry;
             }
             catch (Exception ex)
             {
@@ -57,24 +59,24 @@ namespace Migration.Infrastructure.Implementation.Move
             }
         }
 
-        public async Task<bool> CopyAsync(string DocumentId, string DestFolderId, CancellationToken ct)
+        public async Task<Entry?> CopyAsync(string DocumentId, string DestFolderId, CancellationToken ct)
         {
             try
             {
                 _fileLogger.LogDebug("Copying document {DocumentId} to folder {DestFolderId}", DocumentId, DestFolderId);
 
-                var toRet = await _write.CopyDocumentAsync(DocumentId, DestFolderId, null, ct).ConfigureAwait(false);
+                var entry = await _write.CopyDocumentAsync(DocumentId, DestFolderId, null, ct).ConfigureAwait(false);
 
-                if (toRet)
+                if (entry != null)
                 {
                     _fileLogger.LogDebug("Successfully copied document {DocumentId} to {DestFolderId}", DocumentId, DestFolderId);
                 }
                 else
                 {
-                    _fileLogger.LogWarning("Copy operation returned false for document {DocumentId} to {DestFolderId}", DocumentId, DestFolderId);
+                    _fileLogger.LogWarning("Copy operation returned null for document {DocumentId} to {DestFolderId}", DocumentId, DestFolderId);
                 }
 
-                return toRet;
+                return entry;
             }
             catch (Exception ex)
             {

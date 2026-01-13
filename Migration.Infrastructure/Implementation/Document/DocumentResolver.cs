@@ -68,20 +68,14 @@ namespace Migration.Infrastructure.Implementation.Document
             _fileLogger.LogInformation("ResolveAsync_v1: Starting - DestinationRootId: {DestinationRootId}, FolderName: {FolderName}, CustomNodeType: {NodeType}, CreateIfMissing: {CreateIfMissing}, Properties: {PropCount}",
                destinationRootId, newFolderName, customNodeType ?? "NULL", createIfMissing, properties?.Count ?? 0);
 
-            var cacheKey = $"{destinationRootId}_{newFolderName}";
-
-            _fileLogger.LogInformation("ResolveAsync_v1: Checking cache with key '{CacheKey}'", cacheKey);
-
-            // Step 1: Check cache first
+            var cacheKey = $"{destinationRootId}_{newFolderName}";     
+            
             if (_folderCache_New.TryGetValue(cacheKey, out var cachedValue))
             {
                 _fileLogger.LogInformation("ResolveAsync_v1: Cache HIT for folder '{FolderName}' under parent '{ParentId}' → FolderId: {FolderId}",
                     newFolderName, destinationRootId, cachedValue.Folder.Id);
                 return cachedValue.Folder;
             }
-
-            _fileLogger.LogInformation("ResolveAsync_v1: Cache MISS for folder '{FolderName}', acquiring lock for key '{CacheKey}'...", newFolderName, cacheKey);
-
             var folderLock = _lockStriping.GetLock(cacheKey);
             var lockStartTime = DateTime.UtcNow;
 
@@ -92,20 +86,12 @@ namespace Migration.Infrastructure.Implementation.Document
 
             try
             {
-                // Step 2: Double-check cache after acquiring lock
-                _fileLogger.LogInformation("ResolveAsync_v1: Double-checking cache after lock for '{CacheKey}'...", cacheKey);
-
                 if (_folderCache_New.TryGetValue(cacheKey, out cachedValue))
                 {
                     _fileLogger.LogInformation("ResolveAsync_v1: Cache HIT after lock (folder created by another thread) for '{FolderName}' → FolderId: {FolderId}",
                         newFolderName, cachedValue.Folder.Id);
                     return cachedValue.Folder;
                 }
-
-                // Step 3: Check if folder exists in Alfresco
-                _fileLogger.LogInformation("ResolveAsync_v1: Checking if folder '{FolderName}' exists under parent '{ParentId}'...",
-                    newFolderName, destinationRootId);
-
                 var existingFolder = await _read.GetFolderByRelative_v1(destinationRootId, newFolderName, ct).ConfigureAwait(false);
 
                 if (existingFolder != null && !string.IsNullOrEmpty(existingFolder.Id))
@@ -114,50 +100,9 @@ namespace Migration.Infrastructure.Implementation.Document
                     _fileLogger.LogInformation("ResolveAsync_v1: Folder '{FolderName}' EXISTS in Alfresco. FolderId: {FolderId}. Checking for required properties...",
                         newFolderName, existingFolder.Id);
 
-                    if (existingFolder.Properties != null && existingFolder.Properties.TryGetValue("ecm:docClientType", out var docClientType))
-                    {
-                        // Folder has all required properties - cache and return
-                        _fileLogger.LogInformation("ResolveAsync_v1: Folder '{FolderName}' has required property 'ecm:docClientType' = '{Value}'. Adding to cache with IsCreated=FALSE",
-                            newFolderName, docClientType);
-
-                        var added = _folderCache_New.TryAdd(cacheKey, (existingFolder, false));
-                        _fileLogger.LogInformation("ResolveAsync_v1: Cache add result for '{CacheKey}': {Result}", cacheKey, added ? "SUCCESS" : "FAILED (already exists)");
-
-                        return existingFolder;
-                    }
-                    else
-                    {
-                        // Folder exists but missing required properties - need to update it
-                        _fileLogger.LogInformation("ResolveAsync_v1: Folder '{FolderName}' EXISTS but MISSING 'ecm:docClientType' property. Calling ClientAPI to enrich properties...",
-                            newFolderName);
-
-                        var clientDataProps = await CallClientApiForFolderAsync(newFolderName, ct).ConfigureAwait(false);
-                        var cliProps = BuildPropertiesClientData(clientDataProps, newFolderName);
-
-                        _fileLogger.LogInformation("ResolveAsync_v1: Built {Count} properties from ClientData for existing folder. Updating folder properties...", cliProps.Count);
-
-                        if (existingFolder.Properties == null) existingFolder.Properties = new();
-
-                        // Merge client properties with existing properties
-                        foreach (var prop in cliProps)
-                        {
-                            existingFolder.Properties[prop.Key] = prop.Value;
-                            _fileLogger.LogInformation("ResolveAsync_v1: Added property '{Key}' = '{Value}' to existing folder", prop.Key, prop.Value);
-                        }
-
-                        _fileLogger.LogInformation("ResolveAsync_v1: Updated folder '{FolderName}' now has {Count} properties total",
-                            newFolderName, existingFolder.Properties.Count);
-
-                        // Cache the updated folder
-                        var added = _folderCache_New.TryAdd(cacheKey, (existingFolder, false));
-                        _fileLogger.LogInformation("ResolveAsync_v1: Cache add result for updated existing folder '{CacheKey}': {Result}",
-                            cacheKey, added ? "SUCCESS" : "FAILED (already exists)");
-
-                        return existingFolder;
-                    }
+                    return existingFolder;
                 }
-
-                // Step 4: Folder doesn't exist - need to create it
+               
                 if (!createIfMissing)
                 {
                     _fileLogger.LogWarning("ResolveAsync_v1: Folder '{FolderName}' doesn't exist and createIfMissing=FALSE. Returning empty Entry.", newFolderName);
@@ -169,32 +114,17 @@ namespace Migration.Infrastructure.Implementation.Document
 
                 var clientData = await CallClientApiForFolderAsync(newFolderName, ct).ConfigureAwait(false);
                 var clientProps = BuildPropertiesClientData(clientData, newFolderName);
-
-                _fileLogger.LogInformation("ResolveAsync_v1: Built {Count} properties from ClientData, merging with input properties...", clientProps.Count);
-
-                // Merge client properties with input properties
+                
                 if (properties == null)
                 {
                     properties = new Dictionary<string, object>();
                 }
 
                 foreach (var prop in clientProps)
-                {
-                    if (properties.ContainsKey(prop.Key))
-                    {
-                        _fileLogger.LogInformation("ResolveAsync_v1: Updating existing property '{Key}': OLD='{OldValue}' -> NEW='{NewValue}'",
-                            prop.Key, properties[prop.Key], prop.Value);
-                    }
-                    else
-                    {
-                        _fileLogger.LogInformation("ResolveAsync_v1: Adding new property '{Key}' = '{Value}'", prop.Key, prop.Value);
-                    }
+                {                   
                     properties[prop.Key] = prop.Value;
                 }
 
-                _fileLogger.LogInformation("ResolveAsync_v1: Total properties after merge: {Count}", properties.Count);
-
-                // Step 5: Create folder with properties
                 _fileLogger.LogInformation("ResolveAsync_v1: Creating folder '{FolderName}' under parent '{ParentId}' with {PropCount} properties...",
                     newFolderName, destinationRootId, properties.Count);
 

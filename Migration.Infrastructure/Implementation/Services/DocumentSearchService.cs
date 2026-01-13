@@ -99,6 +99,265 @@ namespace Migration.Infrastructure.Implementation.Services
 
             var batchSize = _options.Value.DocumentTypeDiscovery.BatchSize;
             var docDescriptions = _docDescriptionsOverride ?? _options.Value.DocumentTypeDiscovery.DocTypes;
+            var maxDocs = _options.Value.MaxDocumentsToProcess;
+
+            _fileLogger.LogInformation("DocumentSearch batch started - BatchSize: {BatchSize}, DocDescriptions: {DocDescriptions}",
+                batchSize, string.Join(", ", docDescriptions));
+
+            // Initialize DOSSIER folders if not done yet
+            if (_dossierFolders == null)
+            {
+                _dossierFolders = await FindDossierSubfoldersAsync(ct).ConfigureAwait(false);
+
+                if (_dossierFolders.Count == 0)
+                {
+                    _fileLogger.LogWarning("No DOSSIER subfolders found matching criteria");
+                    return result;
+                }
+
+                _fileLogger.LogInformation("Found {Count} DOSSIER subfolders: {Types}, TotalTime: {Time}",
+                    _dossierFolders.Count, string.Join(", ", _dossierFolders.Keys), sw.Elapsed);
+            }
+
+
+            var folderTypes = _dossierFolders.Keys.OrderBy(k => k).ToList();
+            List<ListEntry> finalDocuments = null;
+            string currentType = null;
+
+            // ✅ OPTIMIZACIJA 1: While petlja umesto rekurzije
+            while (_currentFolderTypeIndex < folderTypes.Count)
+            {
+                sw.Restart();
+                // Check if we've reached the maximum number of documents to process
+                if (maxDocs > 0 && _totalDocumentsProcessed >= maxDocs)
+                {
+                    return result;
+                }
+
+                currentType = folderTypes[_currentFolderTypeIndex];
+                var currentFolderId = _dossierFolders[currentType];
+
+                // Adjust batchSize based on MaxDocumentsToProcess to avoid fetching more than needed
+                var adjustedBatchSize = batchSize;
+                if (maxDocs > 0)
+                {
+                    var remainingToProcess = maxDocs - _totalDocumentsProcessed;
+                    if (remainingToProcess <= 0)
+                    {
+                        _fileLogger.LogInformation("Max documents limit already reached in loop check");
+                        return result;
+                    }
+
+                    // If we need fewer documents than batchSize, reduce the batch size
+                    if (remainingToProcess < batchSize)
+                    {
+                        _fileLogger.LogInformation(
+                            "Adjusting batchSize from {OriginalBatchSize} to {AdjustedBatchSize} (MaxDocuments: {MaxDocs}, Already processed: {Processed}, Remaining: {Remaining})",
+                            batchSize, remainingToProcess, maxDocs, _totalDocumentsProcessed, remainingToProcess);
+                        adjustedBatchSize = (int)remainingToProcess;
+                    }
+                }
+
+
+                // Search documents by ecm:docDesc
+                var searchResult = await SearchDocumentsByDescriptionAsync(currentFolderId, docDescriptions, _currentSkipCount, adjustedBatchSize, ct)
+                    .ConfigureAwait(false);
+
+                _fileLogger.LogInformation($" SearchDocumentsByDescriptionAsync TotalTime: {sw.Elapsed}");
+                // Apply filters
+                var typeForRegex = currentType == "D" ? "DE" : currentType;
+                var regex = new Regex($"^{Regex.Escape(typeForRegex)}[0-9]", RegexOptions.IgnoreCase);
+                var docDescHashSet = new HashSet<string>(docDescriptions, StringComparer.OrdinalIgnoreCase);
+
+                finalDocuments = searchResult.Documents.Where(o =>
+                {
+                    var lastParentName = o.Entry.Path?.Elements?.LastOrDefault()?.Name;
+                    return lastParentName != null && regex.IsMatch(lastParentName);
+                }).Where(o =>
+                {
+                    var docDesc = o.Entry.Properties?.GetValueOrDefault("ecm:docDesc")?.ToString();
+                    return docDesc != null && docDescHashSet.Contains(docDesc);
+
+                }).ToList();
+
+                result.DocumentsFound = finalDocuments.Count;
+                result.HasMore = searchResult.HasMore;
+
+                if (finalDocuments.Count == 0)
+                {
+                    
+                    if (searchResult.HasMore)
+                    {
+                        _fileLogger.LogInformation(
+                            "No matching documents found in current batch for DOSSIER-{Type} (filter: {Pattern}), but more results available. " +
+                            "Continuing pagination (SkipCount: {Skip} -> {NextSkip})",
+                            currentType, regex.ToString(), _currentSkipCount, _currentSkipCount + adjustedBatchSize);
+
+                        // Continue pagination - increment skipCount and try next batch
+                        _currentSkipCount += adjustedBatchSize;
+
+                        // ✅ Continue loop umesto rekurzivnog poziva
+                        continue;
+                    }
+
+                    // No more results in Alfresco AND no matching documents - move to next folder type
+                    _fileLogger.LogInformation(
+                        "No matching documents found in DOSSIER-{Type} after processing all pages. Moving to next folder type.",
+                        currentType);
+
+                    // Move to next folder type
+                    _currentFolderTypeIndex++;
+                    _currentSkipCount = 0;
+
+                    // ✅ Continue loop umesto rekurzivnog poziva
+                    continue;
+                }
+
+                // Found documents - break out of loop to process them
+                break;
+            }
+
+            // Check if we've exhausted all folders
+            if (_currentFolderTypeIndex >= folderTypes.Count)
+            {
+                _fileLogger.LogInformation("All DOSSIER subfolders processed");
+                return result;
+            }
+
+            // If no documents after loop, return
+            if (finalDocuments == null || finalDocuments.Count == 0)
+            {
+                return result;
+            }
+
+            _fileLogger.LogInformation("Found {Count} documents in DOSSIER-{Type}", finalDocuments.Count, currentType);
+
+            // Safety check: ensure we don't process more than MaxDocumentsToProcess allows
+            var documentsToProcess = finalDocuments;
+
+            if (maxDocs > 0)
+            {
+                var remainingDocs = maxDocs - _totalDocumentsProcessed;
+                if (remainingDocs <= 0)
+                {
+                    _fileLogger.LogWarning("Max documents limit already reached in safety check - this should have been caught earlier");
+                    return result;
+                }
+
+                if (finalDocuments.Count > remainingDocs)
+                {
+                    _fileLogger.LogWarning(
+                        "Safety check triggered: Limiting documents from {Total} to {Remaining} - batchSize adjustment may need review",
+                        finalDocuments.Count, remainingDocs);
+                    documentsToProcess = finalDocuments.Take((int)remainingDocs).ToList();
+                }
+            }
+
+            // Extract unique parent folders from documents
+            var uniqueFolders = ExtractUniqueFolders(documentsToProcess, currentType);
+            result.FoldersFound = uniqueFolders.Count;
+
+            _fileLogger.LogInformation("Extracted {Count} unique folders from batch", uniqueFolders.Count);
+
+            // Insert folders (ignore duplicates)
+            var foldersInserted = await InsertFoldersAsync(uniqueFolders.Values.ToList(), ct).ConfigureAwait(false);
+            result.FoldersInserted = foldersInserted;
+            Interlocked.Add(ref _totalFoldersInserted, foldersInserted);
+
+            // ✅ OPTIMIZACIJA 2: Paralelno procesiranje dokumenata
+            var mappingTasks = documentsToProcess.Select(async doc =>
+            {
+                try
+                {
+                    var parentFolderId = GetParentFolderIdFromPath(doc.Entry);
+                    if (string.IsNullOrEmpty(parentFolderId))
+                    {
+                        _fileLogger.LogWarning("Could not extract parent folder for document {Name}", doc.Entry.Name);
+                        return null;
+                    }
+
+                    // Get folder info from cache or uniqueFolders (thread-safe operations)
+                    if (!uniqueFolders.TryGetValue(parentFolderId, out var folder))
+                    {
+                        _folderCache.TryGetValue(parentFolderId, out folder);
+                    }
+
+                    if (folder == null)
+                    {
+                        _fileLogger.LogWarning("Folder not found for document {Name}, parentId: {ParentId}",
+                            doc.Entry.Name, parentFolderId);
+                        return null;
+                    }
+
+                    // Convert to DocStaging and apply mapping
+                    var docStaging = doc.Entry.ToDocStagingInsert();
+                    docStaging.Status = MigrationStatus.Ready.ToDbString();
+                    docStaging.ToPath = string.Empty;
+
+                    await ApplyDocumentMappingAsync(docStaging, folder, doc.Entry, ct).ConfigureAwait(false);
+
+                    return docStaging;
+                }
+                catch (Exception ex)
+                {
+                    _fileLogger.LogError("Error processing document {Name}: {Error}",
+                        doc.Entry?.Name ?? "Unknown", ex.Message);
+                    return null;
+                }
+            });
+
+            // Wait for all mapping tasks to complete
+            var mappedDocs = await Task.WhenAll(mappingTasks).ConfigureAwait(false);
+
+            // Filter out null results (failed mappings)
+            var docsToInsert = mappedDocs.Where(d => d != null).ToList();
+            var docsInserted = await InsertDocumentsAsync(docsToInsert, ct).ConfigureAwait(false);
+            _fileLogger.LogInformation($" InsertDocumentsAsync TotalTime: {sw.Elapsed}");
+            result.DocumentsInserted = docsInserted;
+            Interlocked.Add(ref _totalDocumentsProcessed, docsInserted);
+
+            // Update skip count for next batch
+            if (result.HasMore)
+            {
+                _currentSkipCount += batchSize;
+            }
+            else
+            {
+                // Move to next folder type
+                _currentFolderTypeIndex++;
+                _currentSkipCount = 0;
+            }
+
+            Interlocked.Increment(ref _batchCounter);
+
+            // Save checkpoint progress after each batch for UI display
+            await SaveCheckpointProgressAsync(ct).ConfigureAwait(false);
+
+            sw.Stop();
+            _fileLogger.LogInformation(
+                "DocumentSearch batch completed: {DocsFound} docs found, {DocsInserted} inserted, " +
+                "{FoldersFound} folders found, {FoldersInserted} inserted in {Elapsed}ms " +
+                "(Total: {TotalDocs} docs, {TotalFolders} folders)",
+                result.DocumentsFound, result.DocumentsInserted,
+                result.FoldersFound, result.FoldersInserted, sw.ElapsedMilliseconds,
+                _totalDocumentsProcessed, _totalFoldersInserted);
+
+            return result;
+        }
+
+        public async Task<DocumentSearchBatchResult> RunBatchAsync1(CancellationToken ct)
+        {
+            var sw = Stopwatch.StartNew();
+            var result = new DocumentSearchBatchResult();
+
+            using var batchScope = _fileLogger.BeginScope(new Dictionary<string, object>
+            {
+                ["Service"] = nameof(DocumentSearchService),
+                ["Operation"] = "RunBatch"
+            });
+
+            var batchSize = _options.Value.DocumentTypeDiscovery.BatchSize;
+            var docDescriptions = _docDescriptionsOverride ?? _options.Value.DocumentTypeDiscovery.DocTypes;
 
             // Adjust batchSize based on MaxDocumentsToProcess to avoid fetching more than needed
             var maxDocs = _options.Value.MaxDocumentsToProcess;
@@ -170,12 +429,7 @@ namespace Migration.Infrastructure.Implementation.Services
 
                                                         }).ToList();
 
-            //finalDocuments = finalDocuments.Where(o =>
-            //{
-            //    var docDesc = o.Entry.Properties?.GetValueOrDefault("ecm:docDesc")?.ToString();
-            //    return docDesc != null && docDescriptions.Contains(docDesc, StringComparer.OrdinalIgnoreCase);
-
-            //}).ToList();
+           
 
 
 
@@ -328,6 +582,7 @@ namespace Migration.Infrastructure.Implementation.Services
 
         public async Task<bool> RunLoopAsync(CancellationToken ct, Action<WorkerProgress>? progressCallback)
         {
+            var sw = Stopwatch.StartNew();
             var emptyResultCounter = 0;
             var delay = _options.Value.IdleDelayInMs;
             var maxEmptyResults = _options.Value.BreakEmptyResults;
@@ -405,7 +660,7 @@ namespace Migration.Infrastructure.Implementation.Services
                     if (result.DocumentsFound == 0)
                     {
                         emptyResultCounter++;
-                        _fileLogger.LogInformation("Empty result ({Counter}/{Max})", emptyResultCounter, maxEmptyResults);
+                       
 
                         if (emptyResultCounter >= maxEmptyResults)
                         {

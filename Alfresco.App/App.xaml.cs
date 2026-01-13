@@ -257,17 +257,17 @@ namespace Alfresco.App
                             return PolicyHelpers.GetCombinedClientApiPolicy(pollyOptions.ReadOperations, _fileLogger, _dbLogger, _uiLogger);
                         });                    
 
-                    services.AddTransient<SqlServer.Abstraction.Interfaces.IDocStagingRepository, SqlServer.Infrastructure.Implementation.DocStagingRepository>();
-                    services.AddTransient<SqlServer.Abstraction.Interfaces.IFolderStagingRepository, SqlServer.Infrastructure.Implementation.FolderStagingRepository>();
-                    services.AddTransient<SqlServer.Abstraction.Interfaces.IMigrationCheckpointRepository, SqlServer.Infrastructure.Implementation.MigrationCheckpointRepository>();
-                    services.AddTransient<SqlServer.Abstraction.Interfaces.IPhaseCheckpointRepository, SqlServer.Infrastructure.Implementation.PhaseCheckpointRepository>();
-                    services.AddTransient<SqlServer.Abstraction.Interfaces.IKdpDocumentStagingRepository, SqlServer.Infrastructure.Implementation.KdpDocumentStagingRepository>();
-                    services.AddTransient<SqlServer.Abstraction.Interfaces.IKdpExportResultRepository, SqlServer.Infrastructure.Implementation.KdpExportResultRepository>();
-                    services.AddMemoryCache();
+                    services.AddScoped<SqlServer.Abstraction.Interfaces.IDocStagingRepository, SqlServer.Infrastructure.Implementation.DocStagingRepository>();
+                    services.AddScoped<SqlServer.Abstraction.Interfaces.IFolderStagingRepository, SqlServer.Infrastructure.Implementation.FolderStagingRepository>();
+                    services.AddScoped<SqlServer.Abstraction.Interfaces.IMigrationCheckpointRepository, SqlServer.Infrastructure.Implementation.MigrationCheckpointRepository>();
+                    services.AddScoped<SqlServer.Abstraction.Interfaces.IPhaseCheckpointRepository, SqlServer.Infrastructure.Implementation.PhaseCheckpointRepository>();
+                    services.AddScoped<SqlServer.Abstraction.Interfaces.IKdpDocumentStagingRepository, SqlServer.Infrastructure.Implementation.KdpDocumentStagingRepository>();
+                    services.AddScoped<SqlServer.Abstraction.Interfaces.IKdpExportResultRepository, SqlServer.Infrastructure.Implementation.KdpExportResultRepository>();
                     services.AddScoped<SqlServer.Abstraction.Interfaces.IDocumentMappingRepository, SqlServer.Infrastructure.Implementation.DocumentMappingRepository>();
                     services.AddScoped<Migration.Abstraction.Interfaces.IDocumentMappingService, Migration.Infrastructure.Implementation.DocumentMappingService>();
                     services.AddScoped<Migration.Abstraction.Interfaces.IOpisToTipMapper, OpisToTipMapperV2>();
                     services.AddScoped<Migration.Infrastructure.Implementation.DocumentStatusDetectorV2>();
+
                     services.Configure<MigrationOptions>(context.Configuration.GetSection("Migration"));
                     services.Configure<ErrorThresholdsOptions>(context.Configuration.GetSection(ErrorThresholdsOptions.SectionName));
                     services.Configure<FolderNodeTypeMappingConfig>(context.Configuration.GetSection("Migration:FolderNodeTypeMapping"));
@@ -280,24 +280,31 @@ namespace Alfresco.App
 
                     services.AddTransient<IFolderReader, FolderReader>();
                     services.AddTransient<IFolderIngestor,FolderIngestor>();
-                    services.AddSingleton<IFolderDiscoveryService, FolderDiscoveryService>();           
+                   
+                    services.AddTransient<IDocumentReader, DocumentReader>();
+                    services.AddTransient<IDocumentIngestor, DocumentIngestor>();
+                    services.AddTransient<IMoveReader, MoveReader>();
+                    services.AddTransient<IMoveExecutor, MoveExecutor>();
+
+                    services.AddSingleton<IDocumentResolver, DocumentResolver>();
+
+                    services.AddSingleton<IFolderDiscoveryService, FolderDiscoveryService>();
                     services.AddSingleton<IFolderPathService, Migration.Infrastructure.Implementation.FolderPathService>();
                     services.AddSingleton<IFolderManager, Migration.Infrastructure.Implementation.FolderManager>();
-                    services.AddTransient<IDocumentReader, DocumentReader>();
-                    services.AddTransient<IDocumentResolver, DocumentResolver>();
-                    services.AddTransient<IDocumentIngestor, DocumentIngestor>();
                     services.AddSingleton<IDocumentDiscoveryService, DocumentDiscoveryService>();                   
                     services.AddSingleton<IDocumentSearchService, DocumentSearchService>();
                     services.AddSingleton<IKdpDocumentProcessingService, KdpDocumentProcessingService>();
-                    services.AddTransient<IMoveReader, MoveReader>();
-                    services.AddTransient<IMoveExecutor, MoveExecutor>();
+
                     services.AddSingleton<IMoveService, MoveService>();                  
                     services.AddSingleton<IFolderPreparationService, FolderPreparationService>();
                     services.AddSingleton<IMigrationPreparationService, MigrationPreparationService>();
                     services.AddSingleton<GlobalErrorTracker>();
                     services.AddSingleton<IMigrationWorker, MigrationWorker>();
                     services.AddSingleton<IAlfrescoDbReader, AlfrescoDbReader>();
-                  
+
+                    services.AddMemoryCache();
+
+
                     var useMigByDoc = context.Configuration.GetValue<bool>("Migration:MigrationByDocument");
                     var options = context.Configuration.GetSection("Migration").Get<MigrationOptions>();
                     if (context.Configuration.GetValue<bool>("EnableDocumentSearchWorker") && useMigByDoc)

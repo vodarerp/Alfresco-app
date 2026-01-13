@@ -518,7 +518,7 @@ namespace Alfresco.Client.Implementation
             throw new NotImplementedException();
         }
 
-        public async Task<bool> MoveDocumentAsync(string nodeId, string targetFolderId, string? newName, CancellationToken ct = default)
+        public async Task<Entry?> MoveDocumentAsync(string nodeId, string targetFolderId, string? newName, CancellationToken ct = default)
         {
             try
             {
@@ -569,24 +569,50 @@ namespace Alfresco.Client.Implementation
                         using var content = new StringContent(json, Encoding.UTF8, "application/json");
                         using var res = await _client.PostAsync(url, content, ct).ConfigureAwait(false);
 
-                        var errorContent = await res.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
+                        var responseBody = await res.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
 
                         _fileLogger.LogInformation("MoveDocumentAsync: RESPONSE -> Status: {StatusCode}, Body: {ResponseBody}",
-                            (int)res.StatusCode, errorContent);
+                            (int)res.StatusCode, responseBody);
 
                         if (res.IsSuccessStatusCode)
                         {
-                            if (attemptNumber > 0)
+                            // ✅ Deserialize Entry from response
+                            try
                             {
-                                _fileLogger.LogInformation(
-                                    "Successfully moved node {NodeId} to folder {TargetFolderId} with renamed file: {NewName} (after {Attempts} attempts)",
-                                    nodeId, targetFolderId, currentName, attemptNumber + 1);
+                                var entryResponse = JsonConvert.DeserializeObject<ListEntry>(responseBody, jsonSerializerSettings);
+
+                                if (entryResponse?.Entry != null)
+                                {
+                                    if (attemptNumber > 0)
+                                    {
+                                        _fileLogger.LogInformation(
+                                            "Successfully moved node {NodeId} to folder {TargetFolderId} with renamed file: {NewName} (after {Attempts} attempts). Entry has {PropCount} properties.",
+                                            nodeId, targetFolderId, currentName, attemptNumber + 1, entryResponse.Entry.Properties?.Count ?? 0);
+                                    }
+                                    else
+                                    {
+                                        _fileLogger.LogInformation(
+                                            "Successfully moved node {NodeId} to folder {TargetFolderId}. Entry has {PropCount} properties.",
+                                            nodeId, targetFolderId, entryResponse.Entry.Properties?.Count ?? 0);
+                                    }
+
+                                    return entryResponse.Entry;
+                                }
+                                else
+                                {
+                                    _fileLogger.LogWarning(
+                                        "MoveDocumentAsync succeeded but response Entry is null for node {NodeId}",
+                                        nodeId);
+                                    return null;
+                                }
                             }
-                            else
+                            catch (JsonException jsonEx)
                             {
-                                _fileLogger.LogInformation("Successfully moved node {NodeId} to folder {TargetFolderId}", nodeId, targetFolderId);
+                                _fileLogger.LogError(
+                                    "Failed to deserialize Entry from move response for node {NodeId}: {Error}",
+                                    nodeId, jsonEx.Message);
+                                return null;
                             }
-                            return true;
                         }
 
                         // Handle error response
@@ -594,7 +620,7 @@ namespace Alfresco.Client.Implementation
                         // Try to parse error response
                         try
                         {
-                            var errorResponse = JsonConvert.DeserializeObject<AlfrescoErrorResponse>(errorContent, jsonSerializerSettings);
+                            var errorResponse = JsonConvert.DeserializeObject<AlfrescoErrorResponse>(responseBody, jsonSerializerSettings);
 
                             if (errorResponse?.Error != null)
                             {
@@ -613,7 +639,7 @@ namespace Alfresco.Client.Implementation
                                     continue; // Retry with new name
                                 }
 
-                                // Other error - log and return false
+                                // Other error - log and return null
                                 _fileLogger.LogError(
                                     "Alfresco move error for node {NodeId}: {ErrorKey} - {BriefSummary} (LogId: {LogId})",
                                     nodeId, errorResponse.Error.ErrorKey, errorResponse.Error.BriefSummary, errorResponse.Error.LogId);
@@ -626,9 +652,9 @@ namespace Alfresco.Client.Implementation
 
                         _fileLogger.LogWarning(
                             "Failed to move node {NodeId} to folder {TargetFolderId}: {StatusCode} - {Error}",
-                            nodeId, targetFolderId, res.StatusCode, errorContent);
+                            nodeId, targetFolderId, res.StatusCode, responseBody);
 
-                        return false;
+                        return null;
                     }
                     catch (Exception ex) when (ex is not AlfrescoTimeoutException && ex is not AlfrescoRetryExhaustedException)
                     {
@@ -644,7 +670,7 @@ namespace Alfresco.Client.Implementation
                 _fileLogger.LogError(
                     "Failed to move node {NodeId} to folder {TargetFolderId} after {MaxAttempts} attempts due to name conflicts",
                     nodeId, targetFolderId, MAX_RETRY_ATTEMPTS);
-                return false;
+                return null;
             }
             catch (AlfrescoTimeoutException timeoutEx)
             {
@@ -663,7 +689,7 @@ namespace Alfresco.Client.Implementation
         }
 
         
-        public async Task<bool> CopyDocumentAsync(string nodeId, string targetFolderId, string? newName, CancellationToken ct = default)
+        public async Task<Entry?> CopyDocumentAsync(string nodeId, string targetFolderId, string? newName, CancellationToken ct = default)
         {
             try
             {
@@ -687,27 +713,53 @@ namespace Alfresco.Client.Implementation
                 using var content = new StringContent(json, Encoding.UTF8, "application/json");
                 using var res = await _client.PostAsync(url, content, ct).ConfigureAwait(false);
 
-                var errorContent = await res.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
+                var responseBody = await res.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
 
                 _fileLogger.LogInformation("CopyDocumentAsync: RESPONSE -> Status: {StatusCode}, Body: {ResponseBody}",
-                    (int)res.StatusCode, errorContent);
+                    (int)res.StatusCode, responseBody);
 
                 if (res.IsSuccessStatusCode)
                 {
-                    _fileLogger.LogInformation("Successfully copied node {NodeId} to folder {TargetFolderId}", nodeId, targetFolderId);
-                    return true;
+                    // ✅ Deserialize Entry from response
+                    try
+                    {
+                        var entryResponse = JsonConvert.DeserializeObject<ListEntry>(responseBody, jsonSerializerSettings);
+
+                        if (entryResponse?.Entry != null)
+                        {
+                            _fileLogger.LogInformation(
+                                "Successfully copied node {NodeId} to folder {TargetFolderId}. Entry has {PropCount} properties.",
+                                nodeId, targetFolderId, entryResponse.Entry.Properties?.Count ?? 0);
+
+                            return entryResponse.Entry;
+                        }
+                        else
+                        {
+                            _fileLogger.LogWarning(
+                                "CopyDocumentAsync succeeded but response Entry is null for node {NodeId}",
+                                nodeId);
+                            return null;
+                        }
+                    }
+                    catch (JsonException jsonEx)
+                    {
+                        _fileLogger.LogError(
+                            "Failed to deserialize Entry from copy response for node {NodeId}: {Error}",
+                            nodeId, jsonEx.Message);
+                        return null;
+                    }
                 }
 
                 // Handle error response
 
                 _fileLogger.LogWarning(
                     "Failed to copy node {NodeId} to folder {TargetFolderId}: {StatusCode} - {Error}",
-                    nodeId, targetFolderId, res.StatusCode, errorContent);
+                    nodeId, targetFolderId, res.StatusCode, responseBody);
 
                 // Try to parse error response for better error details
                 try
                 {
-                    var errorResponse = JsonConvert.DeserializeObject<AlfrescoErrorResponse>(errorContent);
+                    var errorResponse = JsonConvert.DeserializeObject<AlfrescoErrorResponse>(responseBody);
 
                     if (errorResponse?.Error != null)
                     {
@@ -721,7 +773,7 @@ namespace Alfresco.Client.Implementation
                     _fileLogger.LogWarning("Could not parse error response for copy operation on node {NodeId}", nodeId);
                 }
 
-                return false;
+                return null;
             }
             catch (AlfrescoTimeoutException timeoutEx)
             {
