@@ -106,6 +106,7 @@ namespace Migration.Infrastructure.Implementation
                     return CreateEmptyClientData(coreId);
                 }
 
+                
                 // Map mock API response to ClientData model
                 var clientData = new ClientData
                 {
@@ -114,7 +115,7 @@ namespace Migration.Infrastructure.Implementation
                     ClientName = mockClientData.ClientName,
                     ClientType = mockClientData.ClientType,//DetermineClientType(mockClientData.ClientType),
                     ClientSubtype = mockClientData.ClientSubtype ?? string.Empty, // Use mock ClientType as subtype
-                    Residency = mockClientData.Residency,//DetermineResidency(mockClientData.Residency),
+                    Residency = DetermineResidency(mockClientData.Residency),//DetermineResidency(mockClientData.Residency),
                     Segment = mockClientData.Segment,
                     // Optional fields - set to null or empty if not available
                     Staff = mockClientData.Staff,
@@ -513,13 +514,12 @@ namespace Migration.Infrastructure.Implementation
         /// </summary>
         private string DetermineResidency(string? nationality)
         {
-            if (string.IsNullOrEmpty(nationality))
-                return "Resident";
-
-            // Serbian nationals are typically residents
-            return nationality.Contains("Serbian", StringComparison.OrdinalIgnoreCase)
-                ? "Resident"
-                : "Non-resident";
+            return nationality?.ToUpperInvariant() switch
+            {
+                string s when s.StartsWith("R") => "REZIDENT",
+                string s when s.StartsWith("N") => "NEREZIDENT",
+                _ => string.Empty
+            };
         }
 
         /// <summary>
