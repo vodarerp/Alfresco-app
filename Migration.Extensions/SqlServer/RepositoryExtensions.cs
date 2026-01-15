@@ -41,7 +41,7 @@ namespace Migration.Extensions.SqlServer
 
             var sql = @"UPDATE DocStaging
                         SET Status = @status,
-                            ErrorMsg = @error,
+                            ErrorMsg = CONCAT(ISNULL(ErrorMsg, ''), @error),
                             UpdatedAt = GETUTCDATE()
                         WHERE Id = @id";
 

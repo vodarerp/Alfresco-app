@@ -23,6 +23,7 @@ namespace SqlServer.Abstraction.Interfaces
             string alfrescoFolderId,
             bool isCreated,
             string finalDocumentType,
+            string? clientApiError = null,
             CancellationToken ct = default);
     }
 }

@@ -453,6 +453,18 @@ namespace Migration.Infrastructure.Implementation.Services
                     "CreateFolderAsync: Successfully created folder hierarchy - RootDestinationFolderId: {RootId}, ParentFolder: {ParentFolder}, Path: {Path}, FinalFolderId: {FinalId}, MainFolderCreated: {IsCreated}",
                     _rootDestinationFolderId, folder.DestinationRootId, folder.FolderPath, currentParentId, mainFolderIsCreated);
 
+                // Check if ClientAPI returned error for main folder (e.g., ORA-01403: no data found)
+                // The error is cached in DocumentResolver by folder name (pathParts[0] is the main dossier folder)
+                var mainFolderName = pathParts.Length > 0 ? pathParts[0] : folder.FolderPath;
+                var clientApiError = documentResolver.GetClientApiError(mainFolderName);
+
+                if (!string.IsNullOrEmpty(clientApiError))
+                {
+                    _fileLogger.LogWarning(
+                        "CreateFolderAsync: ClientAPI error detected for folder '{FolderName}'. Error will be written to DocStaging.ErrorMsg. Error: {Error}",
+                        mainFolderName, clientApiError);
+                }
+
                 // STEP 3: Update DocStaging.DestinationFolderId and DossierDestFolderIsCreated for all documents in this folder
                 _fileLogger.LogInformation("CreateFolderAsync: STEP 3 - Updating DocStaging for folder '{Path}' with FolderId: {FolderId}",
                     folder.FolderPath, currentParentId);
@@ -462,6 +474,7 @@ namespace Migration.Infrastructure.Implementation.Services
                     currentParentId,
                     mainFolderIsCreated,
                     clinetType,
+                    clientApiError,
                     ct).ConfigureAwait(false);
 
                 _fileLogger.LogInformation("CreateFolderAsync: Completed successfully for folder '{Path}' -> FolderId: {FolderId}",
@@ -485,6 +498,7 @@ namespace Migration.Infrastructure.Implementation.Services
             string alfrescoFolderId,
             bool isCreated,
             string clinetType,
+            string? clientApiError,
             CancellationToken ct)
         {
             const int MAX_RETRIES = 3;
@@ -513,6 +527,7 @@ namespace Migration.Infrastructure.Implementation.Services
                             alfrescoFolderId,
                             isCreated,
                             clinetType,
+                            clientApiError,
                             ct).ConfigureAwait(false);
 
                         await uow.CommitAsync(ct: ct).ConfigureAwait(false);

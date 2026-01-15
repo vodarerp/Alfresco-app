@@ -220,16 +220,19 @@ namespace SqlServer.Infrastructure.Implementation
             string alfrescoFolderId,
             bool isCreated,
             string finalDocumentType,
+            string? clientApiError = null,
             CancellationToken ct = default)
         {
             // Updates DestinationFolderId after folder is created
             // Status remains READY - documents will be picked up by MoveService
+            // ErrorMsg is set if ClientAPI didn't return data for this client (ORA-01403: no data found)
             var sql = @"
                 UPDATE DocStaging
                 SET DestinationFolderId = @AlfrescoFolderId,
                     DossierDestFolderIsCreated = @IsCreated,
                     UpdatedAt = GETUTCDATE(),
-                    FinalDocumentType = @FinalDocumentType
+                    FinalDocumentType = @FinalDocumentType,
+                    ErrorMsg = @ErrorMsg
                 WHERE DossierDestFolderId = @DossierDestFolderId";
 
             var parameters = new DynamicParameters();
@@ -237,6 +240,8 @@ namespace SqlServer.Infrastructure.Implementation
             parameters.Add("@AlfrescoFolderId", alfrescoFolderId);
             parameters.Add("@IsCreated", isCreated);
             parameters.Add("@FinalDocumentType", finalDocumentType);
+            // Set ErrorMsg to clientApiError if present, otherwise empty string
+            parameters.Add("@ErrorMsg", clientApiError ?? string.Empty);
 
             var cmd = new CommandDefinition(sql, parameters, Tx, cancellationToken: ct);
 

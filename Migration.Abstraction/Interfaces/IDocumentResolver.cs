@@ -22,12 +22,12 @@ namespace Migration.Abstraction.Interfaces
             Alfresco.Contracts.Models.UniqueFolderInfo? folderInfo,
             CancellationToken ct);
 
-
-        //Task<(string FolderId, bool IsCreated)> ResolveWithStatusAsync(
-        //    string destinationRootId,
-        //    string newFolderName,
-        //    Dictionary<string, object>? properties,
-        //    Alfresco.Contracts.Models.UniqueFolderInfo? folderInfo,
-        //    CancellationToken ct);
+        /// <summary>
+        /// Gets the cached ClientAPI error for a folder, if any.
+        /// When ClientAPI returns "no data found" error, it's cached and can be retrieved here.
+        /// </summary>
+        /// <param name="folderPath">The folder name to check for errors</param>
+        /// <returns>Error message if ClientAPI failed for this folder, otherwise null</returns>
+        string? GetClientApiError(string folderPath);
     }
 }

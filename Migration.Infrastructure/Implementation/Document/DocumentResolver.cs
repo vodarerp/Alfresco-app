@@ -36,6 +36,13 @@ namespace Migration.Infrastructure.Implementation.Document
         private readonly ConcurrentDictionary<string, (string FolderId, bool IsCreated)> _folderCache = new();
         private readonly ConcurrentDictionary<string, (Entry Folder, bool IsCreated)> _folderCache_New = new();
 
+        /// <summary>
+        /// Cache for ClientAPI errors by folder path (DossierDestFolderId).
+        /// When ClientAPI returns "no data found" error, the error message is cached here
+        /// so it can be later written to DocStaging.ErrorMsg when updating DestinationFolderId.
+        /// </summary>
+        private readonly ConcurrentDictionary<string, string> _clientApiErrorCache = new();
+
 
         private readonly LockStriping _lockStriping = new(1024);
 
@@ -58,6 +65,29 @@ namespace Migration.Infrastructure.Implementation.Document
         }       
        
        
+        /// <summary>
+        /// Gets the cached ClientAPI error for a folder, if any.
+        /// Returns null if no error was cached for that folder.
+        /// </summary>
+        /// <param name="folderPath">The folder path (DossierDestFolderId) to check for errors</param>
+        /// <returns>Error message if ClientAPI failed for this folder, otherwise null</returns>
+        public string? GetClientApiError(string folderPath)
+        {
+            _fileLogger.LogDebug("GetClientApiError: Looking for error with key '{FolderPath}'. Cache has {Count} entries: [{Keys}]",
+                folderPath, _clientApiErrorCache.Count, string.Join(", ", _clientApiErrorCache.Keys));
+
+            if (_clientApiErrorCache.TryGetValue(folderPath, out var error))
+            {
+                _fileLogger.LogInformation("GetClientApiError: Found cached error for '{FolderPath}': {Error}",
+                    folderPath, error);
+                error = "No data found in ClientAPI for the specified client.";
+                return error;
+            }
+
+            _fileLogger.LogDebug("GetClientApiError: No cached error found for '{FolderPath}'", folderPath);
+            return null;
+        }
+
         public async Task<string> ResolveAsync(string destinationRootId, string newFolderName, Dictionary<string, object>? properties, CancellationToken ct)
         {
             return await ResolveAsync(destinationRootId, newFolderName, properties, null, true, ct).ConfigureAwait(false);
@@ -590,7 +620,17 @@ namespace Migration.Infrastructure.Implementation.Document
         {
             _fileLogger.LogInformation("CallClientApiForFolderAsync: Starting - FolderName: '{FolderName}'", folderName);
 
-            ClientData toRet = new();
+             string DetermineResidency(string? res)
+             {
+                return res?.ToUpperInvariant() switch
+                {
+                        string s when s.StartsWith("R") => "REZIDENT",
+                        string s when s.StartsWith("N") => "NEREZIDENT",
+                        _ => string.Empty
+                };
+             }
+
+        ClientData toRet = new();
             try
             {
                 // Extract CoreID from folder name (e.g., "PI-102206" → "102206")
@@ -621,39 +661,42 @@ namespace Migration.Infrastructure.Implementation.Document
                 {
                     if (toRet == null) toRet = new();
 
-                    toRet.Residency = resCliDeteail.ClientGeneral.ResidentIndicator ?? "";
+                    toRet.Residency = DetermineResidency(resCliDeteail.ClientGeneral.ResidentIndicator ?? "");
                     toRet.ClientName = resCliDeteail.Name ?? "";
                     toRet.MbrJmbg = resCliDeteail.ClientGeneral.ClientID ?? "";
+
+                    // Propagate error from GetClientDetail if present
+                    if (resCliDeteail.HasError && !toRet.HasError)
+                    {
+                        toRet.HasError = true;
+                        toRet.ErrorMessage = resCliDeteail.ErrorMessage;
+                    }
 
                     _fileLogger.LogInformation(
                         "CallClientApiForFolderAsync: Enriched ClientData from ClientDetail for CoreID '{CoreId}' - Residency: '{Residency}', ClientName: '{ClientName}', MbrJmbg: '{MbrJmbg}'",
                         coreId, toRet.Residency, toRet.ClientName, toRet.MbrJmbg);
                 }
 
-                if (toRet != null)
+                // Cache ClientAPI error if present (for later use in DocStaging.ErrorMsg update)
+                if (toRet != null && toRet.HasError && !string.IsNullOrEmpty(toRet.ErrorMessage))
                 {
-                    _fileLogger.LogInformation(
-                        "CallClientApiForFolderAsync: Final ClientData for CoreID '{CoreId}':",
-                        coreId);
-                    _fileLogger.LogInformation("  ClientName: '{ClientName}'", toRet.ClientName ?? "NULL");
-                    _fileLogger.LogInformation("  ClientType: '{ClientType}'", toRet.ClientType ?? "NULL");
-                    _fileLogger.LogInformation("  MbrJmbg: '{MbrJmbg}'", toRet.MbrJmbg ?? "NULL");
-                    _fileLogger.LogInformation("  Residency: '{Residency}'", toRet.Residency ?? "NULL");
-                    _fileLogger.LogInformation("  Segment: '{Segment}'", toRet.Segment ?? "NULL");
-                    _fileLogger.LogInformation("  ClientSubtype: '{ClientSubtype}'", toRet.ClientSubtype ?? "NULL");
-                    _fileLogger.LogInformation("  BarCLEXOpu: '{BarCLEXOpu}'", toRet.BarCLEXOpu ?? "NULL");
-                    _fileLogger.LogInformation("  Staff: '{Staff}'", toRet.Staff ?? "NULL");
-                    _fileLogger.LogInformation("  BarCLEXGroupCode: '{BarCLEXGroupCode}'", toRet.BarCLEXGroupCode ?? "NULL");
-                    _fileLogger.LogInformation("  BarCLEXGroupName: '{BarCLEXGroupName}'", toRet.BarCLEXGroupName ?? "NULL");
-                    _fileLogger.LogInformation("  BarCLEXCode: '{BarCLEXCode}'", toRet.BarCLEXCode ?? "NULL");
-                    _fileLogger.LogInformation("  BarCLEXName: '{BarCLEXName}'", toRet.BarCLEXName ?? "NULL");
+                    var errorMsg = $"ClientAPI nije vratio podatke za CoreId: {coreId}. {toRet.ErrorMessage}";
+                    var added = _clientApiErrorCache.TryAdd(folderName, errorMsg);
+
+                    _fileLogger.LogWarning(
+                        "CallClientApiForFolderAsync: ClientAPI error cached for folder '{FolderName}', CoreId: {CoreId}. CacheKey: '{CacheKey}', Added: {Added}, Error: {Error}",
+                        folderName, coreId, folderName, added, errorMsg);
+                    _dbLogger.LogWarning(
+                        "ClientAPI nije vratio podatke za CoreId: {CoreId}, folder: {FolderName}. Error: {Error}",
+                        coreId, folderName, toRet.ErrorMessage);
                 }
                 else
                 {
-                    _fileLogger.LogWarning(
-                        "CallClientApiForFolderAsync: ClientAPI returned null for CoreID '{CoreId}' (folder '{FolderName}')",
-                        coreId, folderName);
+                    _fileLogger.LogDebug(
+                        "CallClientApiForFolderAsync: No ClientAPI error to cache for folder '{FolderName}'. HasError: {HasError}, ErrorMessage: '{ErrorMessage}'",
+                        folderName, toRet?.HasError ?? false, toRet?.ErrorMessage ?? "null");
                 }
+               
             }
             catch (ClientApiTimeoutException timeoutEx)
             {
@@ -750,71 +793,7 @@ namespace Migration.Infrastructure.Implementation.Document
         }
 
 
-        /* Old ResolveWithStatusAsync
-         
-        public async Task<(string FolderId, bool IsCreated)> ResolveWithStatusAsync(string destinationRootId,string newFolderName,Dictionary<string, object>? properties,UniqueFolderInfo? folderInfo,CancellationToken ct)
-        {
-            _fileLogger.LogInformation("ResolveWithStatusAsync: Starting - DestinationRootId: {DestinationRootId}, FolderName: {FolderName}, Properties: {PropCount}, HasFolderInfo: {HasInfo}",
-                destinationRootId, newFolderName, properties?.Count ?? 0, folderInfo != null);
-
-            // Check cache first
-            var cacheKey = $"{destinationRootId}_{newFolderName}";
-            _fileLogger.LogInformation("ResolveWithStatusAsync: Checking cache for key '{CacheKey}'", cacheKey);
-
-            if (_folderCache.TryGetValue(cacheKey, out var cachedValue))
-            {
-                _fileLogger.LogInformation("ResolveWithStatusAsync: Cache HIT for folder '{FolderName}' → FolderId: {FolderId}, IsCreated: {IsCreated}",
-                    newFolderName, cachedValue.FolderId, cachedValue.IsCreated);
-                return cachedValue;
-            }
-
-            _fileLogger.LogInformation("ResolveWithStatusAsync: Cache MISS, proceeding with folder resolution");
-                        
-            string? customNodeType = null;
-            if (folderInfo?.TargetDossierType.HasValue == true)
-            {
-                customNodeType = _nodeTypeMapping.GetNodeType(folderInfo.TargetDossierType.Value);
-                _fileLogger.LogInformation(
-                    "ResolveWithStatusAsync: Determined customNodeType '{NodeType}' for TargetDossierType {DossierType}",
-                    customNodeType ?? "NULL", folderInfo.TargetDossierType.Value);
-            }
-            else
-            {
-                _fileLogger.LogInformation("ResolveWithStatusAsync: No FolderInfo or TargetDossierType provided, using default nodeType");
-            }
-
-            // Enrich properties with ECM standard properties if folderInfo is provided
-            if (folderInfo != null)
-            {
-                _fileLogger.LogInformation("ResolveWithStatusAsync: Enriching properties with ECM data from FolderInfo...");
-                properties = EnrichPropertiesWithEcmData(properties, newFolderName, folderInfo);
-                _fileLogger.LogInformation("ResolveWithStatusAsync: Properties enriched, total count: {Count}", properties?.Count ?? 0);
-            }
-            else
-            {
-                _fileLogger.LogInformation("ResolveWithStatusAsync: No FolderInfo provided, skipping ECM enrichment");
-            }
-
-            // Call standard resolve with customNodeType (CRITICAL for Alfresco content model)
-            _fileLogger.LogInformation("ResolveWithStatusAsync: Calling ResolveAsync with customNodeType '{NodeType}'...", customNodeType ?? "NULL");
-            var folderId = await ResolveAsync(destinationRootId, newFolderName, properties, customNodeType, true, ct).ConfigureAwait(false);
-            _fileLogger.LogInformation("ResolveWithStatusAsync: ResolveAsync returned FolderId: {FolderId}", folderId);
-
-            // Retrieve from cache (should always hit now)
-            _fileLogger.LogInformation("ResolveWithStatusAsync: Retrieving from cache after ResolveAsync for key '{CacheKey}'", cacheKey);
-            if (_folderCache.TryGetValue(cacheKey, out cachedValue))
-            {
-                _fileLogger.LogInformation("ResolveWithStatusAsync: Cache hit after ResolveAsync - FolderId: {FolderId}, IsCreated: {IsCreated}",
-                    cachedValue.FolderId, cachedValue.IsCreated);
-                return cachedValue;
-            }
-
-            // Fallback (should never happen, but safety)
-            _fileLogger.LogWarning("ResolveWithStatusAsync: Cache MISS after ResolveAsync for folder '{FolderName}' (unexpected!), returning (folderId: {FolderId}, IsCreated: false)", newFolderName, folderId);
-            return (folderId, false);
-        }
-
-        */
+     
 
         private Dictionary<string, object> EnrichPropertiesWithEcmData(Dictionary<string, object>? properties,string folderName,UniqueFolderInfo folderInfo)
         {
@@ -933,16 +912,16 @@ namespace Migration.Infrastructure.Implementation.Document
                 "0" => false,
                 _ => true
             };
+
+            var barClex = $"{clientData.BarCLEXGroupCode ?? string.Empty} {clientData.BarCLEXGroupName ?? string.Empty}";
+            var contri = $"{clientData.BarCLEXCode ?? string.Empty} {clientData.BarCLEXName ?? string.Empty}";
             properties.Add("ecm:bnkStaff", staf);
-            properties.Add("ecm:bnkBarclex", $"{clientData.BarCLEXGroupCode ?? string.Empty} {clientData.BarCLEXGroupName ?? string.Empty} ");
-            properties.Add("ecm:bnkContributor", $"{clientData.BarCLEXCode ?? string.Empty} {clientData.BarCLEXName ?? string.Empty} ");
+            properties.Add("ecm:bnkBarclex", barClex.Trim());
+            properties.Add("ecm:bnkContributor",contri.Trim());
 
             _fileLogger.LogInformation("BuildPropertiesClientData: Built {Count} properties from ClientData", properties.Count);
             _fileLogger.LogInformation("BuildPropertiesClientData: Properties built:");
-            foreach (var kvp in properties)
-            {
-                _fileLogger.LogInformation("  {Key} = {Value}", kvp.Key, kvp.Value ?? "NULL");
-            }
+            
 
             return properties;
         }

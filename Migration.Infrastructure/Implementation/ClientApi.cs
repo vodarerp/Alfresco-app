@@ -7,6 +7,7 @@ using Migration.Abstraction.Interfaces;
 using Migration.Abstraction.Models;
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Net.Http;
 using System.Net.Http.Json;
 using System.Text.Json;
@@ -95,10 +96,37 @@ namespace Migration.Infrastructure.Implementation
                 var endpoint = $"{_options.GetClientDataEndpoint}/{coreId}";
 
                 var response = await _httpClient.GetAsync(endpoint, ct).ConfigureAwait(false);
+
+                // Read response body as string first to check for error responses
+                var responseBody = await response.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
+
+                // Check if response contains an error (e.g., ORA-01403: no data found)
+                var errorResponse = TryParseErrorResponse(responseBody);
+                if (errorResponse != null)
+                {
+                    _fileLogger.LogWarning(
+                        "Client API returned error for CoreId: {CoreId}. Error: {Error}. Returning empty ClientData with error flag.",
+                        coreId, errorResponse);
+                    _dbLogger.LogWarning(
+                        "ClientAPI error for CoreId: {CoreId}. Error: {Error}. Migration continues with empty data.",
+                        coreId, errorResponse);
+
+                    var emptyDataWithError = CreateEmptyClientData(coreId);
+                    emptyDataWithError.HasError = true;
+                    emptyDataWithError.ErrorMessage = errorResponse;
+
+                    // Cache the error result to avoid repeated API calls for the same client
+                    _cache.Set(cacheKey, emptyDataWithError, _cacheDuration);
+
+                    return emptyDataWithError;
+                }
+
                 response.EnsureSuccessStatusCode();
 
-                var mockClientData = await response.Content.ReadFromJsonAsync<ClientDetailExtendedDto>(cancellationToken: ct)
-                    .ConfigureAwait(false);
+                var mockClientData = JsonSerializer.Deserialize<ClientDetailExtendedDto>(responseBody, new JsonSerializerOptions
+                {
+                    PropertyNameCaseInsensitive = true
+                });
 
                 if (mockClientData == null)
                 {
@@ -201,29 +229,7 @@ namespace Migration.Infrastructure.Implementation
 
                 return new List<string>();
 
-                // TODO: When real API is available, uncomment this:
-                /*
-                var endpoint = $"{_options.GetActiveAccountsEndpoint}/{coreId}/accounts?asOfDate={asOfDate:yyyy-MM-dd}&status=active";
-                var response = await _httpClient.GetAsync(endpoint, ct).ConfigureAwait(false);
-                response.EnsureSuccessStatusCode();
-
-                var accounts = await response.Content.ReadFromJsonAsync<List<string>>(cancellationToken: ct)
-                    .ConfigureAwait(false);
-
-                if (accounts == null)
-                {
-                    _fileLogger.LogWarning(
-                        "Client API returned null accounts list for CoreId: {CoreId}, returning empty list",
-                        coreId);
-                    return new List<string>();
-                }
-
-                _fileLogger.LogInformation(
-                    "Successfully retrieved {Count} active accounts for CoreId: {CoreId} as of {AsOfDate}",
-                    accounts.Count, coreId, asOfDate);
-
-                return accounts;
-                */
+               
             }
             catch (ClientApiTimeoutException)
             {
@@ -374,10 +380,37 @@ namespace Migration.Infrastructure.Implementation
                 var endpoint = $"{_options.GetClientDetailEndpoint}/{coreId}";
 
                 var response = await _httpClient.GetAsync(endpoint, ct).ConfigureAwait(false);
+
+                // Read response body as string first to check for error responses
+                var responseBody = await response.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
+
+                // Check if response contains an error (e.g., ORA-01403: no data found)
+                var errorResponse = TryParseErrorResponse(responseBody);
+                if (errorResponse != null)
+                {
+                    _fileLogger.LogWarning(
+                        "Client API (GetClientDetail) returned error for CoreId: {CoreId}. Error: {Error}. Returning empty ClientDetailResponse with error flag.",
+                        coreId, errorResponse);
+                    _dbLogger.LogWarning(
+                        "ClientAPI (GetClientDetail) error for CoreId: {CoreId}. Error: {Error}. Migration continues with empty data.",
+                        coreId, errorResponse);
+
+                    var emptyDetailWithError = CreateEmptyClientDetailResponse();
+                    emptyDetailWithError.HasError = true;
+                    emptyDetailWithError.ErrorMessage = errorResponse;
+
+                    // Cache the error result to avoid repeated API calls for the same client
+                    _cache.Set(cacheKey, emptyDetailWithError, _cacheDuration);
+
+                    return emptyDetailWithError;
+                }
+
                 response.EnsureSuccessStatusCode();
 
-                var clientDetailDto = await response.Content.ReadFromJsonAsync<ClientDetailDto>(cancellationToken: ct)
-                    .ConfigureAwait(false);
+                var clientDetailDto = JsonSerializer.Deserialize<ClientDetailDto>(responseBody, new JsonSerializerOptions
+                {
+                    PropertyNameCaseInsensitive = true
+                });
 
                 if (clientDetailDto == null)
                 {
@@ -442,6 +475,67 @@ namespace Migration.Infrastructure.Implementation
         }
 
         #region Helper Methods
+
+        /// <summary>
+        /// Tries to parse an error response from the ClientAPI.
+        /// Returns the error message if the response contains an "error" field, otherwise null.
+        /// Handles error responses like: {"error": "ORA-01403: no data found..."}
+        /// </summary>
+        private string? TryParseErrorResponse(string responseBody)
+        {
+            if (string.IsNullOrWhiteSpace(responseBody))
+            {
+                _fileLogger.LogDebug("TryParseErrorResponse: Response body is null or empty");
+                return null;
+            }
+
+            _fileLogger.LogDebug("TryParseErrorResponse: Parsing response body (length: {Length}): {Preview}",
+                responseBody.Length, responseBody.Length > 200 ? responseBody.Substring(0, 200) + "..." : responseBody);
+
+            try
+            {
+                using var doc = JsonDocument.Parse(responseBody);
+                var root = doc.RootElement;
+
+                // Log all top-level properties for debugging
+                var properties = root.EnumerateObject().Select(p => p.Name).ToList();
+                _fileLogger.LogDebug("TryParseErrorResponse: JSON has {Count} top-level properties: [{Properties}]",
+                    properties.Count, string.Join(", ", properties));
+
+                // Check if the response has an "error" property
+                if (root.TryGetProperty("error", out var errorElement))
+                {
+                    var errorMessage = errorElement.GetString();
+                    _fileLogger.LogDebug("TryParseErrorResponse: Found 'error' property with value: {Value}",
+                        string.IsNullOrWhiteSpace(errorMessage) ? "(empty)" : errorMessage);
+                    if (!string.IsNullOrWhiteSpace(errorMessage))
+                    {
+                        return errorMessage;
+                    }
+                }
+
+                // Also check for lowercase/uppercase variants
+                if (root.TryGetProperty("Error", out errorElement))
+                {
+                    var errorMessage = errorElement.GetString();
+                    _fileLogger.LogDebug("TryParseErrorResponse: Found 'Error' property with value: {Value}",
+                        string.IsNullOrWhiteSpace(errorMessage) ? "(empty)" : errorMessage);
+                    if (!string.IsNullOrWhiteSpace(errorMessage))
+                    {
+                        return errorMessage;
+                    }
+                }
+
+                _fileLogger.LogDebug("TryParseErrorResponse: No error property found in response");
+                return null;
+            }
+            catch (JsonException ex)
+            {
+                // Response is not valid JSON, not an error response we can parse
+                _fileLogger.LogDebug("TryParseErrorResponse: Failed to parse JSON - {Error}", ex.Message);
+                return null;
+            }
+        }
 
         /// <summary>
         /// Creates an empty ClientData object when ClientAPI fails or returns no data
