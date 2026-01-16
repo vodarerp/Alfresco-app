@@ -14,6 +14,7 @@ using System.Linq;
 using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
+using System.Text.Json;
 
 namespace Migration.Infrastructure.Implementation.Services
 {
@@ -300,9 +301,11 @@ namespace Migration.Infrastructure.Implementation.Services
             var coreId = ExtractCoreId(accFolderName);
 
             // Extract CreatedDate from ecm:docCreationDate property
-            var createdDate = GetDateTimePropertyValue(entry, "ecm:docCreationDate")
-                              ?? GetDateTimePropertyValue(entry, "ecm:docCreatedDate")
-                              ?? entry.CreatedAt.DateTime;
+            var createdDate = GetDateTimePropertyValue(entry, "ecm:docCreationDate")                             
+                              ?? null;
+
+            var sysCreated = entry.CreatedAt.DateTime;
+
 
             return new KdpDocumentStaging
             {
@@ -313,11 +316,14 @@ namespace Migration.Infrastructure.Implementation.Services
                 ParentFolderName = ExtractParentFolderName(documentPath),
                 DocumentType = GetPropertyValue(entry, "ecm:docType"),
                 DocumentStatus = GetPropertyValue(entry, "ecm:docStatus"),
-                CreatedDate = createdDate,
+                CreatedDate = sysCreated,
                 AccountNumbers = GetPropertyValue(entry, "ecm:bnkAccountNumber"),
                 AccFolderName = accFolderName,
                 CoreId = coreId,
-                ProcessedDate = DateTime.Now
+                ProcessedDate = DateTime.Now,
+                Source = GetPropertyValue(entry, "ecm:docSource"),
+                Properties = entry.Properties == null ? null : JsonSerializer.Serialize(entry.Properties, new JsonSerializerOptions { WriteIndented = false }),
+                MigrationCreationDate = createdDate
             };
         }
 
