@@ -16,6 +16,7 @@ using SqlServer.Abstraction.Interfaces;
 using System;
 using System.Data;
 using System.Diagnostics;
+using System.Linq;
 
 namespace Migration.Infrastructure.Implementation.Services
 {
@@ -110,6 +111,62 @@ namespace Migration.Infrastructure.Implementation.Services
                     "Current user initialized: {DisplayName} ({UserId}, {Email})",
                     _currentUserService.DisplayName, _currentUserService.UserId, _currentUserService.Email);
                 _uiLogger.LogInformation("Ulogovan korisnik: {DisplayName}", _currentUserService.DisplayName);
+
+                // ====================================================================
+                // PRELOAD DOCUMENT MAPPINGS: Pre-warm cache for docDesc values from UI
+                // ====================================================================
+                if (_migrationOptions.MigrationByDocument && _documentSearch != null)
+                {
+                    var docDescriptions = _documentSearch.GetCurrentDocDescriptions();
+                    if (docDescriptions != null && docDescriptions.Any())
+                    {
+                        _logger.LogInformation("Preloading DocumentMappings for {Count} docDesc values...", docDescriptions.Count());
+                        _uiLogger.LogInformation("Učitavanje mapiranja za {Count} opisa dokumenata...", docDescriptions.Count());
+                        sw.Restart();
+
+                        await using (var preloadScope = _scopeFactory.CreateAsyncScope())
+                        {
+                            var uow = preloadScope.ServiceProvider.GetRequiredService<IUnitOfWork>();
+                            var mappingService = preloadScope.ServiceProvider.GetRequiredService<IDocumentMappingService>();
+
+                            await uow.BeginAsync(ct: ct).ConfigureAwait(false);
+                            try
+                            {
+                                var preloadedCount = 0;
+                                foreach (var docDesc in docDescriptions)
+                                {
+                                    if (!string.IsNullOrWhiteSpace(docDesc))
+                                    {
+                                        var mapping = await mappingService.FindByOriginalNameAsync(docDesc, ct).ConfigureAwait(false);
+                                        if (mapping != null)
+                                        {
+                                            preloadedCount++;
+                                            _logger.LogDebug("Preloaded mapping for docDesc: '{DocDesc}' -> '{MigratedCode}'",
+                                                docDesc, mapping.SifraDokumentaMigracija);
+                                        }
+                                        else
+                                        {
+                                            _logger.LogWarning("No mapping found for docDesc: '{DocDesc}'", docDesc);
+                                        }
+                                    }
+                                }
+                                await uow.CommitAsync(ct: ct).ConfigureAwait(false);
+
+                                _logger.LogInformation(
+                                    "DocumentMappings preloaded: {Count}/{Total} mappings cached in {Time}",
+                                    preloadedCount, docDescriptions.Count(), sw.Elapsed);
+                                _uiLogger.LogInformation("Učitano {Count} mapiranja dokumenata", preloadedCount);
+                            }
+                            catch (Exception ex)
+                            {
+                                await uow.RollbackAsync(ct: ct).ConfigureAwait(false);
+                                _logger.LogWarning(ex, "Failed to preload DocumentMappings - continuing with lazy loading");
+                                _uiLogger.LogWarning("Preload mapiranja nije uspeo - nastavlja se sa lazy loading");
+                                // Don't fail migration - mappings will be loaded on-demand
+                            }
+                        }
+                    }
+                }
 
                 // Determine migration mode
                 if (_migrationOptions.MigrationByDocument)

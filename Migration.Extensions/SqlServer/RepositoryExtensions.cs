@@ -191,7 +191,8 @@ namespace Migration.Extensions.SqlServer
 
         /// <summary>
         /// Deletes all incomplete documents from DocStaging table.
-        /// Incomplete = Status is NOT 'DONE' (includes READY, PREPARATION, PREPARED, IN_PROGRESS, ERROR, NULL).
+        /// Incomplete = Status is NOT 'DONE' and NOT 'ERROR' (includes READY, PREPARATION, PREPARED, IN_PROGRESS, NULL).
+        /// ERROR documents are preserved because they may have been physically moved but failed on property update.
         /// Use this before starting migration to ensure clean state.
         /// </summary>
         public static async Task<int> DeleteIncompleteDocumentsAsync(
@@ -200,9 +201,10 @@ namespace Migration.Extensions.SqlServer
             IDbTransaction tran,
             CancellationToken ct = default)
         {
+            // NE brišemo ERROR dokumente jer mogu biti fizički premešteni ali sa neuspešnim update-om propertija
             var sql = @"
                 DELETE FROM DocStaging
-                WHERE Status != 'DONE'
+                WHERE (Status != 'DONE' AND Status != 'ERROR')
                    OR Status IS NULL";
 
             var cmd = new CommandDefinition(sql, transaction: tran, cancellationToken: ct);
@@ -231,6 +233,7 @@ namespace Migration.Extensions.SqlServer
 
         /// <summary>
         /// Gets count of incomplete documents in DocStaging.
+        /// Excludes ERROR documents (same logic as DeleteIncompleteDocumentsAsync).
         /// Useful for logging before deletion.
         /// </summary>
         public static async Task<long> CountIncompleteDocumentsAsync(
@@ -239,10 +242,11 @@ namespace Migration.Extensions.SqlServer
             IDbTransaction tran,
             CancellationToken ct = default)
         {
+            // Konzistentno sa DeleteIncompleteDocumentsAsync - NE brojimo ERROR dokumente
             var sql = @"
                 SELECT COUNT(*)
                 FROM DocStaging
-                WHERE Status != 'DONE'
+                WHERE (Status != 'DONE' AND Status != 'ERROR')
                    OR Status IS NULL";
 
             var cmd = new CommandDefinition(sql, transaction: tran, cancellationToken: ct);

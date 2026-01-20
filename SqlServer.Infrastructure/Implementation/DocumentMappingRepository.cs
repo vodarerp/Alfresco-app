@@ -19,8 +19,8 @@ namespace SqlServer.Infrastructure.Implementation
     public class DocumentMappingRepository : SqlServerRepository<DocumentMapping, int>, IDocumentMappingRepository
     {
         private readonly IMemoryCache _cache;
-        private static readonly TimeSpan DocumentCacheDuration = TimeSpan.FromMinutes(30); // Keširanje DocumentMapping zapisa
-        private static readonly TimeSpan CategoryCacheDuration = TimeSpan.FromHours(2); // Duže keširanje za CategoryMapping (retko se menja)
+        private static readonly TimeSpan DocumentCacheDuration = TimeSpan.FromHours(24); // Keširanje DocumentMapping zapisa
+        private static readonly TimeSpan CategoryCacheDuration = TimeSpan.FromHours(24); // Duže keširanje za CategoryMapping (retko se menja)
 
         public DocumentMappingRepository(IUnitOfWork uow, IMemoryCache cache) : base(uow)
         {

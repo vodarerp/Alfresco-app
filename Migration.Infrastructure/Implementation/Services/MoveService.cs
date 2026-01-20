@@ -503,32 +503,32 @@ namespace Migration.Infrastructure.Implementation.Services
                 ["DestinationFolderId"] = doc.DestinationFolderId ?? "null"
             });
 
+            // ========================================
+            // VALIDATION: Ensure DestinationFolderId is populated by FolderPreparationService (FAZA 3)
+            // ========================================
+            if (string.IsNullOrWhiteSpace(doc.DestinationFolderId))
+            {
+                _uiLogger.LogError("Missing destination folder for document {DocId}", doc.Id);
+                throw new InvalidOperationException(
+                    $"DestinationFolderId is NULL for document {doc.Id} (NodeId: {doc.NodeId}). " +
+                    $"FolderPreparationService (FAZA 3) must run first and populate this field!");
+            }
+
+            _fileLogger.LogDebug("Using pre-resolved DestinationFolderId: {FolderId} for document {DocId}",
+                doc.DestinationFolderId, doc.Id);
+
+            // ========================================
+            // STEP 1: Move or Copy document to destination folder - Returns Entry object
+            // ========================================
+            var useCopy = _options.Value.MoveService.UseCopy;
+            var operationName = useCopy ? "Copying" : "Moving";
+
+            _fileLogger.LogDebug("{Operation} document {DocId} (NodeId: {NodeId}) to folder {FolderId}",
+                operationName, doc.Id, doc.NodeId, doc.DestinationFolderId);
+
+            Entry? movedEntry;
             try
             {
-                // ========================================
-                // VALIDATION: Ensure DestinationFolderId is populated by FolderPreparationService (FAZA 3)
-                // ========================================
-                if (string.IsNullOrWhiteSpace(doc.DestinationFolderId))
-                {
-                    _uiLogger.LogError("Missing destination folder for document {DocId}", doc.Id);
-                    throw new InvalidOperationException(
-                        $"DestinationFolderId is NULL for document {doc.Id} (NodeId: {doc.NodeId}). " +
-                        $"FolderPreparationService (FAZA 3) must run first and populate this field!");
-                }
-
-                _fileLogger.LogDebug("Using pre-resolved DestinationFolderId: {FolderId} for document {DocId}",
-                    doc.DestinationFolderId, doc.Id);
-
-                // ========================================
-                // STEP 1: Move or Copy document to destination folder - Returns Entry object
-                // ========================================
-                var useCopy = _options.Value.MoveService.UseCopy;
-                var operationName = useCopy ? "Copying" : "Moving";
-
-                _fileLogger.LogDebug("{Operation} document {DocId} (NodeId: {NodeId}) to folder {FolderId}",
-                    operationName, doc.Id, doc.NodeId, doc.DestinationFolderId);
-
-                Entry? movedEntry;
                 if (useCopy)
                 {
                     movedEntry = await _moveExecutor.CopyAsync(doc.NodeId, doc.DestinationFolderId, ct).ConfigureAwait(false);
@@ -548,8 +548,27 @@ namespace Migration.Infrastructure.Implementation.Services
                 _fileLogger.LogInformation(
                     "Document {DocId} successfully {Operation} to {FolderId}. Entry has {PropCount} properties.",
                     doc.Id, useCopy ? "copied" : "moved", doc.DestinationFolderId, movedEntry.Properties?.Count ?? 0);
+            }
+            catch (Exception ex)
+            {
+                // Move/Copy NIJE uspeo - dokument nije premešten, može se retry-ovati
+                _fileLogger.LogError(
+                    "[{Method}] Failed to {Operation} document {DocId} (NodeId: {NodeId}) - {ErrorType}: {Message}",
+                    nameof(MoveSingleDocumentAsync), operationName.ToLower(), doc.Id, doc.NodeId, ex.GetType().Name, ex.Message);
+                _dbLogger.LogError(ex,
+                    "[{Method}] Failed to {Operation} document {DocId} (NodeId: {NodeId})",
+                    nameof(MoveSingleDocumentAsync), operationName.ToLower(), doc.Id, doc.NodeId);
+                _uiLogger.LogError("{Operation} failed for document {DocId}: {Error}", operationName, doc.Id, ex.Message);
+                throw;
+            }
 
-                // ========================================
+            // ========================================
+            // STEP 2+: Update properties - dokument je VEĆ PREMEŠTEN u ovom trenutku!
+            // ========================================
+            try
+            {
+
+                
                 // STEP 2: Get migrated docType and naziv from DocStaging with FALLBACK to DocumentMappingService
                 // ========================================
                 string? migratedDocType = doc.NewDocumentCode;
@@ -562,25 +581,47 @@ namespace Migration.Infrastructure.Implementation.Services
                         "Document {DocId} has missing mapping fields (NewDocumentName='{NewName}', NewDocumentCode='{NewCode}'). Using fallback lookup via IDocumentMappingService.",
                         doc.Id, migratedNaziv ?? "NULL", migratedDocType ?? "NULL");
 
-                    await using var mappingScope = _scopeFactory.CreateAsyncScope();
-                    var mappingService = mappingScope.ServiceProvider.GetRequiredService<IDocumentMappingService>();
-
-                    // Try to get migrated name from DocDescription
-                    if (string.IsNullOrWhiteSpace(migratedNaziv) && !string.IsNullOrWhiteSpace(doc.DocDescription))
+                    try
                     {
-                        migratedNaziv = await mappingService.GetMigratedNameAsync(doc.DocDescription, ct).ConfigureAwait(false);
-                        _fileLogger.LogInformation(
-                            "Fallback: Retrieved migratedNaziv='{Naziv}' for document {DocId} from DocDescription='{DocDesc}'",
-                            migratedNaziv, doc.Id, doc.DocDescription);
+                        await using var mappingScope = _scopeFactory.CreateAsyncScope();
+                        var uow = mappingScope.ServiceProvider.GetRequiredService<IUnitOfWork>();
+                        var mappingService = mappingScope.ServiceProvider.GetRequiredService<IDocumentMappingService>();
+
+                        await uow.BeginAsync(ct: ct).ConfigureAwait(false);
+                        try
+                        {
+                            if (!string.IsNullOrWhiteSpace(doc.DocDescription))
+                            {
+                                if (string.IsNullOrWhiteSpace(migratedNaziv) || string.IsNullOrWhiteSpace(migratedDocType))
+                                {
+                                    var x = await mappingService.FindByOriginalNameAsync(doc.DocDescription, ct).ConfigureAwait(false);
+
+                                    if (x != null)
+                                    {
+                                        migratedNaziv = !string.IsNullOrWhiteSpace(migratedNaziv) ? migratedNaziv : x.NazivDokumentaMigracija;
+                                        migratedDocType = !string.IsNullOrWhiteSpace(migratedDocType) ? migratedDocType : x.SifraDokumentaMigracija;
+                                    }
+
+                                }
+                            }
+
+                            await uow.CommitAsync(ct: ct).ConfigureAwait(false);
+                        }
+                        catch
+                        {
+                            await uow.RollbackAsync(ct: ct).ConfigureAwait(false);
+                            throw;
+                        }
                     }
-
-                    // Try to get migrated code from OriginalDocumentCode
-                    if (string.IsNullOrWhiteSpace(migratedDocType) && !string.IsNullOrWhiteSpace(doc.OriginalDocumentCode))
+                    catch (Exception ex)
                     {
-                        migratedDocType = await mappingService.GetMigratedCodeAsync(doc.OriginalDocumentCode, ct).ConfigureAwait(false);
-                        _fileLogger.LogInformation(
-                            "Fallback: Retrieved migratedDocType='{DocType}' for document {DocId} from OriginalDocumentCode='{OrigCode}'",
-                            migratedDocType, doc.Id, doc.OriginalDocumentCode);
+                        _fileLogger.LogWarning(
+                            "Fallback mapping lookup failed for document {DocId}: {ErrorType} - {Message}. Continuing without migrated values.",
+                            doc.Id, ex.GetType().Name, ex.Message);
+                        _dbLogger.LogWarning(ex,
+                            "Fallback mapping lookup failed for document {DocId}. Continuing without migrated values.",
+                            doc.Id);
+                        // Continue migration without the fallback values - don't fail the entire document
                     }
                 }
 
@@ -749,14 +790,21 @@ namespace Migration.Infrastructure.Implementation.Services
             }
             catch (Exception ex)
             {
+                // KRITIČNO: Move JE USPEO, ali Update properties NIJE!
+                // Dokument je fizički premešten u novi folder, ali propertiji nisu ažurirani.
+                // Ovaj dokument NE SME biti obrisan iz DocStaging prilikom sledeće migracije!
                 _fileLogger.LogError(
-                    "[{Method}] Failed to migrate document {DocId} (NodeId: {NodeId}) - {ErrorType}: {Message}",
+                    "[{Method}] Document {DocId} (NodeId: {NodeId}) MOVED SUCCESSFULLY but property update FAILED - {ErrorType}: {Message}",
                     nameof(MoveSingleDocumentAsync), doc.Id, doc.NodeId, ex.GetType().Name, ex.Message);
                 _dbLogger.LogError(ex,
-                    "[{Method}] Failed to migrate document {DocId} (NodeId: {NodeId})",
-                    nameof(MoveSingleDocumentAsync), doc.Id, doc.NodeId);
-                _uiLogger.LogError("Migration failed for document {DocId}: {Error}", doc.Id, ex.Message);
-                throw;
+                    "[{Method}] Document {DocId} MOVED but properties failed",
+                    nameof(MoveSingleDocumentAsync), doc.Id);
+                _uiLogger.LogError("Document {DocId} moved but properties failed: {Error}", doc.Id, ex.Message);
+
+                // Bacamo exception sa specifičnom porukom koja će biti upisana u ErrorMsg
+                throw new InvalidOperationException(
+                    $"MOVED_UPDATE_PROPERTIES_FAILED: Original error: {ex.Message}",
+                    ex);
             }
         }
 
