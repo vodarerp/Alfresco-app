@@ -445,7 +445,7 @@ namespace Alfresco.App
         {
             try
             {
-                const string appVersion = "4.10.2"; // Manual version - update as needed
+                const string appVersion = "4.10.3"; // Manual version - update as needed
 
                 var loggerFactory = AppHost.Services.GetRequiredService<ILoggerFactory>();
                 var logger = loggerFactory.CreateLogger("FileLogger");
