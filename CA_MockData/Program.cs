@@ -38,7 +38,7 @@ public static class Program
             BaseUrl = "http://localhost:8080/",
             Username =  "admin",
             Password = "admin",
-            RootParentId = "c3cb9e11-839d-4f69-8b9e-11839ddf6925",
+            RootParentId = "cc",
             FolderCount = 500,
             DocsPerFolder = 3,
             DegreeOfParallelism = 8,
@@ -53,7 +53,7 @@ public static class Program
             // KDP document generation settings
             // To generate ~5000 KDP documents: Set FolderCount=500 and KdpDocumentsPerFolder=10
             // Or: Set FolderCount=250 and KdpDocumentsPerFolder=20
-            GenerateOnlyKdpDocuments = true,       // Set to true to generate only KDP documents
+            GenerateOnlyKdpDocuments = false,       // Set to true to generate only KDP documents
             KdpDocumentsPerFolder = 15              // Number of KDP documents per folder
         };
 
@@ -80,12 +80,12 @@ public static class Program
         if (cfg.UseNewFolderStructure)
         {
             Console.WriteLine("Creating dosie folder structure...");
-            // Add DE (Deposit) to the list of client types to create folders for
-            var allClientTypes = cfg.ClientTypes.Concat(new[] { "D" }).ToArray();
+            // Only create folders for client types (PI, LE) - deposit documents go into these folders
+            var allClientTypes = cfg.ClientTypes;
 
             foreach (var clientType in allClientTypes)
             {
-                // Use correct naming: DOSSIERS-PI, DOSSIERS-LE, DOSSIERS-DE, DOSSIERS-ACC
+                // Use correct naming: DOSSIERS-PI, DOSSIERS-LE (deposit documents go into these folders)
                 var dosieFolderName = $"DOSSIERS-{clientType}";
                 try
                 {
@@ -207,74 +207,20 @@ public static class Program
                                 Interlocked.Increment(ref createdDocument);
                             }
 
-                            // Create separate Deposit Dossier folders for deposit documents (every 5th folder)
-                            // Skip deposit folder creation when in KDP-only mode
+                            // Add deposit documents to existing PI/LE folders (every 5th folder)
+                            // Skip deposit document creation when in KDP-only mode
                             if (cfg.UseNewFolderStructure && i % 5 == 0 && !cfg.GenerateOnlyKdpDocuments)
                             {
                                 // Generate contract number as YYYYMMDD format
                                 var contractDate = DateTime.UtcNow.AddDays(-new Random(coreId).Next(1, 365));
                                 var contractNumber = contractDate.ToString("yyyyMMdd");
 
-                                // Determine typeOfProduct (5-digit format: 00008 for PI, 00010 for LE)
-                                var typeOfProduct = clientType == "PI" ? "00008" : "00010";
-
-                                // Create D folder with different naming patterns:
-                                // - Variant 0: D{coreId}-{typeOfProduct}-{contractNumber} (full format)
-                                // - Variant 1: D{coreId}-{typeOfProduct} (with ecm:bnkNumberOfContract)
-                                // - Variant 2: D{coreId}-{contractNumber} (with ecm:bnkNumberOfContract)
-                                // - Variant 3: D{coreId} (without ecm:bnkNumberOfContract)
-                                var folderVariant = (i / 5) % 4; // Use i/5 to get deposit folder index, then % 4 for variant
-                                string depositFolderName;
-                                bool includeContractInProperty;
-
-                                if (folderVariant == 0)
-                                {
-                                    // Full format: D{coreId}-{typeOfProduct}-{contractNumber}
-                                    depositFolderName = $"D{coreId}-{typeOfProduct}-{contractNumber}";
-                                    includeContractInProperty = true;
-                                }
-                                else if (folderVariant == 1)
-                                {
-                                    // D{coreId}-{typeOfProduct} with contract in property only
-                                    depositFolderName = $"D{coreId}-{typeOfProduct}";
-                                    includeContractInProperty = true;
-                                }
-                                else if (folderVariant == 2)
-                                {
-                                    // D{coreId}-{contractNumber} with contract in property
-                                    // Use contractNumber in name to avoid duplicates with variant 3
-                                    depositFolderName = $"D{coreId}-{contractNumber}";
-                                    includeContractInProperty = true;
-                                }
-                                else
-                                {
-                                    // Minimal: D{coreId} without contract property
-                                    depositFolderName = $"D{coreId}";
-                                    includeContractInProperty = false;
-                                }
-
-                                var depositParentId = dosieFolders["D"]; // DOSSIERS-D folder
-
                                 try
                                 {
-                                    // Generate deposit-specific properties
-                                    var depositProps = GenerateDepositFolderProperties(coreId, contractNumber, clientType, typeOfProduct, includeContractInProperty);
-
-                                    string depositFolderId;
-                                    try
-                                    {
-                                        depositFolderId = await CreateFolderAsync(http, cfg, depositParentId, depositFolderName, cts.Token, depositProps);
-                                    }
-                                    catch (HttpRequestException ex) when (ex.Message.Contains("400") && depositProps != null)
-                                    {
-                                        Console.WriteLine($"[WARNING] Failed to create deposit folder with properties. Trying without properties...");
-                                        depositFolderId = await CreateFolderAsync(http, cfg, depositParentId, depositFolderName, cts.Token, null);
-                                    }
-
-                                    Console.WriteLine($"[INFO] Created Deposit Dossier: {depositFolderName}");
-
-                                    // Generate deposit documents
+                                    // Generate deposit documents and add them to the existing client folder (PI or LE)
                                     var depositDocs = await GenerateDepositDocumentsAsync(cfg, clientType, coreId, contractNumber, i, cts.Token);
+
+                                    Console.WriteLine($"[INFO] Adding {depositDocs.Count} deposit documents to folder {folderName}");
 
                                     for (var x = 0; x < depositDocs.Count; x++)
                                     {
@@ -283,13 +229,14 @@ public static class Program
 
                                         try
                                         {
-                                            await CreateDocumentAsync(http, cfg, depositFolderId, depositDoc.Name, depositContent, cts.Token, depositDoc.Properties);
+                                            // Insert deposit documents into the existing client folder (folderId)
+                                            await CreateDocumentAsync(http, cfg, folderId, depositDoc.Name, depositContent, cts.Token, depositDoc.Properties);
                                         }
                                         catch (HttpRequestException ex) when (ex.Message.Contains("400") && depositDoc.Properties != null)
                                         {
                                             Console.WriteLine($"[WARNING] Failed to create deposit document with properties. Trying without properties...");
                                             depositContent.Position = 0;
-                                            await CreateDocumentAsync(http, cfg, depositFolderId, depositDoc.Name, depositContent, cts.Token, null);
+                                            await CreateDocumentAsync(http, cfg, folderId, depositDoc.Name, depositContent, cts.Token, null);
                                         }
 
                                         Interlocked.Increment(ref createdDocument);
@@ -297,7 +244,7 @@ public static class Program
                                 }
                                 catch (Exception ex)
                                 {
-                                    Console.WriteLine($"[ERROR] Failed to create deposit dossier {depositFolderName}: {ex.Message}");
+                                    Console.WriteLine($"[ERROR] Failed to create deposit documents in folder {folderName}: {ex.Message}");
                                 }
                             }
 
@@ -768,6 +715,8 @@ public static class Program
         // However, we generate documents with TipDosiea="Dosije paket računa" that will be migrated to ACC
         if (clientType == "PI")
         {
+            //await AddDocumentAsync("PiPonuda");  // WITH account number - should be active
+
             // Test Case 4: Dosije fizičkog lica documents (single versions)
             await AddDocumentAsync("KYC Questionnaire MDOC");
             await AddDocumentAsync("Specimen Card for Authorized Person");
@@ -790,8 +739,8 @@ public static class Program
             await AddDocumentWithVersionsAsync("Account Package", versionCount: 2);
 
             // TC 1 & 2: Add documents with "-migracija" suffix (should become "poništen")
-            await AddDocumentAsync("KYC Questionnaire", addMigrationSuffix: true);
-            await AddDocumentAsync("Personal Notice", addMigrationSuffix: true);
+            await AddDocumentAsync("KYC Questionnaire");
+            await AddDocumentAsync("Personal Notice");
 
             // TC 11: Add pre-existing "poništen" documents
             await AddDocumentAsync("Communication Consent", customStatus: "poništen");
@@ -806,11 +755,12 @@ public static class Program
 
             // TC 16: Add KDP 00824 documents - edge cases with/without account number
             await AddDocumentAsync("Travel Insurance");  // WITH account number - should be active
-            await AddDocumentAsync("PiPonuda");  // WITH account number - should be active
-            await AddDocumentAsync("PiVazeciUgovorOroceniDepozitOstaleValute", includeAccountNumber: false); // WITHOUT account number - should NOT be active
+            await AddDocumentAsync("PiVazeciUgovorOroceniDepozitOstaleValute"); // WITHOUT account number - should NOT be active
         }
         else if (clientType == "LE")
         {
+            //await AddDocumentAsync("PiPonuda");  // WITH account number - should be active
+
             // Test Case 5: Dosije pravnog lica documents (single versions)
             await AddDocumentAsync("GDPR Revoke");
             await AddDocumentAsync("GL Transaction");
@@ -1226,17 +1176,17 @@ public static class Program
 
         // Dossier type (Test Cases 3-5)
         // This comes from TipDosiea field in HeimdallDocumentMapper
-        properties["ecm:docDossierType"] = tipDosijea;
+        //properties["ecm:docDossierType"] = tipDosijea;
 
         // Client segment (CRITICAL for migration) - 50% chance to include this property
         if (random.Next(2) == 1)
         {
-            properties["ecm:docClientType"] = clientType;
+            //properties["ecm:docClientType"] = clientType;
         }
 
         // Source (will be set by migration, but can add for reference)
         // Note: Migration will set this based on destination folder
-        properties["ecm:source"] = "Heimdall";
+        properties["ecm:docSource"] = tipDosijea == "Dosije Depozita" ? "Dut" : "Heimdall";
 
         // Dates
         var creationDate = DateTime.UtcNow.AddDays(-random.Next(1, 365));
@@ -1249,7 +1199,7 @@ public static class Program
             if (includeAccountNumber == true)
             {
                 // Include account number - document should be active after migration
-                properties["ecm:contractNumber"] = $"{coreId}{random.Next(100, 999)}";
+                properties["ecm:contractNumber"] = $"{coreId}_{random.Next(100, 999)}";
             }
             else if (includeAccountNumber == false)
             {
@@ -1261,7 +1211,7 @@ public static class Program
                 // Default behavior: add account number if status is validiran
                 if (docStatus == "validiran")
                 {
-                    properties["ecm:contractNumber"] = $"{coreId}{random.Next(100, 999)}";
+                    properties["ecm:contractNumber"] = $"{coreId}_{random.Next(100, 999)}";
                 }
             }
         }
