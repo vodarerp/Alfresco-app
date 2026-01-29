@@ -18,6 +18,7 @@ namespace Alfresco.App.UserControls
     public partial class KdpProcessingUC : UserControl, INotifyPropertyChanged
     {
         private readonly IKdpDocumentProcessingService _kdpService;
+        private readonly IKdpDocumentUpdateService? _updateService;
         private CancellationTokenSource? _cts;
         private CancellationTokenSource? _searchCts;
 
@@ -48,6 +49,8 @@ namespace Alfresco.App.UserControls
 
             _kdpService = App.AppHost.Services.GetService(typeof(IKdpDocumentProcessingService)) as IKdpDocumentProcessingService
                 ?? throw new InvalidOperationException("IKdpDocumentProcessingService nije registrovan u DI kontejneru");
+
+            _updateService = App.AppHost.Services.GetService(typeof(IKdpDocumentUpdateService)) as IKdpDocumentUpdateService;
 
             Loaded += KdpProcessingUC_Loaded;
         }
@@ -114,6 +117,105 @@ namespace Alfresco.App.UserControls
                 AppendLog($"GRESKA: {ex.Message}");
                 UpdateStatus("Greska");
                 MessageBox.Show($"Greska pri obradi dokumenata: {ex.Message}", "Greska", MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+            finally
+            {
+                EnableButtons();
+                _cts?.Dispose();
+                _cts = null;
+            }
+        }
+
+        private async void BtnUpdateDocuments_Click(object sender, RoutedEventArgs e)
+        {
+            if (_updateService == null)
+            {
+                MessageBox.Show("IKdpDocumentUpdateService nije registrovan u DI kontejneru.",
+                    "Greska", MessageBoxButton.OK, MessageBoxImage.Error);
+                return;
+            }
+
+            var result = MessageBox.Show(
+                "Da li zelite da pokrenete azuriranje dokumenata u Alfrescu?\n\n" +
+                "Ova operacija moze trajati dugo za veliki broj dokumenata.\n" +
+                "Proces se moze prekinuti u bilo kom trenutku.",
+                "Potvrda",
+                MessageBoxButton.YesNo,
+                MessageBoxImage.Question);
+
+            if (result != MessageBoxResult.Yes)
+                return;
+
+            try
+            {
+                DisableButtons();
+                AppendLog("Pocetak azuriranja KDP dokumenata u Alfrescu...");
+                UpdateStatus("Azuriranje...");
+
+                _cts = new CancellationTokenSource();
+
+                // Progress callback - azurira UI sa napretkom
+                void OnProgress(KdpUpdateProgress progress)
+                {
+                    Dispatcher.Invoke(() =>
+                    {
+                        var eta = progress.EstimatedTimeRemaining.HasValue
+                            ? $", ETA: {progress.EstimatedTimeRemaining.Value:hh\\:mm\\:ss}"
+                            : "";
+
+                        UpdateStatus($"Azuriranje: {progress.PercentComplete:F1}% ({progress.ProcessedDocuments}/{progress.TotalDocuments}){eta}");
+
+                        // Loguj svakih 1000 dokumenata
+                        if (progress.ProcessedDocuments % 1000 == 0 && progress.ProcessedDocuments > 0)
+                        {
+                            AppendLog($"Progress: {progress.ProcessedDocuments}/{progress.TotalDocuments} " +
+                                      $"(Uspesno: {progress.SuccessfulUpdates}, Neuspesno: {progress.FailedUpdates}, " +
+                                      $"Brzina: {progress.DocumentsPerSecond:F1} dok/sec)");
+                        }
+                    });
+                }
+
+                var updateResult = await _updateService.UpdateDocumentsAsync(
+                    batchSize: 500,
+                    maxDegreeOfParallelism: 5,
+                    progressCallback: OnProgress,
+                    ct: _cts.Token);
+
+                // Prikazi rezultate
+                AppendLog($"Azuriranje zavrseno:");
+                AppendLog($"  - Uspesno azurirano: {updateResult.TotalSuccessful}");
+                AppendLog($"  - Neuspesno: {updateResult.TotalFailed}");
+                AppendLog($"  - Trajanje: {updateResult.Duration:hh\\:mm\\:ss}");
+
+                if (updateResult.WasCancelled)
+                {
+                    AppendLog("  - Proces je bio prekinut");
+                    UpdateStatus("Azuriranje prekinuto");
+                }
+                else if (!string.IsNullOrEmpty(updateResult.ErrorMessage))
+                {
+                    AppendLog($"  - Greska: {updateResult.ErrorMessage}");
+                    UpdateStatus("Azuriranje zavrseno sa greskama");
+                }
+                else
+                {
+                    UpdateStatus("Azuriranje zavrseno");
+                }
+
+                await RefreshStatisticsAsync();
+                await LoadDataAsync();
+            }
+            catch (OperationCanceledException)
+            {
+                AppendLog("Azuriranje je otkazano od strane korisnika.");
+                UpdateStatus("Otkazano");
+            }
+            catch (Exception ex)
+            {
+                AppendLog($"GRESKA: {ex.Message}");
+                UpdateStatus("Greska");
+                MessageBox.Show($"Greska pri azuriranju dokumenata: {ex.Message}",
+                    "Greska", MessageBoxButton.OK, MessageBoxImage.Error);
             }
             finally
             {
@@ -432,6 +534,7 @@ namespace Alfresco.App.UserControls
             {
                 BtnLoadDocuments.IsEnabled = false;
                 BtnRunProcess.IsEnabled = false;
+                BtnUpdateDocuments.IsEnabled = false;
                 BtnRefreshStats.IsEnabled = false;
                 BtnClearStaging.IsEnabled = false;
                 BtnRefreshData.IsEnabled = false;
@@ -444,6 +547,7 @@ namespace Alfresco.App.UserControls
             {
                 BtnLoadDocuments.IsEnabled = true;
                 BtnRunProcess.IsEnabled = true;
+                BtnUpdateDocuments.IsEnabled = true;
                 BtnRefreshStats.IsEnabled = true;
                 BtnClearStaging.IsEnabled = true;
                 BtnRefreshData.IsEnabled = true;

@@ -42,5 +42,31 @@ namespace SqlServer.Abstraction.Interfaces
             int skip = 0,
             int take = 25,
             CancellationToken ct = default);
+
+        /// <summary>
+        /// Vraća batch neažuriranih dokumenata za procesiranje
+        /// </summary>
+        /// <param name="batchSize">Veličina batcha</param>
+        /// <param name="ct">Cancellation token</param>
+        /// <returns>Lista neažuriranih dokumenata</returns>
+        Task<IReadOnlyList<KdpExportResult>> GetUnupdatedBatchAsync(int batchSize, CancellationToken ct = default);
+
+        /// <summary>
+        /// Označava batch dokumenata kao ažurirane
+        /// </summary>
+        /// <param name="documentIds">Lista ID-jeva dokumenata</param>
+        /// <param name="updateMessages">Dictionary sa ID-jem i porukom za svaki dokument</param>
+        /// <param name="ct">Cancellation token</param>
+        Task MarkBatchAsUpdatedAsync(IEnumerable<long> documentIds, Dictionary<long, string>? updateMessages = null, CancellationToken ct = default);
+
+        /// <summary>
+        /// Vraća broj neažuriranih dokumenata
+        /// </summary>
+        Task<long> CountUnupdatedAsync(CancellationToken ct = default);
+
+        /// <summary>
+        /// Ažurira pojedinačni dokument sa rezultatom update-a
+        /// </summary>
+        Task UpdateDocumentStatusAsync(long id, bool isUpdated, string? message, CancellationToken ct = default);
     }
 }

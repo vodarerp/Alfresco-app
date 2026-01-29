@@ -144,5 +144,92 @@ namespace SqlServer.Infrastructure.Implementation
 
             return (results.AsList(), totalCount);
         }
+
+        /// <summary>
+        /// Vraća batch neažuriranih dokumenata za procesiranje
+        /// </summary>
+        public async Task<IReadOnlyList<KdpExportResult>> GetUnupdatedBatchAsync(int batchSize, CancellationToken ct = default)
+        {
+            var sql = @"SELECT TOP (@BatchSize) *
+                        FROM KdpExportResult
+                        WHERE IsUpdated = 0
+                        ORDER BY Id";
+
+            var cmd = new CommandDefinition(sql, new { BatchSize = batchSize }, transaction: Tx, cancellationToken: ct);
+            var results = await Conn.QueryAsync<KdpExportResult>(cmd).ConfigureAwait(false);
+
+            return results.AsList();
+        }
+
+        /// <summary>
+        /// Označava batch dokumenata kao ažurirane
+        /// </summary>
+        public async Task MarkBatchAsUpdatedAsync(IEnumerable<long> documentIds, Dictionary<long, string>? updateMessages = null, CancellationToken ct = default)
+        {
+            var idList = documentIds.ToList();
+            if (!idList.Any())
+                return;
+
+            // Ako imamo poruke za svaki dokument, ažuriramo pojedinačno
+            if (updateMessages != null && updateMessages.Count > 0)
+            {
+                foreach (var id in idList)
+                {
+                    var message = updateMessages.TryGetValue(id, out var msg) ? msg : "OK";
+                    var sql = @"UPDATE KdpExportResult
+                                SET IsUpdated = 1,
+                                    UpdatedDate = @UpdatedDate,
+                                    UpdateMessage = @Message
+                                WHERE Id = @Id";
+
+                    var cmd = new CommandDefinition(sql,
+                        new { Id = id, UpdatedDate = DateTime.Now, Message = message },
+                        transaction: Tx, cancellationToken: ct);
+                    await Conn.ExecuteAsync(cmd).ConfigureAwait(false);
+                }
+            }
+            else
+            {
+                // Bulk update bez pojedinačnih poruka
+                var sql = @"UPDATE KdpExportResult
+                            SET IsUpdated = 1,
+                                UpdatedDate = @UpdatedDate,
+                                UpdateMessage = 'OK'
+                            WHERE Id IN @Ids";
+
+                var cmd = new CommandDefinition(sql,
+                    new { Ids = idList, UpdatedDate = DateTime.Now },
+                    transaction: Tx, cancellationToken: ct);
+                await Conn.ExecuteAsync(cmd).ConfigureAwait(false);
+            }
+        }
+
+        /// <summary>
+        /// Vraća broj neažuriranih dokumenata
+        /// </summary>
+        public async Task<long> CountUnupdatedAsync(CancellationToken ct = default)
+        {
+            var sql = "SELECT COUNT(*) FROM KdpExportResult WHERE IsUpdated = 0";
+            var cmd = new CommandDefinition(sql, transaction: Tx, cancellationToken: ct);
+            var count = await Conn.ExecuteScalarAsync<long>(cmd).ConfigureAwait(false);
+            return count;
+        }
+
+        /// <summary>
+        /// Ažurira pojedinačni dokument sa rezultatom update-a
+        /// </summary>
+        public async Task UpdateDocumentStatusAsync(long id, bool isUpdated, string? message, CancellationToken ct = default)
+        {
+            var sql = @"UPDATE KdpExportResult
+                        SET IsUpdated = @IsUpdated,
+                            UpdatedDate = @UpdatedDate,
+                            UpdateMessage = @Message
+                        WHERE Id = @Id";
+
+            var cmd = new CommandDefinition(sql,
+                new { Id = id, IsUpdated = isUpdated, UpdatedDate = DateTime.Now, Message = message },
+                transaction: Tx, cancellationToken: ct);
+            await Conn.ExecuteAsync(cmd).ConfigureAwait(false);
+        }
     }
 }

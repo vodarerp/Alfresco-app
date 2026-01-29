@@ -103,6 +103,13 @@
                             Background="LightGreen"
                             ToolTip="sp_ProcessKdpDocuments"/>
 
+                    <Button x:Name="BtnUpdateDocuments"
+                            Content="3. Azuriraj u Alfrescu"
+                            Click="BtnUpdateDocuments_Click"
+                            Height="32" Margin="3"
+                            Background="LightYellow"
+                            ToolTip="Azurira dokumente u Alfrescu na osnovu Action kolone"/>
+
                     <Button x:Name="BtnRefreshStats"
                             Content="Osvezi Statistiku"
                             Click="BtnRefreshStats_Click"
@@ -210,6 +217,9 @@
                             <DataGridTextColumn Header="Poruka" Binding="{Binding Message}" Width="200"/>
                             <DataGridTextColumn Header="Datum Kreiranja" Binding="{Binding DatumKreiranjaDokumenta, StringFormat=dd.MM.yyyy HH:mm}" Width="120"/>
                             <DataGridTextColumn Header="Export Date" Binding="{Binding ExportDate, StringFormat=dd.MM.yyyy HH:mm}" Width="120"/>
+                            <DataGridCheckBoxColumn Header="Azurirano" Binding="{Binding IsUpdated}" Width="70"/>
+                            <DataGridTextColumn Header="Datum Azur." Binding="{Binding UpdatedDate, StringFormat=dd.MM.yyyy HH:mm}" Width="120"/>
+                            <DataGridTextColumn Header="Update Poruka" Binding="{Binding UpdateMessage}" Width="150"/>
                         </DataGrid.Columns>
                     </DataGrid>
 

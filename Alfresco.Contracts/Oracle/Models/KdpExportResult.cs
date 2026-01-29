@@ -104,5 +104,20 @@ namespace Alfresco.Contracts.Oracle.Models
         /// Novi status dokumenta
         /// </summary>
         public string? NewDocumentStatus { get; set; }
+
+        /// <summary>
+        /// Da li je dokument ažuriran u Alfrescu
+        /// </summary>
+        public bool IsUpdated { get; set; } = false;
+
+        /// <summary>
+        /// Datum ažuriranja dokumenta u Alfrescu
+        /// </summary>
+        public DateTime? UpdatedDate { get; set; }
+
+        /// <summary>
+        /// Poruka o rezultatu ažuriranja (uspeh/greška)
+        /// </summary>
+        public string? UpdateMessage { get; set; }
     }
 }

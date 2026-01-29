@@ -294,6 +294,7 @@ namespace Alfresco.App
                     services.AddSingleton<IDocumentDiscoveryService, DocumentDiscoveryService>();                   
                     services.AddSingleton<IDocumentSearchService, DocumentSearchService>();
                     services.AddSingleton<IKdpDocumentProcessingService, KdpDocumentProcessingService>();
+                    services.AddSingleton<IKdpDocumentUpdateService, KdpDocumentUpdateService>();
 
                     services.AddSingleton<IMoveService, MoveService>();                  
                     services.AddSingleton<IFolderPreparationService, FolderPreparationService>();
