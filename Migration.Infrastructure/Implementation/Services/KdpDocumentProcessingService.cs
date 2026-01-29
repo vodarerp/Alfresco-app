@@ -27,18 +27,18 @@ namespace Migration.Infrastructure.Implementation.Services
         private readonly IAlfrescoReadApi _alfrescoReadApi;
         private readonly IServiceScopeFactory _scopeFactory;
         private readonly IOptions<MigrationOptions> _options;
-        private readonly ILogger<KdpDocumentProcessingService> _logger;
+        private readonly ILogger _logger;
 
         public KdpDocumentProcessingService(
             IAlfrescoReadApi alfrescoReadApi,
             IServiceScopeFactory scopeFactory,
             IOptions<MigrationOptions> options,
-            ILogger<KdpDocumentProcessingService> logger)
+            ILoggerFactory logger)
         {
             _alfrescoReadApi = alfrescoReadApi ?? throw new ArgumentNullException(nameof(alfrescoReadApi));
             _scopeFactory = scopeFactory ?? throw new ArgumentNullException(nameof(scopeFactory));
             _options = options ?? throw new ArgumentNullException(nameof(options));
-            _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+            _logger = logger.CreateLogger("UiLogger");
         }
 
         /// <summary>
@@ -47,7 +47,7 @@ namespace Migration.Infrastructure.Implementation.Services
         /// </summary>
         public async Task<int> LoadKdpDocumentsToStagingAsync(CancellationToken ct = default)
         {
-            _logger.LogInformation("Početak učitavanja KDP dokumenata iz Alfresca (hibridni pristup)...");
+            _logger.LogInformation("Pocetak učitavanja KDP dokumenata iz Alfresca (hibridni pristup)...");
 
             try
             {
@@ -67,9 +67,8 @@ namespace Migration.Infrastructure.Implementation.Services
                     _logger.LogWarning("Nema KDP dokumenata za učitavanje");
                     return 0;
                 }
-                batchSize = 10;
 
-                // 2. Pre-kalkuliši sve skip vrednosti (svaki element je JEDINSTVEN)
+               
                 var skipValues = Enumerable
                     .Range(0, (totalCount + batchSize - 1) / batchSize)
                     .Select(i => i * batchSize)
@@ -77,37 +76,32 @@ namespace Migration.Infrastructure.Implementation.Services
 
                 _logger.LogInformation("Broj batch-eva za obradu: {Count}", skipValues.Count);
 
-                // ═══════════════════════════════════════════════════════════════
-                // KLJUČNE STRUKTURE ZA HIBRIDNI PRISTUP
-                // ═══════════════════════════════════════════════════════════════
-
-                // Thread-safe queue - svi PARALLEL PROCESI ovde DODAJU batch-eve
+               
                 var pendingBatches = new ConcurrentQueue<List<KdpDocumentStaging>>();
 
-                // SEMAFOR - GARANTUJE DA SAMO 1 PROCES RADI UPIS U BAZU
+               
                 var dbWriteLock = new SemaphoreSlim(1, 1);
 
-                // Prag za bulk insert (akumuliraj 5 batch-eva pre inserta)
+               
                 const int batchThreshold = 5;
 
-                // Ukupan broj upisanih dokumenata (thread-safe)
+               
                 var totalInserted = 0;
 
-                // ═══════════════════════════════════════════════════════════════
-                // PARALLEL PROCESSING SA STREAMING INSERT
-                // ═══════════════════════════════════════════════════════════════
+              
+
+                var maxParallelism = kdpOptions.MaxDegreeOfParallelism > 0 ? kdpOptions.MaxDegreeOfParallelism : 3;
+                
 
                 var parallelOptions = new ParallelOptions
                 {
-                    MaxDegreeOfParallelism = 5,  // Max 5 simultanih API poziva ka Alfrescu
+                    MaxDegreeOfParallelism = maxParallelism,
                     CancellationToken = ct
                 };
 
                 await Parallel.ForEachAsync(skipValues, parallelOptions, async (skipCount, token) =>
                 {
-                    // ───────────────────────────────────────────────────────────
-                    // KORAK 1: FETCH (paralelno - do 5 thread-ova istovremeno)
-                    // ───────────────────────────────────────────────────────────
+                   
                     var request = new PostSearchRequest
                     {
                         Query = new QueryRequest { Query = query, Language = "afts" },
@@ -119,7 +113,7 @@ namespace Migration.Infrastructure.Implementation.Services
                         },
                         Sort = new List<SortRequest>
                         {
-                            new() { Field = "sys:node-uuid", Ascending = true }
+                            new() { Field = "cm:created", Ascending = true }
                         }
                     };
 
@@ -128,22 +122,16 @@ namespace Migration.Infrastructure.Implementation.Services
 
                     if (entries.Count == 0) return;
 
-                    // ───────────────────────────────────────────────────────────
-                    // KORAK 2: MAP (paralelno - svaki thread mapira svoj batch)
-                    // ───────────────────────────────────────────────────────────
+                   
                     var stagingDocs = entries.Select(MapToKdpDocumentStaging).ToList();
 
-                    // ───────────────────────────────────────────────────────────
-                    // KORAK 3: ENQUEUE (thread-safe, lock-free)
-                    // ───────────────────────────────────────────────────────────
+                    
                     pendingBatches.Enqueue(stagingDocs);
 
                     _logger.LogDebug("Batch skip={Skip} učitan ({Count} dok.), queue size: {Size}",
                         skipCount, stagingDocs.Count, pendingBatches.Count);
 
-                    // ───────────────────────────────────────────────────────────
-                    // KORAK 4: POKUŠAJ BULK INSERT (samo ako ima dovoljno batch-eva)
-                    // ───────────────────────────────────────────────────────────
+                    
                     if (pendingBatches.Count >= batchThreshold)
                     {
                         // TryWait sa timeout 0 = ne blokiraj, samo proveri dostupnost
@@ -151,9 +139,7 @@ namespace Migration.Infrastructure.Implementation.Services
 
                         if (acquired)
                         {
-                            // ═══════════════════════════════════════════════════
-                            // KRITIČNA SEKCIJA - SAMO 1 THREAD OVDE U ISTO VREME
-                            // ═══════════════════════════════════════════════════
+                            
                             try
                             {
                                 // PRAŽNJENJE QUEUE-a u lokalnu listu
@@ -201,9 +187,7 @@ namespace Migration.Infrastructure.Implementation.Services
                     }
                 });
 
-                // ═══════════════════════════════════════════════════════════════
-                // FINAL FLUSH - upiši preostale batch-eve nakon što su svi upisani
-                // ═══════════════════════════════════════════════════════════════
+                
                 if (!pendingBatches.IsEmpty)
                 {
                     _logger.LogInformation("Final flush - preostalo {Count} batch-eva u queue-u", pendingBatches.Count);
@@ -289,9 +273,7 @@ namespace Migration.Infrastructure.Implementation.Services
             }
         }
 
-        /// <summary>
-        /// Eksportuje rezultate u Excel fajl (placeholder za buduću implementaciju)
-        /// </summary>
+      
         public Task ExportToExcelAsync(string filePath, CancellationToken ct = default)
         {
             // TODO: Implementirati Excel export korišćenjem ClosedXML ili EPPlus
@@ -300,9 +282,7 @@ namespace Migration.Infrastructure.Implementation.Services
             throw new NotImplementedException("Excel export će biti implementiran kasnije");
         }
 
-        /// <summary>
-        /// Briše staging tabelu
-        /// </summary>
+       
         public async Task ClearStagingAsync(CancellationToken ct = default)
         {
             _logger.LogInformation("Čišćenje staging tabele...");
@@ -326,9 +306,7 @@ namespace Migration.Infrastructure.Implementation.Services
             }
         }
 
-        /// <summary>
-        /// Vraća statistiku obrade
-        /// </summary>
+        
         public async Task<KdpProcessingStatistics> GetStatisticsAsync(CancellationToken ct = default)
         {
             _logger.LogInformation("Učitavanje statistike...");
@@ -369,17 +347,11 @@ namespace Migration.Infrastructure.Implementation.Services
             }
         }
 
-        // ============================================
-        // PRIVATE HELPER METHODS
-        // ============================================
-
-        /// <summary>
-        /// Gradi AFTS query za KDP dokumente na osnovu konfiguracije
-        /// </summary>
+        
         private string BuildKdpQuery()
         {
             var kdpOptions = _options.Value.KdpProcessing;
-            var docTypes = kdpOptions.DocTypes ?? new List<string> { "00824", "00099" };
+            var docTypes = kdpOptions.DocTypes;// ?? new List<string> { "00824", "00099" };
 
             // Build AFTS query for KDP documents
             var docTypeConditions = string.Join(" OR ", docTypes.Select(t => $"=ecm\\:docType:\"{t}\""));
@@ -405,9 +377,7 @@ namespace Migration.Infrastructure.Implementation.Services
             return query;
         }
 
-        /// <summary>
-        /// Dobija ukupan broj dokumenata koji odgovaraju query-ju (jedan API poziv)
-        /// </summary>
+       
         private async Task<int> GetTotalDocumentCountAsync(string query, CancellationToken ct)
         {
             var request = new PostSearchRequest
@@ -420,9 +390,7 @@ namespace Migration.Infrastructure.Implementation.Services
             return response.List.Pagination.TotalItems;
         }
 
-        /// <summary>
-        /// Mapira Alfresco Entry objekat u KdpDocumentStaging entitet
-        /// </summary>
+       
         private KdpDocumentStaging MapToKdpDocumentStaging(Entry entry)
         {
             var documentPath = entry.Path?.Name;
@@ -456,9 +424,7 @@ namespace Migration.Infrastructure.Implementation.Services
             };
         }
 
-        /// <summary>
-        /// Ekstrahuje vrednost property-ja iz Entry objekta
-        /// </summary>
+       
         private string? GetPropertyValue(Entry entry, string propertyName)
         {
             if (entry.Properties == null)
@@ -472,9 +438,7 @@ namespace Migration.Infrastructure.Implementation.Services
             return null;
         }
 
-        /// <summary>
-        /// Ekstrahuje DateTime vrednost property-ja iz Entry objekta
-        /// </summary>
+      
         private DateTime? GetDateTimePropertyValue(Entry entry, string propertyName)
         {
             if (entry.Properties == null)
@@ -492,10 +456,7 @@ namespace Migration.Infrastructure.Implementation.Services
             return null;
         }
 
-        /// <summary>
-        /// Ekstrahuje ACC folder iz putanje
-        /// Primer: /Company Home/Sites/bank/documentLibrary/ACC-123456/DOSSIERS-FL/... -> ACC-123456
-        /// </summary>
+       
         private string? ExtractAccFolderFromPath(string? path)
         {
             if (string.IsNullOrEmpty(path))
@@ -505,10 +466,7 @@ namespace Migration.Infrastructure.Implementation.Services
             return match.Success ? match.Value : null;
         }
 
-        /// <summary>
-        /// Ekstrahuje Core ID iz ACC folder name
-        /// Primer: ACC-123456 -> 123456
-        /// </summary>
+       
         private string? ExtractCoreId(string? accFolderName)
         {
             if (string.IsNullOrEmpty(accFolderName))
@@ -517,9 +475,7 @@ namespace Migration.Infrastructure.Implementation.Services
             return accFolderName.Replace("ACC-", "");
         }
 
-        /// <summary>
-        /// Ekstrahuje naziv parent foldera iz putanje
-        /// </summary>
+       
         private string? ExtractParentFolderName(string? path)
         {
             if (string.IsNullOrEmpty(path))

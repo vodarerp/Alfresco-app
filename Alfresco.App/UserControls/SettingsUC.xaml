@@ -162,6 +162,28 @@
                     </Grid>
                 </GroupBox>
 
+                <!-- KDP Processing Configuration -->
+                <GroupBox Header="KDP Processing Configuration" Margin="0,0,0,15" Padding="10">
+                    <Grid>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                        </Grid.RowDefinitions>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="200"/>
+                            <ColumnDefinition Width="*"/>
+                        </Grid.ColumnDefinitions>
+
+                        <TextBlock Grid.Row="0" Grid.Column="0" Text="Ancestor Folder ID:" VerticalAlignment="Center" Margin="0,5"/>
+                        <TextBox Grid.Row="0" Grid.Column="1" Name="KdpAncestorFolderIdTextBox" Margin="5" Padding="5"
+                                 ToolTip="Alfresco ancestor folder ID za KDP dokumente (UUID format)"
+                                 Tag="Enter Alfresco ancestor folder UUID"/>
+
+                        <TextBlock Grid.Row="1" Grid.Column="0" Text="Max Degree of Parallelism:" VerticalAlignment="Center" Margin="0,5"/>
+                        <TextBox Grid.Row="1" Grid.Column="1" Name="KdpMaxDegreeOfParallelismTextBox" Margin="5" Padding="5"
+                                 ToolTip="Maksimalan broj paralelnih API poziva (preporučeno: 5)"/>
+                    </Grid>
+                </GroupBox>
 
             </StackPanel>
         </ScrollViewer>

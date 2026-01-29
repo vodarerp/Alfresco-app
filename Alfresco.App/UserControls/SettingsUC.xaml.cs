@@ -71,6 +71,7 @@ namespace Alfresco.App.UserControls
             // Set up placeholder behavior for textboxes with Tag property
             SetupPlaceholderForTextBox(RootFolderIdTextBox);
             SetupPlaceholderForTextBox(FolderTypesTextBox);
+            SetupPlaceholderForTextBox(KdpAncestorFolderIdTextBox);
         }
 
         private void SetupPlaceholderForTextBox(TextBox textBox)
@@ -219,6 +220,18 @@ namespace Alfresco.App.UserControls
                 // Load UseCopy from MoveService section
                 var useCopy = configuration.GetSection("Migration:MoveService:UseCopy").Value;
                 UseCopyCheckBox.IsChecked = useCopy?.ToLower() == "true";
+
+                // Load KDP Processing settings
+                var kdpAncestorFolderId = configuration.GetSection("Migration:KdpProcessing:AncestorFolderId").Value ?? "";
+                if (!string.IsNullOrEmpty(kdpAncestorFolderId))
+                {
+                    KdpAncestorFolderIdTextBox.Text = kdpAncestorFolderId;
+                    KdpAncestorFolderIdTextBox.Foreground = System.Windows.Media.Brushes.Black;
+                    KdpAncestorFolderIdTextBox.FontStyle = FontStyles.Normal;
+                }
+
+                var kdpMaxDegreeOfParallelism = configuration.GetSection("Migration:KdpProcessing:MaxDegreeOfParallelism").Value ?? "5";
+                KdpMaxDegreeOfParallelismTextBox.Text = kdpMaxDegreeOfParallelism;
 
                 StatusTextBlock.Text = "Configuration loaded successfully.";
                 StatusTextBlock.Foreground = System.Windows.Media.Brushes.Green;
@@ -587,7 +600,26 @@ namespace Alfresco.App.UserControls
                 }
             }
 
+            // Update KDP Processing settings
+            var kdpProcessing = migration["KdpProcessing"] as Newtonsoft.Json.Linq.JObject;
+            if (kdpProcessing == null)
+            {
+                kdpProcessing = new Newtonsoft.Json.Linq.JObject();
+                migration["KdpProcessing"] = kdpProcessing;
+            }
 
+            // Save AncestorFolderId (skip if it's the placeholder text)
+            var kdpAncestorFolderId = KdpAncestorFolderIdTextBox.Text;
+            if (kdpAncestorFolderId != KdpAncestorFolderIdTextBox.Tag?.ToString() && !string.IsNullOrWhiteSpace(kdpAncestorFolderId))
+            {
+                kdpProcessing["AncestorFolderId"] = kdpAncestorFolderId;
+            }
+
+            // Save MaxDegreeOfParallelism
+            if (int.TryParse(KdpMaxDegreeOfParallelismTextBox.Text, out int kdpMaxParallelism))
+            {
+                kdpProcessing["MaxDegreeOfParallelism"] = kdpMaxParallelism;
+            }
 
                 //if (isMigrationByDocument?.ToLower() == "true")
                 //{
