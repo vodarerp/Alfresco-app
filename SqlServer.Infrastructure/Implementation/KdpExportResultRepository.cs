@@ -152,7 +152,7 @@ namespace SqlServer.Infrastructure.Implementation
         {
             var sql = @"SELECT TOP (@BatchSize) *
                         FROM KdpExportResult
-                        WHERE IsUpdated = 0
+                        WHERE isnull(IsUpdated,0) = 0
                         ORDER BY Id";
 
             var cmd = new CommandDefinition(sql, new { BatchSize = batchSize }, transaction: Tx, cancellationToken: ct);
@@ -209,7 +209,7 @@ namespace SqlServer.Infrastructure.Implementation
         /// </summary>
         public async Task<long> CountUnupdatedAsync(CancellationToken ct = default)
         {
-            var sql = "SELECT COUNT(*) FROM KdpExportResult WHERE IsUpdated = 0";
+            var sql = "SELECT COUNT(*) FROM KdpExportResult WHERE isnull(IsUpdated,0) = 0";
             var cmd = new CommandDefinition(sql, transaction: Tx, cancellationToken: ct);
             var count = await Conn.ExecuteScalarAsync<long>(cmd).ConfigureAwait(false);
             return count;
