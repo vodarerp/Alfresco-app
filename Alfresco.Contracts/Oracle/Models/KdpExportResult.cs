@@ -79,5 +79,30 @@ namespace Alfresco.Contracts.Oracle.Models
         /// Datum aktivacije dokumenta
         /// </summary>
         public DateTime? ActivationDate { get; set; }
+
+        /// <summary>
+        /// Akcija izvršena nad dokumentom
+        /// </summary>
+        public int? Action { get; set; }
+
+        /// <summary>
+        /// Izuzetak - da li je dokument izuzetak
+        /// </summary>
+        public int? Izuzetak { get; set; }
+
+        /// <summary>
+        /// Poruka o rezultatu obrade
+        /// </summary>
+        public string? Message { get; set; }
+
+        /// <summary>
+        /// Stari status dokumenta
+        /// </summary>
+        public string? OldDocumentStatus { get; set; }
+
+        /// <summary>
+        /// Novi status dokumenta
+        /// </summary>
+        public string? NewDocumentStatus { get; set; }
     }
 }

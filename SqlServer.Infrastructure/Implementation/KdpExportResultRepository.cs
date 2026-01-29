@@ -81,5 +81,68 @@ namespace SqlServer.Infrastructure.Implementation
             var cmd = new CommandDefinition(sql, transaction: Tx, cancellationToken: ct);
             await Conn.ExecuteAsync(cmd).ConfigureAwait(false);
         }
+
+        /// <summary>
+        /// Pretrazuje rezultate po filterima sa paginacijom
+        /// </summary>
+        public async Task<(IReadOnlyList<KdpExportResult> Results, int TotalCount)> SearchAsync(
+            string? coreId = null,
+            string? oldStatus = null,
+            string? newStatus = null,
+            int? action = null,
+            int skip = 0,
+            int take = 25,
+            CancellationToken ct = default)
+        {
+            var conditions = new List<string>();
+            var parameters = new DynamicParameters();
+
+            if (!string.IsNullOrWhiteSpace(coreId))
+            {
+                conditions.Add("KlijentskiBroj LIKE @CoreId");
+                parameters.Add("@CoreId", $"%{coreId}%");
+            }
+
+            if (!string.IsNullOrWhiteSpace(oldStatus))
+            {
+                conditions.Add("OldDocumentStatus LIKE @OldStatus");
+                parameters.Add("@OldStatus", $"%{oldStatus}%");
+            }
+
+            if (!string.IsNullOrWhiteSpace(newStatus))
+            {
+                conditions.Add("NewDocumentStatus LIKE @NewStatus");
+                parameters.Add("@NewStatus", $"%{newStatus}%");
+            }
+
+            if (action.HasValue)
+            {
+                conditions.Add("Action = @Action");
+                parameters.Add("@Action", action.Value);
+            }
+
+            var whereClause = conditions.Count > 0
+                ? "WHERE " + string.Join(" AND ", conditions)
+                : string.Empty;
+
+            // Count query
+            var countSql = $"SELECT COUNT(*) FROM KdpExportResult {whereClause}";
+            var countCmd = new CommandDefinition(countSql, parameters, transaction: Tx, cancellationToken: ct);
+            var totalCount = await Conn.ExecuteScalarAsync<int>(countCmd).ConfigureAwait(false);
+
+            // Data query with pagination
+            var dataSql = $@"SELECT * FROM KdpExportResult
+                            {whereClause}
+                            ORDER BY Id DESC
+                            OFFSET @Skip ROWS FETCH NEXT @Take ROWS ONLY";
+
+            parameters.Add("@Skip", skip);
+            parameters.Add("@Take", take);
+
+            var dataCmd = new CommandDefinition(dataSql, parameters, transaction: Tx, cancellationToken: ct);
+            var results = await Conn.QueryAsync<KdpExportResult>(dataCmd).ConfigureAwait(false);
+
+            return (results.AsList(), totalCount);
+        }
     }
 }

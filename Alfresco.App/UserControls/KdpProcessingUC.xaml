@@ -3,131 +3,277 @@
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
              xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             xmlns:converters="clr-namespace:Alfresco.App.Converters"
              mc:Ignorable="d"
-             d:DesignHeight="600" d:DesignWidth="900">
+             d:DesignHeight="800" d:DesignWidth="1100">
+
+    <UserControl.Resources>
+        <converters:ActionToTextConverter x:Key="ActionToTextConverter"/>
+    </UserControl.Resources>
+
     <Grid Margin="15">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/>
-            <RowDefinition Height="Auto"/>
-            <RowDefinition Height="*"/>
+            <RowDefinition Height="*" MinHeight="400"/>
         </Grid.RowDefinitions>
 
         <!-- Title Section -->
         <TextBlock Grid.Row="0" Text="KDP Document Processing"
-                   FontSize="20" FontWeight="Bold" Margin="0,0,0,15"/>
+                   FontSize="20" FontWeight="Bold" Margin="0,0,0,10"/>
 
-        <!-- Statistics Section -->
-        <GroupBox Grid.Row="1" Header="Statistika" Margin="0,0,0,10" Padding="10">
-            <Grid>
-                <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="*"/>
-                    <ColumnDefinition Width="*"/>
-                    <ColumnDefinition Width="*"/>
-                </Grid.ColumnDefinitions>
-                <Grid.RowDefinitions>
-                    <RowDefinition Height="Auto"/>
-                    <RowDefinition Height="Auto"/>
-                    <RowDefinition Height="Auto"/>
-                </Grid.RowDefinitions>
+        <!-- Statistics and Actions in 2 columns -->
+        <Grid Grid.Row="1" Margin="0,0,0,10">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="Auto"/>
+            </Grid.ColumnDefinitions>
 
-                <!-- Row 1 -->
-                <StackPanel Grid.Row="0" Grid.Column="0" Margin="5">
-                    <TextBlock Text="Dokumenti u Staging:" FontWeight="SemiBold"/>
-                    <TextBlock x:Name="TxtStagingCount" Text="0" FontSize="18" Foreground="DodgerBlue"/>
-                </StackPanel>
+            <!-- Statistics Section -->
+            <GroupBox Grid.Column="0" Header="Statistika" Margin="0,0,10,0" Padding="10">
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="*"/>
+                    </Grid.ColumnDefinitions>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
+                    </Grid.RowDefinitions>
 
-                <StackPanel Grid.Row="0" Grid.Column="1" Margin="5">
-                    <TextBlock Text="Kandidat Folderi:" FontWeight="SemiBold"/>
-                    <TextBlock x:Name="TxtCandidateFolders" Text="0" FontSize="18" Foreground="Green"/>
-                </StackPanel>
+                    <!-- Row 1 -->
+                    <StackPanel Grid.Row="0" Grid.Column="0" Margin="5">
+                        <TextBlock Text="Dokumenti u Staging:" FontWeight="SemiBold"/>
+                        <TextBlock x:Name="TxtStagingCount" Text="0" FontSize="18" Foreground="DodgerBlue"/>
+                    </StackPanel>
 
-                <StackPanel Grid.Row="0" Grid.Column="2" Margin="5">
-                    <TextBlock Text="Ukupno KDP Dokumenata:" FontWeight="SemiBold"/>
-                    <TextBlock x:Name="TxtTotalDocuments" Text="0" FontSize="18" Foreground="DarkOrange"/>
-                </StackPanel>
+                    <StackPanel Grid.Row="0" Grid.Column="1" Margin="5">
+                        <TextBlock Text="Kandidat Folderi:" FontWeight="SemiBold"/>
+                        <TextBlock x:Name="TxtCandidateFolders" Text="0" FontSize="18" Foreground="Green"/>
+                    </StackPanel>
 
-                <!-- Row 2 -->
-                <StackPanel Grid.Row="1" Grid.Column="0" Margin="5">
-                    <TextBlock Text="Neaktivni (Status=2):" FontWeight="SemiBold"/>
-                    <TextBlock x:Name="TxtInactiveCount" Text="0" FontSize="16" Foreground="Gray"/>
-                </StackPanel>
+                    <StackPanel Grid.Row="0" Grid.Column="2" Margin="5">
+                        <TextBlock Text="Ukupno KDP Dok.:" FontWeight="SemiBold"/>
+                        <TextBlock x:Name="TxtTotalDocuments" Text="0" FontSize="18" Foreground="DarkOrange"/>
+                    </StackPanel>
 
-                <StackPanel Grid.Row="1" Grid.Column="1" Margin="5">
-                    <TextBlock Text="Aktivni (Status=1):" FontWeight="SemiBold"/>
-                    <TextBlock x:Name="TxtActiveCount" Text="0" FontSize="16" Foreground="Gray"/>
-                </StackPanel>
+                    <StackPanel Grid.Row="0" Grid.Column="3" Margin="5">
+                        <TextBlock Text="Status:" FontWeight="SemiBold"/>
+                        <TextBlock x:Name="TxtStatus" Text="Spremno" FontSize="16" Foreground="Black"/>
+                    </StackPanel>
 
-                <StackPanel Grid.Row="1" Grid.Column="2" Margin="5">
-                    <TextBlock Text="Status:" FontWeight="SemiBold"/>
-                    <TextBlock x:Name="TxtStatus" Text="Spremno" FontSize="16" Foreground="Black"/>
-                </StackPanel>
+                    <!-- Row 2 -->
+                    <StackPanel Grid.Row="1" Grid.Column="0" Margin="5">
+                        <TextBlock Text="Neaktivni (Status=2):" FontWeight="SemiBold"/>
+                        <TextBlock x:Name="TxtInactiveCount" Text="0" FontSize="14" Foreground="Gray"/>
+                    </StackPanel>
 
-                <!-- Row 3 - Document types -->
-                <StackPanel Grid.Row="2" Grid.Column="0" Margin="5">
-                    <TextBlock Text="Tip 00824:" FontWeight="SemiBold"/>
-                    <TextBlock x:Name="TxtType00824Count" Text="0" FontSize="14" Foreground="Gray"/>
-                </StackPanel>
+                    <StackPanel Grid.Row="1" Grid.Column="1" Margin="5">
+                        <TextBlock Text="Aktivni (Status=1):" FontWeight="SemiBold"/>
+                        <TextBlock x:Name="TxtActiveCount" Text="0" FontSize="14" Foreground="Gray"/>
+                    </StackPanel>
 
-                <StackPanel Grid.Row="2" Grid.Column="1" Margin="5">
-                    <TextBlock Text="Tip 00099:" FontWeight="SemiBold"/>
-                    <TextBlock x:Name="TxtType00099Count" Text="0" FontSize="14" Foreground="Gray"/>
-                </StackPanel>
-            </Grid>
-        </GroupBox>
+                    <StackPanel Grid.Row="1" Grid.Column="2" Margin="5">
+                        <TextBlock Text="Tip 00824:" FontWeight="SemiBold"/>
+                        <TextBlock x:Name="TxtType00824Count" Text="0" FontSize="14" Foreground="Gray"/>
+                    </StackPanel>
 
-        <!-- Action Buttons Section -->
-        <GroupBox Grid.Row="2" Header="Akcije" Margin="0,0,0,10" Padding="10">
-            <StackPanel>
-                <!-- Process Section -->
-                <WrapPanel Margin="0,0,0,10">
+                    <StackPanel Grid.Row="1" Grid.Column="3" Margin="5">
+                        <TextBlock Text="Tip 00099:" FontWeight="SemiBold"/>
+                        <TextBlock x:Name="TxtType00099Count" Text="0" FontSize="14" Foreground="Gray"/>
+                    </StackPanel>
+                </Grid>
+            </GroupBox>
+
+            <!-- Action Buttons Section -->
+            <GroupBox Grid.Column="1" Header="Akcije" Padding="10" MinWidth="220">
+                <StackPanel>
                     <Button x:Name="BtnLoadDocuments"
-                            Content="1. Učitaj KDP Dokumente"
+                            Content="1. Ucitaj KDP Dokumente"
                             Click="BtnLoadDocuments_Click"
-                            Width="200" Height="35" Margin="5"
+                            Height="32" Margin="3"
                             Background="LightSkyBlue"/>
 
                     <Button x:Name="BtnRunProcess"
-                            Content="2. Pokreni Obradu (sp_ProcessKdpDocuments)"
+                            Content="2. Pokreni Obradu"
                             Click="BtnRunProcess_Click"
-                            Width="280" Height="35" Margin="5"
-                            Background="LightGreen"/>
+                            Height="32" Margin="3"
+                            Background="LightGreen"
+                            ToolTip="sp_ProcessKdpDocuments"/>
 
                     <Button x:Name="BtnRefreshStats"
-                            Content="Osveži Statistiku"
+                            Content="Osvezi Statistiku"
                             Click="BtnRefreshStats_Click"
-                            Width="150" Height="35" Margin="5"/>
-                </WrapPanel>
+                            Height="32" Margin="3"/>
 
-                <!-- Export Section -->
-                <WrapPanel>
                     <Button x:Name="BtnExportExcel"
                             Content="Eksportuj u Excel"
                             Click="BtnExportExcel_Click"
-                            Width="200" Height="35" Margin="5"
+                            Height="32" Margin="3"
                             IsEnabled="False"
-                            ToolTip="Excel export će biti implementiran kasnije"/>
+                            ToolTip="Excel export ce biti implementiran kasnije"/>
 
                     <Button x:Name="BtnClearStaging"
-                            Content="Očisti Staging Tabelu"
+                            Content="Ocisti Staging Tabelu"
                             Click="BtnClearStaging_Click"
-                            Width="180" Height="35" Margin="5"
+                            Height="32" Margin="3"
                             Background="LightCoral"/>
-                </WrapPanel>
-            </StackPanel>
-        </GroupBox>
+                </StackPanel>
+            </GroupBox>
+        </Grid>
 
-        <!-- Log Output Section -->
-        <GroupBox Grid.Row="3" Header="Log Output" Padding="10">
-            <ScrollViewer VerticalScrollBarVisibility="Auto">
-                <TextBox x:Name="TxtLog"
-                         IsReadOnly="True"
-                         TextWrapping="Wrap"
-                         FontFamily="Consolas"
-                         FontSize="11"
-                         BorderThickness="0"
-                         VerticalScrollBarVisibility="Auto"/>
-            </ScrollViewer>
-        </GroupBox>
+        <!-- TabControl for Preview Data and Log Output -->
+        <TabControl Grid.Row="2" Margin="0,5,0,0">
+            <!-- Preview Data Tab -->
+            <TabItem Header="Preview Data">
+                <Grid>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="*"/>
+                        <RowDefinition Height="Auto"/>
+                    </Grid.RowDefinitions>
+
+                    <!-- Search Section -->
+                    <GroupBox Grid.Row="0" Header="Pretraga" Margin="0,5,0,5" Padding="5">
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto"/>
+                                <ColumnDefinition Width="150"/>
+                                <ColumnDefinition Width="Auto"/>
+                                <ColumnDefinition Width="100"/>
+                                <ColumnDefinition Width="Auto"/>
+                                <ColumnDefinition Width="100"/>
+                                <ColumnDefinition Width="Auto"/>
+                                <ColumnDefinition Width="100"/>
+                                <ColumnDefinition Width="Auto"/>
+                                <ColumnDefinition Width="*"/>
+                            </Grid.ColumnDefinitions>
+
+                            <TextBlock Grid.Column="0" Text="CoreId:" VerticalAlignment="Center" Margin="5,0"/>
+                            <TextBox x:Name="TxtSearchCoreId" Grid.Column="1" Height="25" Margin="5,0"/>
+
+                            <TextBlock Grid.Column="2" Text="Stari Status:" VerticalAlignment="Center" Margin="5,0"/>
+                            <TextBox x:Name="TxtSearchOldStatus" Grid.Column="3" Height="25" Margin="5,0"/>
+
+                            <TextBlock Grid.Column="4" Text="Novi Status:" VerticalAlignment="Center" Margin="5,0"/>
+                            <TextBox x:Name="TxtSearchNewStatus" Grid.Column="5" Height="25" Margin="5,0"/>
+
+                            <TextBlock Grid.Column="6" Text="Akcija:" VerticalAlignment="Center" Margin="5,0"/>
+                            <ComboBox x:Name="CmbSearchAction" Grid.Column="7" Height="25" Margin="5,0">
+                                <ComboBoxItem Content="" IsSelected="True"/>
+                                <ComboBoxItem Content="0"/>
+                                <ComboBoxItem Content="1"/>
+                                <ComboBoxItem Content="2"/>
+                            </ComboBox>
+
+                            <Button x:Name="BtnSearch" Grid.Column="8" Content="Pretrazi"
+                                    Width="70" Height="25" Margin="10,0"
+                                    Click="BtnSearch_Click" Background="LightSkyBlue"/>
+
+                            <StackPanel Grid.Column="9" Orientation="Horizontal" HorizontalAlignment="Right">
+                                <Button x:Name="BtnClearSearch" Content="Ocisti"
+                                        Width="70" Height="25" Margin="5,0"
+                                        Click="BtnClearSearch_Click"/>
+
+                                <Button x:Name="BtnRefreshData" Content="Osvezi"
+                                        Width="70" Height="25" Margin="5,0"
+                                        Click="BtnRefreshData_Click"/>
+                            </StackPanel>
+                        </Grid>
+                    </GroupBox>
+
+                    <!-- DataGrid -->
+                    <DataGrid x:Name="DgExportResults" Grid.Row="1"
+                              ItemsSource="{Binding ExportResults}"
+                              AutoGenerateColumns="False"
+                              IsReadOnly="True"
+                              CanUserSortColumns="True"
+                              SelectionMode="Single"
+                              AlternatingRowBackground="AliceBlue"
+                              GridLinesVisibility="Horizontal"
+                              VirtualizingPanel.IsVirtualizing="True"
+                              VirtualizingPanel.VirtualizationMode="Recycling"
+                              EnableRowVirtualization="True"
+                              Margin="0,5">
+                        <DataGrid.Columns>
+                            <DataGridTextColumn Header="ID" Binding="{Binding Id}" Width="60"/>
+                            <DataGridTextColumn Header="CoreId" Binding="{Binding KlijentskiBroj}" Width="100"/>
+                            <DataGridTextColumn Header="ACC Folder" Binding="{Binding AccFolderName}" Width="120"/>
+                            <DataGridTextColumn Header="Dokument" Binding="{Binding DocumentName}" Width="150"/>
+                            <DataGridTextColumn Header="Tip" Binding="{Binding TipDokumenta}" Width="70"/>
+                            <DataGridTextColumn Header="Stari Status" Binding="{Binding OldDocumentStatus}" Width="80"/>
+                            <DataGridTextColumn Header="Novi Status" Binding="{Binding NewDocumentStatus}" Width="80"/>
+                            <DataGridTextColumn Header="Akcija" Binding="{Binding Action, Converter={StaticResource ActionToTextConverter}}" Width="100"/>
+                            <DataGridTextColumn Header="Izuzetak" Binding="{Binding Izuzetak}" Width="70"/>
+                            <DataGridTextColumn Header="Poruka" Binding="{Binding Message}" Width="200"/>
+                            <DataGridTextColumn Header="Datum Kreiranja" Binding="{Binding DatumKreiranjaDokumenta, StringFormat=dd.MM.yyyy HH:mm}" Width="120"/>
+                            <DataGridTextColumn Header="Export Date" Binding="{Binding ExportDate, StringFormat=dd.MM.yyyy HH:mm}" Width="120"/>
+                        </DataGrid.Columns>
+                    </DataGrid>
+
+                    <!-- Pagination Section -->
+                    <Grid Grid.Row="2" Margin="0,5">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto"/>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="Auto"/>
+                        </Grid.ColumnDefinitions>
+
+                        <!-- Records info -->
+                        <StackPanel Grid.Column="0" Orientation="Horizontal" VerticalAlignment="Center">
+                            <TextBlock Text="Ukupno zapisa: " FontWeight="SemiBold"/>
+                            <TextBlock x:Name="TxtTotalRecords" Text="0"/>
+                            <TextBlock Text="  |  Prikazano: " Margin="10,0,0,0"/>
+                            <TextBlock x:Name="TxtDisplayedRecords" Text="0"/>
+                        </StackPanel>
+
+                        <!-- Page size -->
+                        <StackPanel Grid.Column="1" Orientation="Horizontal" HorizontalAlignment="Center" VerticalAlignment="Center">
+                            <TextBlock Text="Zapisa po strani:" VerticalAlignment="Center" Margin="0,0,5,0"/>
+                            <ComboBox x:Name="CmbPageSize" Width="70" Height="25"
+                                      SelectionChanged="CmbPageSize_SelectionChanged">
+                                <ComboBoxItem Content="25" IsSelected="True"/>
+                                <ComboBoxItem Content="50"/>
+                                <ComboBoxItem Content="100"/>
+                                <ComboBoxItem Content="500"/>
+                            </ComboBox>
+                        </StackPanel>
+
+                        <!-- Pagination controls -->
+                        <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
+                            <Button x:Name="BtnFirstPage" Content="|&lt;" Width="30" Height="25" Margin="2"
+                                    Click="BtnFirstPage_Click" ToolTip="Prva strana"/>
+                            <Button x:Name="BtnPrevPage" Content="&lt;" Width="30" Height="25" Margin="2"
+                                    Click="BtnPrevPage_Click" ToolTip="Prethodna strana"/>
+                            <TextBlock VerticalAlignment="Center" Margin="5,0">
+                                <Run Text="Strana "/>
+                                <Run x:Name="TxtCurrentPage" Text="1"/>
+                                <Run Text=" od "/>
+                                <Run x:Name="TxtTotalPages" Text="1"/>
+                            </TextBlock>
+                            <Button x:Name="BtnNextPage" Content="&gt;" Width="30" Height="25" Margin="2"
+                                    Click="BtnNextPage_Click" ToolTip="Sledeca strana"/>
+                            <Button x:Name="BtnLastPage" Content="&gt;|" Width="30" Height="25" Margin="2"
+                                    Click="BtnLastPage_Click" ToolTip="Poslednja strana"/>
+                        </StackPanel>
+                    </Grid>
+                </Grid>
+            </TabItem>
+
+            <!-- Log Output Tab -->
+            <TabItem Header="Log Output">
+                <ScrollViewer VerticalScrollBarVisibility="Auto" Margin="5">
+                    <TextBox x:Name="TxtLog"
+                             IsReadOnly="True"
+                             TextWrapping="Wrap"
+                             FontFamily="Consolas"
+                             FontSize="11"
+                             BorderThickness="0"
+                             VerticalScrollBarVisibility="Auto"/>
+                </ScrollViewer>
+            </TabItem>
+        </TabControl>
     </Grid>
 </UserControl>
