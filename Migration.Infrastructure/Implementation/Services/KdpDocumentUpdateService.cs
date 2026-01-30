@@ -22,7 +22,7 @@ namespace Migration.Infrastructure.Implementation.Services
     {
         private readonly IAlfrescoWriteApi _alfrescoWriteApi;
         private readonly IServiceScopeFactory _scopeFactory;
-        private readonly ILogger<KdpDocumentUpdateService> _logger;
+        private readonly ILogger _logger;
 
         // Progress tracking
         private KdpUpdateProgress _currentProgress = new();
@@ -31,11 +31,11 @@ namespace Migration.Infrastructure.Implementation.Services
         public KdpDocumentUpdateService(
             IAlfrescoWriteApi alfrescoWriteApi,
             IServiceScopeFactory scopeFactory,
-            ILogger<KdpDocumentUpdateService> logger)
+            ILoggerFactory logger)
         {
             _alfrescoWriteApi = alfrescoWriteApi ?? throw new ArgumentNullException(nameof(alfrescoWriteApi));
             _scopeFactory = scopeFactory ?? throw new ArgumentNullException(nameof(scopeFactory));
-            _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+            _logger = logger.CreateLogger("FileLogger");
         }
 
         /// <summary>
@@ -251,6 +251,15 @@ namespace Migration.Infrastructure.Implementation.Services
                 return (false, "NodeId je prazan");
             }
 
+            if (document?.Action != null && document?.Action == 0)
+            {
+                return (true, "Akcija 0. Ne treba update");
+            }
+            if ((document?.Action != null && document?.Action == 1) && (document.Izuzetak != null && document.Izuzetak == 1))
+            {
+                return (true, "Dokument izuzetak. Ne treba update");
+            }
+
             try
             {
                 // Pripremi properties za update na osnovu Action vrednosti
@@ -270,11 +279,11 @@ namespace Migration.Infrastructure.Implementation.Services
 
                 if (success)
                 {
-                    return (true, "OK");
+                    return (true, "OK Updated");
                 }
                 else
                 {
-                    return (false, "Alfresco API vratio false");
+                    return (false, "Alfresco API false");
                 }
             }
             catch (Exception ex)
