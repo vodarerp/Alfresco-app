@@ -421,8 +421,7 @@ namespace Migration.Infrastructure.Implementation.Services
                 ProcessedDate = DateTime.Now,
                 Source = GetPropertyValue(entry, "ecm:docSource"),
                 Properties = entry.Properties == null ? null : JsonSerializer.Serialize(entry.Properties, new JsonSerializerOptions { WriteIndented = false }),
-                MigrationCreationDate = createdDate,
-                
+                MigrationCreationDate = createdDate                
             };
         }
 
