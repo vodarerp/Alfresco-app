@@ -303,13 +303,14 @@ namespace Migration.Infrastructure.Implementation.Services
 
             switch (document.Action)
             {
-                case 1:                   
-                    properties["ecm:docStatus"] = "1";                    
+                case 1:
+                    properties["ecm:docStatus"] = "1";
                     properties["ecm:docType"] = "00099";
+                    properties["ecm:docTypeCode"] = "00099";
                     properties["ecm:docTypeName"] = "KDP za fizička lica";
                     if (!string.IsNullOrWhiteSpace(document.ListaRacuna))
                     {
-                        properties["ecm:bnkAccountNumber"] = document.ListaRacuna;
+                        properties["ecm:docAccountNumbers"] = document.ListaRacuna;
                     }
                     break;
                 case 2:

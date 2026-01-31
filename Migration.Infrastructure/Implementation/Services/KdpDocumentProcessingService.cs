@@ -402,6 +402,7 @@ namespace Migration.Infrastructure.Implementation.Services
                               ?? null;
 
             var sysCreated = entry.CreatedAt.DateTime;
+            var sysModified = entry.ModifiedAt.DateTime;
 
 
             return new KdpDocumentStaging
@@ -413,14 +414,15 @@ namespace Migration.Infrastructure.Implementation.Services
                 ParentFolderName = ExtractParentFolderName(documentPath),
                 DocumentType = GetPropertyValue(entry, "ecm:docType"),
                 DocumentStatus = GetPropertyValue(entry, "ecm:docStatus"),
-                CreatedDate = sysCreated,
-                AccountNumbers = GetPropertyValue(entry, "ecm:bnkAccountNumber"),
+                CreatedDate = sysModified,
+                AccountNumbers = GetPropertyValue(entry, "ecm:docAccountNumbers"),
                 AccFolderName = accFolderName,
                 CoreId = coreId,
                 ProcessedDate = DateTime.Now,
                 Source = GetPropertyValue(entry, "ecm:docSource"),
                 Properties = entry.Properties == null ? null : JsonSerializer.Serialize(entry.Properties, new JsonSerializerOptions { WriteIndented = false }),
-                MigrationCreationDate = createdDate
+                MigrationCreationDate = createdDate,
+                
             };
         }
 
