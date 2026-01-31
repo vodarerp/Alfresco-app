@@ -414,7 +414,7 @@ namespace Migration.Infrastructure.Implementation.Services
                 ParentFolderName = ExtractParentFolderName(documentPath),
                 DocumentType = GetPropertyValue(entry, "ecm:docType"),
                 DocumentStatus = GetPropertyValue(entry, "ecm:docStatus"),
-                CreatedDate = sysModified,
+                CreatedDate = sysCreated,
                 AccountNumbers = GetPropertyValue(entry, "ecm:docAccountNumbers"),
                 AccFolderName = accFolderName,
                 CoreId = coreId,
