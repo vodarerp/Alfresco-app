@@ -1,4 +1,5 @@
 using Alfresco.Contracts.Oracle.Models;
+using Alfresco.Contracts.SqlServer;
 using Dapper;
 using SqlServer.Abstraction.Interfaces;
 using System;
@@ -15,7 +16,7 @@ namespace SqlServer.Infrastructure.Implementation
     /// </summary>
     public class KdpExportResultRepository : SqlServerRepository<KdpExportResult, long>, IKdpExportResultRepository
     {
-        public KdpExportResultRepository(IUnitOfWork uow) : base(uow)
+        public KdpExportResultRepository(IUnitOfWork uow, SqlServerOptions sqlServerOptions) : base(uow, sqlServerOptions)
         {
         }
 
@@ -29,7 +30,7 @@ namespace SqlServer.Infrastructure.Implementation
                 commandText: "sp_ProcessKdpDocuments",
                 commandType: CommandType.StoredProcedure,
                 transaction: Tx,
-                commandTimeout: 300, // 5 minuta
+                commandTimeout: _commandTimeoutSeconds,
                 cancellationToken: ct
             );
 
@@ -54,7 +55,7 @@ namespace SqlServer.Infrastructure.Implementation
             var sql = @"SELECT * FROM KdpExportResult
                         ORDER BY AccFolderName, DatumKreiranjaDokumenta DESC";
 
-            var cmd = new CommandDefinition(sql, transaction: Tx, cancellationToken: ct);
+            var cmd = new CommandDefinition(sql, transaction: Tx, commandTimeout: _commandTimeoutSeconds, cancellationToken: ct);
 
             var results = await Conn.QueryAsync<KdpExportResult>(cmd).ConfigureAwait(false);
 
@@ -67,7 +68,7 @@ namespace SqlServer.Infrastructure.Implementation
         public async Task<long> CountAsync(CancellationToken ct = default)
         {
             var sql = "SELECT COUNT(*) FROM KdpExportResult";
-            var cmd = new CommandDefinition(sql, transaction: Tx, cancellationToken: ct);
+            var cmd = new CommandDefinition(sql, transaction: Tx, commandTimeout: _commandTimeoutSeconds, cancellationToken: ct);
             var count = await Conn.ExecuteScalarAsync<long>(cmd).ConfigureAwait(false);
             return count;
         }
@@ -78,7 +79,7 @@ namespace SqlServer.Infrastructure.Implementation
         public async Task ClearResultsAsync(CancellationToken ct = default)
         {
             var sql = "TRUNCATE TABLE KdpExportResult";
-            var cmd = new CommandDefinition(sql, transaction: Tx, cancellationToken: ct);
+            var cmd = new CommandDefinition(sql, transaction: Tx, commandTimeout: _commandTimeoutSeconds, cancellationToken: ct);
             await Conn.ExecuteAsync(cmd).ConfigureAwait(false);
         }
 
@@ -127,7 +128,7 @@ namespace SqlServer.Infrastructure.Implementation
 
             // Count query
             var countSql = $"SELECT COUNT(*) FROM KdpExportResult {whereClause}";
-            var countCmd = new CommandDefinition(countSql, parameters, transaction: Tx, cancellationToken: ct);
+            var countCmd = new CommandDefinition(countSql, parameters, transaction: Tx, commandTimeout: _commandTimeoutSeconds, cancellationToken: ct);
             var totalCount = await Conn.ExecuteScalarAsync<int>(countCmd).ConfigureAwait(false);
 
             // Data query with pagination
@@ -139,7 +140,7 @@ namespace SqlServer.Infrastructure.Implementation
             parameters.Add("@Skip", skip);
             parameters.Add("@Take", take);
 
-            var dataCmd = new CommandDefinition(dataSql, parameters, transaction: Tx, cancellationToken: ct);
+            var dataCmd = new CommandDefinition(dataSql, parameters, transaction: Tx, commandTimeout: _commandTimeoutSeconds, cancellationToken: ct);
             var results = await Conn.QueryAsync<KdpExportResult>(dataCmd).ConfigureAwait(false);
 
             return (results.AsList(), totalCount);
@@ -150,12 +151,35 @@ namespace SqlServer.Infrastructure.Implementation
         /// </summary>
         public async Task<IReadOnlyList<KdpExportResult>> GetUnupdatedBatchAsync(int batchSize, CancellationToken ct = default)
         {
+            //var sql = @"SELECT TOP (@BatchSize) *
+            //            FROM KdpExportResult
+            //            where 1 = 1
+            //              and isnull(isUpdated, 0) = 0
+            //              and isnull(Action, 0) > 0
+            //              and isnull(Izuzetak, 0) = 0
+            //              and 1 = case
+            //                        when Action = 1 and isnull(ListaRacunaUpdated, 0) = 1 then 1
+            //                        else 0
+            //                      end
+            //            ORDER BY Id";
+
             var sql = @"SELECT TOP (@BatchSize) *
                         FROM KdpExportResult
-                        WHERE isnull(IsUpdated,0) = 0
+                        where 1 = 1
+                          and isnull(isUpdated, 0) = 0
+                          and isnull(action, 0) <> 0
+                          and isnull(izuzetak, 0) = 0
+                          and 1 = case
+                                when Action = 0 then 0
+                                when Action = 2 and isnull(OldDocumentStatus, '') = '1' and isnull(NewDocumentStatus, '') = '2' then 1
+                                when Action = 1 and isnull(OldDocumentStatus, '') = '2' and isnull(NewDocumentStatus, '') = '1' then 1
+                                when Action = 1 and isnull(OldDocumentStatus, '') = '1' and isnull(NewDocumentStatus, '') = '1'
+                                     and isnull(ListaRacunaUpdated, 0) = 1 then 1
+                                else 0
+                              end
                         ORDER BY Id";
 
-            var cmd = new CommandDefinition(sql, new { BatchSize = batchSize }, transaction: Tx, cancellationToken: ct);
+            var cmd = new CommandDefinition(sql, new { BatchSize = batchSize }, transaction: Tx, commandTimeout: _commandTimeoutSeconds, cancellationToken: ct);
             var results = await Conn.QueryAsync<KdpExportResult>(cmd).ConfigureAwait(false);
 
             return results.AsList();
@@ -184,7 +208,7 @@ namespace SqlServer.Infrastructure.Implementation
 
                     var cmd = new CommandDefinition(sql,
                         new { Id = id, UpdatedDate = DateTime.Now, Message = message },
-                        transaction: Tx, cancellationToken: ct);
+                        transaction: Tx, commandTimeout: _commandTimeoutSeconds, cancellationToken: ct);
                     await Conn.ExecuteAsync(cmd).ConfigureAwait(false);
                 }
             }
@@ -199,7 +223,7 @@ namespace SqlServer.Infrastructure.Implementation
 
                 var cmd = new CommandDefinition(sql,
                     new { Ids = idList, UpdatedDate = DateTime.Now },
-                    transaction: Tx, cancellationToken: ct);
+                    transaction: Tx, commandTimeout: _commandTimeoutSeconds, cancellationToken: ct);
                 await Conn.ExecuteAsync(cmd).ConfigureAwait(false);
             }
         }
@@ -210,7 +234,7 @@ namespace SqlServer.Infrastructure.Implementation
         public async Task<long> CountUnupdatedAsync(CancellationToken ct = default)
         {
             var sql = "SELECT COUNT(*) FROM KdpExportResult WHERE isnull(IsUpdated,0) = 0";
-            var cmd = new CommandDefinition(sql, transaction: Tx, cancellationToken: ct);
+            var cmd = new CommandDefinition(sql, transaction: Tx, commandTimeout: _commandTimeoutSeconds, cancellationToken: ct);
             var count = await Conn.ExecuteScalarAsync<long>(cmd).ConfigureAwait(false);
             return count;
         }
@@ -228,7 +252,7 @@ namespace SqlServer.Infrastructure.Implementation
 
             var cmd = new CommandDefinition(sql,
                 new { Id = id, IsUpdated = isUpdated, UpdatedDate = DateTime.Now, Message = message },
-                transaction: Tx, cancellationToken: ct);
+                transaction: Tx, commandTimeout: _commandTimeoutSeconds, cancellationToken: ct);
             await Conn.ExecuteAsync(cmd).ConfigureAwait(false);
         }
     }

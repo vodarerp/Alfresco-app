@@ -304,10 +304,7 @@ namespace Migration.Infrastructure.Implementation.Services
             switch (document.Action)
             {
                 case 1:
-                    properties["ecm:docStatus"] = "1";
-                    properties["ecm:docType"] = "00099";
-                    properties["ecm:docTypeCode"] = "00099";
-                    properties["ecm:docTypeName"] = "KDP za fizička lica";
+                    properties["ecm:docStatus"] = "1";                   
                     if (!string.IsNullOrWhiteSpace(document.ListaRacuna))
                     {
                         properties["ecm:docAccountNumbers"] = document.ListaRacuna;

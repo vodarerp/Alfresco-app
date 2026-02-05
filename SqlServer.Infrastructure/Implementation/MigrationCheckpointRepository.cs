@@ -1,4 +1,5 @@
 using Alfresco.Contracts.Oracle.Models;
+using Alfresco.Contracts.SqlServer;
 using Dapper;
 using SqlServer.Abstraction.Interfaces;
 
@@ -6,7 +7,7 @@ namespace SqlServer.Infrastructure.Implementation
 {
     public class MigrationCheckpointRepository : SqlServerRepository<MigrationCheckpoint, long>, IMigrationCheckpointRepository
     {
-        public MigrationCheckpointRepository(IUnitOfWork uow) : base(uow)
+        public MigrationCheckpointRepository(IUnitOfWork uow, SqlServerOptions sqlServerOptions) : base(uow, sqlServerOptions)
         {
         }
 
@@ -18,7 +19,7 @@ namespace SqlServer.Infrastructure.Implementation
             var dp = new DynamicParameters();
             dp.Add("@serviceName", serviceName);
 
-            var cmd = new CommandDefinition(sql, dp, Tx, cancellationToken: ct);
+            var cmd = new CommandDefinition(sql, dp, Tx, commandTimeout: _commandTimeoutSeconds, cancellationToken: ct);
             return await Conn.QueryFirstOrDefaultAsync<MigrationCheckpoint>(cmd).ConfigureAwait(false);
         }
 
@@ -53,7 +54,7 @@ namespace SqlServer.Infrastructure.Implementation
                 dp.Add("@batchCounter", checkpoint.BatchCounter);
                 dp.Add("@id", checkpoint.Id);
 
-                var cmd = new CommandDefinition(sql, dp, Tx, cancellationToken: ct);
+                var cmd = new CommandDefinition(sql, dp, Tx, commandTimeout: _commandTimeoutSeconds, cancellationToken: ct);
                 await Conn.ExecuteAsync(cmd).ConfigureAwait(false);
 
                 return checkpoint.Id;
@@ -83,7 +84,7 @@ namespace SqlServer.Infrastructure.Implementation
                 dp.Add("@createdAt", checkpoint.CreatedAt);
                 dp.Add("@batchCounter", checkpoint.BatchCounter);
 
-                var cmd = new CommandDefinition(sql, dp, Tx, cancellationToken: ct);
+                var cmd = new CommandDefinition(sql, dp, Tx, commandTimeout: _commandTimeoutSeconds, cancellationToken: ct);
                 var insertedId = await Conn.ExecuteScalarAsync<long>(cmd).ConfigureAwait(false);
 
                 return insertedId;
@@ -97,7 +98,7 @@ namespace SqlServer.Infrastructure.Implementation
             var dp = new DynamicParameters();
             dp.Add("@serviceName", serviceName);
 
-            var cmd = new CommandDefinition(sql, dp, Tx, cancellationToken: ct);
+            var cmd = new CommandDefinition(sql, dp, Tx, commandTimeout: _commandTimeoutSeconds, cancellationToken: ct);
             await Conn.ExecuteAsync(cmd).ConfigureAwait(false);
         }
     }

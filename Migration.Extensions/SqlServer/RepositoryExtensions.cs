@@ -29,13 +29,13 @@ namespace Migration.Extensions.SqlServer
         /// <summary>
         /// SQL Server version - uses Dapper batch execution (not array binding like Oracle)
         /// </summary>
-        public static async Task BatchSetDocumentStatusAsync_v1(this IDocStagingRepository repo, IDbConnection conn, IDbTransaction tran, IEnumerable<(long DocId, string Status, string? Error)> values, CancellationToken ct = default)
+        public static async Task BatchSetDocumentStatusAsync_v1(this IDocStagingRepository repo, IDbConnection conn, IDbTransaction tran, IEnumerable<(long DocId, string Status, string? Error)> values, CancellationToken ct = default, int? commandTimeout = null)
         {
             // SQL Server doesn't support array binding like Oracle, so we delegate to Dapper's batch execution
-            await BatchSetDocumentStatusAsync(repo, conn, tran, values, ct).ConfigureAwait(false);
+            await BatchSetDocumentStatusAsync(repo, conn, tran, values, ct, commandTimeout).ConfigureAwait(false);
         }
 
-        public static async Task BatchSetDocumentStatusAsync(this IDocStagingRepository repo, IDbConnection conn, IDbTransaction tran, IEnumerable<(long DocId, string Status, string? Error)> values, CancellationToken ct = default)
+        public static async Task BatchSetDocumentStatusAsync(this IDocStagingRepository repo, IDbConnection conn, IDbTransaction tran, IEnumerable<(long DocId, string Status, string? Error)> values, CancellationToken ct = default, int? commandTimeout = null)
         {
             if (!values.Any()) return;
 
@@ -52,26 +52,26 @@ namespace Migration.Extensions.SqlServer
                 id = o.DocId
             }).ToList();
 
-            var cmd = new CommandDefinition(sql, parameters, transaction: tran, cancellationToken: ct);
+            var cmd = new CommandDefinition(sql, parameters, transaction: tran, commandTimeout: commandTimeout, cancellationToken: ct);
 
             await conn.ExecuteAsync(cmd).ConfigureAwait(false);
 
         }
 
-        public static async Task<Dictionary<string, long>> GetDocumentStatisticAsync(this IDocStagingRepository repo, IDbConnection conn, IDbTransaction tran, CancellationToken ct = default)
+        public static async Task<Dictionary<string, long>> GetDocumentStatisticAsync(this IDocStagingRepository repo, IDbConnection conn, IDbTransaction tran, CancellationToken ct = default, int? commandTimeout = null)
         {
             var sql = @"SELECT Status, COUNT(*) AS Count
                         FROM DocStaging
                         GROUP BY Status";
 
-            var cmd = new CommandDefinition(sql, transaction: tran, cancellationToken: ct);
+            var cmd = new CommandDefinition(sql, transaction: tran, commandTimeout: commandTimeout, cancellationToken: ct);
             var result = await conn.QueryAsync<(string Status, long Count)>(cmd).ConfigureAwait(false);
 
             return result.ToDictionary(o => o.Status, o => o.Count);
 
         }
 
-        public static async Task<int> ResetStuckDocumentsAsync(this IDocStagingRepository repo, IDbConnection conn, IDbTransaction tran, TimeSpan timeSpan, CancellationToken ct = default)
+        public static async Task<int> ResetStuckDocumentsAsync(this IDocStagingRepository repo, IDbConnection conn, IDbTransaction tran, TimeSpan timeSpan, CancellationToken ct = default, int? commandTimeout = null)
         {
             var totalMinutes = (int)timeSpan.TotalMinutes;
 
@@ -83,7 +83,7 @@ namespace Migration.Extensions.SqlServer
                         WHERE Status = '{MigrationStatus.InProgress.ToDbString()}'
                           AND UpdatedAt < DATEADD(MINUTE, -{totalMinutes}, GETUTCDATE())";
 
-            var cmd = new CommandDefinition(sql, transaction: tran, cancellationToken: ct);
+            var cmd = new CommandDefinition(sql, transaction: tran, commandTimeout: commandTimeout, cancellationToken: ct);
             return await conn.ExecuteAsync(cmd).ConfigureAwait(false);
         }
 
@@ -94,13 +94,13 @@ namespace Migration.Extensions.SqlServer
         /// <summary>
         /// SQL Server version - uses Dapper batch execution (not array binding like Oracle)
         /// </summary>
-        public static async Task BatchSetFolderStatusAsync_v1(this IFolderStagingRepository repo, IDbConnection conn, IDbTransaction tran, IEnumerable<(long FolderId, string Status, string? Error)> values, CancellationToken ct = default)
+        public static async Task BatchSetFolderStatusAsync_v1(this IFolderStagingRepository repo, IDbConnection conn, IDbTransaction tran, IEnumerable<(long FolderId, string Status, string? Error)> values, CancellationToken ct = default, int? commandTimeout = null)
         {
             // SQL Server doesn't support array binding like Oracle, so we delegate to Dapper's batch execution
-            await BatchSetFolderStatusAsync(repo, conn, tran, values, ct).ConfigureAwait(false);
+            await BatchSetFolderStatusAsync(repo, conn, tran, values, ct, commandTimeout).ConfigureAwait(false);
         }
 
-        public static async Task BatchSetFolderStatusAsync(this IFolderStagingRepository repo, IDbConnection conn, IDbTransaction tran, IEnumerable<(long FolderId, string Status, string? Error)> values, CancellationToken ct = default)
+        public static async Task BatchSetFolderStatusAsync(this IFolderStagingRepository repo, IDbConnection conn, IDbTransaction tran, IEnumerable<(long FolderId, string Status, string? Error)> values, CancellationToken ct = default, int? commandTimeout = null)
         {
             if (!values.Any()) return;
 
@@ -117,26 +117,26 @@ namespace Migration.Extensions.SqlServer
                 error = o.Error
             }).ToList();
 
-            var cmd = new CommandDefinition(sql, parameters, transaction: tran, cancellationToken: ct);
+            var cmd = new CommandDefinition(sql, parameters, transaction: tran, commandTimeout: commandTimeout, cancellationToken: ct);
 
             await conn.ExecuteAsync(cmd).ConfigureAwait(false);
 
         }
 
-        public static async Task<Dictionary<string, long>> GetFolderStatisticAsync(this IFolderStagingRepository repo, IDbConnection conn, IDbTransaction tran, CancellationToken ct = default)
+        public static async Task<Dictionary<string, long>> GetFolderStatisticAsync(this IFolderStagingRepository repo, IDbConnection conn, IDbTransaction tran, CancellationToken ct = default, int? commandTimeout = null)
         {
             var sql = @"SELECT Status, COUNT(*) AS Count
                         FROM FolderStaging
                         GROUP BY Status";
 
-            var cmd = new CommandDefinition(sql, transaction: tran, cancellationToken: ct);
+            var cmd = new CommandDefinition(sql, transaction: tran, commandTimeout: commandTimeout, cancellationToken: ct);
             var result = await conn.QueryAsync<(string Status, long Count)>(cmd).ConfigureAwait(false);
 
             return result.ToDictionary(o => o.Status, o => o.Count);
 
         }
 
-        public static async Task<int> ResetStuckFolderAsync(this IFolderStagingRepository repo, IDbConnection conn, IDbTransaction tran, TimeSpan timeSpan, CancellationToken ct = default)
+        public static async Task<int> ResetStuckFolderAsync(this IFolderStagingRepository repo, IDbConnection conn, IDbTransaction tran, TimeSpan timeSpan, CancellationToken ct = default, int? commandTimeout = null)
         {
             var totalMinutes = (int)timeSpan.TotalMinutes;
 
@@ -149,7 +149,7 @@ namespace Migration.Extensions.SqlServer
                         WHERE Status = '{MigrationStatus.InProgress.ToDbString()}'
                           AND UpdatedAt < DATEADD(MINUTE, -{totalMinutes}, GETUTCDATE())";
 
-            var cmd = new CommandDefinition(sql, transaction: tran, cancellationToken: ct);
+            var cmd = new CommandDefinition(sql, transaction: tran, commandTimeout: commandTimeout, cancellationToken: ct);
             return await conn.ExecuteAsync(cmd).ConfigureAwait(false);
         }
 
@@ -162,7 +162,8 @@ namespace Migration.Extensions.SqlServer
             IDbConnection conn,
             IDbTransaction tran,
             IEnumerable<(string DestFolderId, string Status, string? NodeId)> updates,
-            CancellationToken ct = default)
+            CancellationToken ct = default,
+            int? commandTimeout = null)
         {
             if (!updates.Any()) return;
 
@@ -181,7 +182,7 @@ namespace Migration.Extensions.SqlServer
                 DestFolderId = u.DestFolderId
             });
 
-            var cmd = new CommandDefinition(sql, parameters, transaction: tran, cancellationToken: ct);
+            var cmd = new CommandDefinition(sql, parameters, transaction: tran, commandTimeout: commandTimeout, cancellationToken: ct);
             await conn.ExecuteAsync(cmd).ConfigureAwait(false);
         }
 
@@ -199,7 +200,8 @@ namespace Migration.Extensions.SqlServer
             this IDocStagingRepository repo,
             IDbConnection conn,
             IDbTransaction tran,
-            CancellationToken ct = default)
+            CancellationToken ct = default,
+            int? commandTimeout = null)
         {
             // NE brišemo ERROR dokumente jer mogu biti fizički premešteni ali sa neuspešnim update-om propertija
             var sql = @"
@@ -207,7 +209,7 @@ namespace Migration.Extensions.SqlServer
                 WHERE (Status != 'DONE' AND Status != 'ERROR')
                    OR Status IS NULL";
 
-            var cmd = new CommandDefinition(sql, transaction: tran, cancellationToken: ct);
+            var cmd = new CommandDefinition(sql, transaction: tran, commandTimeout: commandTimeout, cancellationToken: ct);
             return await conn.ExecuteAsync(cmd).ConfigureAwait(false);
         }
 
@@ -220,14 +222,15 @@ namespace Migration.Extensions.SqlServer
             this IFolderStagingRepository repo,
             IDbConnection conn,
             IDbTransaction tran,
-            CancellationToken ct = default)
+            CancellationToken ct = default,
+            int? commandTimeout = null)
         {
             var sql = @"
                 DELETE FROM FolderStaging
                 WHERE Status NOT LIKE 'DONE%'
                    OR Status IS NULL";
 
-            var cmd = new CommandDefinition(sql, transaction: tran, cancellationToken: ct);
+            var cmd = new CommandDefinition(sql, transaction: tran, commandTimeout: commandTimeout, cancellationToken: ct);
             return await conn.ExecuteAsync(cmd).ConfigureAwait(false);
         }
 
@@ -240,7 +243,8 @@ namespace Migration.Extensions.SqlServer
             this IDocStagingRepository repo,
             IDbConnection conn,
             IDbTransaction tran,
-            CancellationToken ct = default)
+            CancellationToken ct = default,
+            int? commandTimeout = null)
         {
             // Konzistentno sa DeleteIncompleteDocumentsAsync - NE brojimo ERROR dokumente
             var sql = @"
@@ -249,7 +253,7 @@ namespace Migration.Extensions.SqlServer
                 WHERE (Status != 'DONE' AND Status != 'ERROR')
                    OR Status IS NULL";
 
-            var cmd = new CommandDefinition(sql, transaction: tran, cancellationToken: ct);
+            var cmd = new CommandDefinition(sql, transaction: tran, commandTimeout: commandTimeout, cancellationToken: ct);
             return await conn.ExecuteScalarAsync<long>(cmd).ConfigureAwait(false);
         }
 
@@ -261,7 +265,8 @@ namespace Migration.Extensions.SqlServer
             this IFolderStagingRepository repo,
             IDbConnection conn,
             IDbTransaction tran,
-            CancellationToken ct = default)
+            CancellationToken ct = default,
+            int? commandTimeout = null)
         {
             var sql = @"
                 SELECT COUNT(*)
@@ -269,7 +274,7 @@ namespace Migration.Extensions.SqlServer
                 WHERE Status NOT LIKE 'DONE%'
                    OR Status IS NULL";
 
-            var cmd = new CommandDefinition(sql, transaction: tran, cancellationToken: ct);
+            var cmd = new CommandDefinition(sql, transaction: tran, commandTimeout: commandTimeout, cancellationToken: ct);
             return await conn.ExecuteScalarAsync<long>(cmd).ConfigureAwait(false);
         }
 

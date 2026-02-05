@@ -176,7 +176,7 @@ namespace Alfresco.App.UserControls
                 }
 
                 var updateResult = await _updateService.UpdateDocumentsAsync(
-                    batchSize: 500,
+                    batchSize: 1000,
                     maxDegreeOfParallelism: 5,
                     progressCallback: OnProgress,
                     ct: _cts.Token);

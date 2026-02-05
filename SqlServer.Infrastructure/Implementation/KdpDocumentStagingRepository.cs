@@ -1,4 +1,5 @@
 using Alfresco.Contracts.Oracle.Models;
+using Alfresco.Contracts.SqlServer;
 using Dapper;
 using SqlServer.Abstraction.Interfaces;
 using System;
@@ -12,7 +13,7 @@ namespace SqlServer.Infrastructure.Implementation
     /// </summary>
     public class KdpDocumentStagingRepository : SqlServerRepository<KdpDocumentStaging, long>, IKdpDocumentStagingRepository
     {
-        public KdpDocumentStagingRepository(IUnitOfWork uow) : base(uow)
+        public KdpDocumentStagingRepository(IUnitOfWork uow, SqlServerOptions sqlServerOptions) : base(uow, sqlServerOptions)
         {
         }
 
@@ -22,7 +23,7 @@ namespace SqlServer.Infrastructure.Implementation
         public async Task ClearStagingAsync(CancellationToken ct = default)
         {
             var sql = "TRUNCATE TABLE KdpDocumentStaging";
-            var cmd = new CommandDefinition(sql, transaction: Tx, cancellationToken: ct);
+            var cmd = new CommandDefinition(sql, transaction: Tx, commandTimeout: _commandTimeoutSeconds, cancellationToken: ct);
             await Conn.ExecuteAsync(cmd).ConfigureAwait(false);
         }
 
@@ -32,7 +33,7 @@ namespace SqlServer.Infrastructure.Implementation
         public async Task<long> CountAsync(CancellationToken ct = default)
         {
             var sql = "SELECT COUNT(*) FROM KdpDocumentStaging";
-            var cmd = new CommandDefinition(sql, transaction: Tx, cancellationToken: ct);
+            var cmd = new CommandDefinition(sql, transaction: Tx, commandTimeout: _commandTimeoutSeconds, cancellationToken: ct);
             var count = await Conn.ExecuteScalarAsync<long>(cmd).ConfigureAwait(false);
             return count;
         }

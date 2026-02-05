@@ -1,5 +1,6 @@
 using Alfresco.Contracts.Enums;
 using Alfresco.Contracts.Oracle.Models;
+using Alfresco.Contracts.SqlServer;
 using Dapper;
 using SqlServer.Abstraction.Interfaces;
 
@@ -7,7 +8,7 @@ namespace SqlServer.Infrastructure.Implementation
 {
     public class PhaseCheckpointRepository : SqlServerRepository<PhaseCheckpoint, long>, IPhaseCheckpointRepository
     {
-        public PhaseCheckpointRepository(IUnitOfWork uow) : base(uow)
+        public PhaseCheckpointRepository(IUnitOfWork uow, SqlServerOptions sqlServerOptions) : base(uow, sqlServerOptions)
         {
         }
 
@@ -19,7 +20,7 @@ namespace SqlServer.Infrastructure.Implementation
             var dp = new DynamicParameters();
             dp.Add("@phase", (int)phase);  
 
-            var cmd = new CommandDefinition(sql, dp, Tx, cancellationToken: ct);
+            var cmd = new CommandDefinition(sql, dp, Tx, commandTimeout: _commandTimeoutSeconds, cancellationToken: ct);
             var result = await Conn.QueryFirstOrDefaultAsync<PhaseCheckpoint>(cmd).ConfigureAwait(false);
 
             return result;
@@ -30,7 +31,7 @@ namespace SqlServer.Infrastructure.Implementation
             var sql = @"SELECT * FROM PhaseCheckpoints
                         ORDER BY Phase ASC";
 
-            var cmd = new CommandDefinition(sql, transaction: Tx, cancellationToken: ct);
+            var cmd = new CommandDefinition(sql, transaction: Tx, commandTimeout: _commandTimeoutSeconds, cancellationToken: ct);
             var result = await Conn.QueryAsync<PhaseCheckpoint>(cmd).ConfigureAwait(false);
 
             return result.ToList();
@@ -57,7 +58,7 @@ namespace SqlServer.Infrastructure.Implementation
                 dp.Add("@startedAt", DateTime.UtcNow);
                 dp.Add("@updatedAt", DateTime.UtcNow);
 
-                var cmd = new CommandDefinition(sql, dp, Tx, cancellationToken: ct);
+                var cmd = new CommandDefinition(sql, dp, Tx, commandTimeout: _commandTimeoutSeconds, cancellationToken: ct);
                 await Conn.ExecuteAsync(cmd).ConfigureAwait(false);
             }
             else
@@ -75,7 +76,7 @@ namespace SqlServer.Infrastructure.Implementation
                 dp.Add("@createdAt", DateTime.UtcNow);
                 dp.Add("@updatedAt", DateTime.UtcNow);
 
-                var cmd = new CommandDefinition(sql, dp, Tx, cancellationToken: ct);
+                var cmd = new CommandDefinition(sql, dp, Tx, commandTimeout: _commandTimeoutSeconds, cancellationToken: ct);
                 await Conn.ExecuteAsync(cmd).ConfigureAwait(false);
             }
         }
@@ -92,7 +93,7 @@ namespace SqlServer.Infrastructure.Implementation
             dp.Add("@docTypes", docTypes);
             dp.Add("@updatedAt", DateTime.UtcNow);
 
-            var cmd = new CommandDefinition(sql, dp, Tx, cancellationToken: ct);
+            var cmd = new CommandDefinition(sql, dp, Tx, commandTimeout: _commandTimeoutSeconds, cancellationToken: ct);
             await Conn.ExecuteAsync(cmd).ConfigureAwait(false);
         }
 
@@ -110,7 +111,7 @@ namespace SqlServer.Infrastructure.Implementation
             dp.Add("@completedAt", DateTime.UtcNow);
             dp.Add("@updatedAt", DateTime.UtcNow);
 
-            var cmd = new CommandDefinition(sql, dp, Tx, cancellationToken: ct);
+            var cmd = new CommandDefinition(sql, dp, Tx, commandTimeout: _commandTimeoutSeconds, cancellationToken: ct);
             await Conn.ExecuteAsync(cmd).ConfigureAwait(false);
         }
 
@@ -130,7 +131,7 @@ namespace SqlServer.Infrastructure.Implementation
             dp.Add("@errorMessage", errorMessage);
             dp.Add("@updatedAt", DateTime.UtcNow);
 
-            var cmd = new CommandDefinition(sql, dp, Tx, cancellationToken: ct);
+            var cmd = new CommandDefinition(sql, dp, Tx, commandTimeout: _commandTimeoutSeconds, cancellationToken: ct);
             await Conn.ExecuteAsync(cmd).ConfigureAwait(false);
         }
 
@@ -155,7 +156,7 @@ namespace SqlServer.Infrastructure.Implementation
             dp.Add("@totalProcessed", totalProcessed);
             dp.Add("@updatedAt", DateTime.UtcNow);
 
-            var cmd = new CommandDefinition(sql, dp, Tx, cancellationToken: ct);
+            var cmd = new CommandDefinition(sql, dp, Tx, commandTimeout: _commandTimeoutSeconds, cancellationToken: ct);
             await Conn.ExecuteAsync(cmd).ConfigureAwait(false);
         }
 
@@ -176,7 +177,7 @@ namespace SqlServer.Infrastructure.Implementation
             dp.Add("@status", (int)PhaseStatus.NotStarted);
             dp.Add("@updatedAt", DateTime.UtcNow);
 
-            var cmd = new CommandDefinition(sql, dp, Tx, cancellationToken: ct);
+            var cmd = new CommandDefinition(sql, dp, Tx, commandTimeout: _commandTimeoutSeconds, cancellationToken: ct);
             await Conn.ExecuteAsync(cmd).ConfigureAwait(false);
         }
 
@@ -199,7 +200,7 @@ namespace SqlServer.Infrastructure.Implementation
             dp.Add("@status", (int)PhaseStatus.NotStarted);
             dp.Add("@updatedAt", DateTime.UtcNow);
 
-            var cmd = new CommandDefinition(sql, dp, Tx, cancellationToken: ct);
+            var cmd = new CommandDefinition(sql, dp, Tx, commandTimeout: _commandTimeoutSeconds, cancellationToken: ct);
             await Conn.ExecuteAsync(cmd).ConfigureAwait(false);
         }
     }

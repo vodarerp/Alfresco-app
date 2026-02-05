@@ -1,3 +1,4 @@
+using Alfresco.Contracts.SqlServer;
 using Dapper;
 using SqlServer.Abstraction.Interfaces;
 using Microsoft.Data.SqlClient;
@@ -16,10 +17,15 @@ namespace SqlServer.Infrastructure.Implementation
     public class SqlServerRepository<T, TKey> : IRepository<T, TKey>
     {
         protected readonly IUnitOfWork _unitOfWork;
+        protected readonly int _commandTimeoutSeconds;
         protected IDbConnection Conn => _unitOfWork.Connection;
         protected IDbTransaction Tx => _unitOfWork.Transaction;
 
-        public SqlServerRepository(IUnitOfWork uow) => _unitOfWork = uow;
+        public SqlServerRepository(IUnitOfWork uow, SqlServerOptions sqlServerOptions)
+        {
+            _unitOfWork = uow;
+            _commandTimeoutSeconds = sqlServerOptions.CommandTimeoutSeconds;
+        }
 
 
         public string TableName => typeof(T).GetCustomAttributes<TableAttribute>()?.FirstOrDefault()?.Name ?? typeof(T).Name;
@@ -52,7 +58,7 @@ namespace SqlServer.Infrastructure.Implementation
                 parameters.Add($"@{Col}", val);
             }
 
-            var outVal = await Conn.ExecuteScalarAsync<long>(new CommandDefinition(sql, parameters, Tx, cancellationToken: cancellationToken)).ConfigureAwait(false);
+            var outVal = await Conn.ExecuteScalarAsync<long>(new CommandDefinition(sql, parameters, Tx, commandTimeout: _commandTimeoutSeconds, cancellationToken: cancellationToken)).ConfigureAwait(false);
 
             return (TKey)Convert.ChangeType(outVal, typeof(TKey));
         }
@@ -93,7 +99,7 @@ namespace SqlServer.Infrastructure.Implementation
                 // Execute batch
                 foreach (var param in batchParameters)
                 {
-                    var cmd = new CommandDefinition(sql, param, Tx, cancellationToken: ct);
+                    var cmd = new CommandDefinition(sql, param, Tx, commandTimeout: _commandTimeoutSeconds, cancellationToken: ct);
                     totalInserted += await Conn.ExecuteAsync(cmd).ConfigureAwait(false);
                 }
             }
@@ -110,7 +116,7 @@ namespace SqlServer.Infrastructure.Implementation
             var dp = new DynamicParameters();
             dp.Add("@id", id);
 
-            var cmd = new CommandDefinition(sql, dp, Tx, cancellationToken: cancellationToken);
+            var cmd = new CommandDefinition(sql, dp, Tx, commandTimeout: _commandTimeoutSeconds, cancellationToken: cancellationToken);
             await Conn.ExecuteAsync(cmd).ConfigureAwait(false);
         }
 
@@ -122,7 +128,7 @@ namespace SqlServer.Infrastructure.Implementation
 
             var dp = new DynamicParameters();
             dp.Add("@id", id);
-            var cmd = new CommandDefinition(sql, dp, Tx, cancellationToken: cancellationToken);
+            var cmd = new CommandDefinition(sql, dp, Tx, commandTimeout: _commandTimeoutSeconds, cancellationToken: cancellationToken);
             return await Conn.QueryFirstOrDefaultAsync<T>(cmd).ConfigureAwait(false);
         }
 
@@ -146,7 +152,7 @@ namespace SqlServer.Infrastructure.Implementation
                 sql += $" OFFSET {s} ROWS FETCH NEXT {t} ROWS ONLY ";
             }
 
-            var cmd = new CommandDefinition(sql, dp, Tx, cancellationToken: ct);
+            var cmd = new CommandDefinition(sql, dp, Tx, commandTimeout: _commandTimeoutSeconds, cancellationToken: ct);
             var res = await Conn.QueryAsync<T>(cmd).ConfigureAwait(false);
 
             return res;
@@ -175,7 +181,7 @@ namespace SqlServer.Infrastructure.Implementation
             var keyVal = key.Prop.GetValue(entity);
             dp.Add($"@{key.Col}", keyVal);
 
-            var cmd = new CommandDefinition(sql, dp, Tx, cancellationToken: cancellationToken);
+            var cmd = new CommandDefinition(sql, dp, Tx, commandTimeout: _commandTimeoutSeconds, cancellationToken: cancellationToken);
             await Conn.ExecuteAsync(cmd).ConfigureAwait(false);
         }
     }

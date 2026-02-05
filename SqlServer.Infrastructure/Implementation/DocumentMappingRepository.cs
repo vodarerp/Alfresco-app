@@ -1,4 +1,5 @@
 using Alfresco.Contracts.Oracle.Models;
+using Alfresco.Contracts.SqlServer;
 using Dapper;
 using SqlServer.Abstraction.Interfaces;
 using Microsoft.Extensions.Caching.Memory;
@@ -22,7 +23,7 @@ namespace SqlServer.Infrastructure.Implementation
         private static readonly TimeSpan DocumentCacheDuration = TimeSpan.FromHours(24); // Keširanje DocumentMapping zapisa
         private static readonly TimeSpan CategoryCacheDuration = TimeSpan.FromHours(24); // Duže keširanje za CategoryMapping (retko se menja)
 
-        public DocumentMappingRepository(IUnitOfWork uow, IMemoryCache cache) : base(uow)
+        public DocumentMappingRepository(IUnitOfWork uow, IMemoryCache cache, SqlServerOptions sqlServerOptions) : base(uow, sqlServerOptions)
         {
             _cache = cache ?? throw new ArgumentNullException(nameof(cache));
         }
@@ -50,7 +51,7 @@ namespace SqlServer.Infrastructure.Implementation
                         FROM DocumentMappings WITH (NOLOCK)
                         ORDER BY ID";
 
-            var cmd = new CommandDefinition(sql, transaction: Tx, cancellationToken: ct);
+            var cmd = new CommandDefinition(sql, transaction: Tx, commandTimeout: _commandTimeoutSeconds, cancellationToken: ct);
             var result = await Conn.QueryAsync<DocumentMapping>(cmd).ConfigureAwait(false);
 
             return result.AsList().AsReadOnly();
@@ -96,6 +97,7 @@ namespace SqlServer.Infrastructure.Implementation
                 sql,
                 new { originalName = originalName.Trim() },
                 transaction: Tx,
+                commandTimeout: _commandTimeoutSeconds,
                 cancellationToken: ct);
 
             var result = await Conn.QueryFirstOrDefaultAsync<DocumentMapping>(cmd).ConfigureAwait(false);
@@ -148,6 +150,7 @@ namespace SqlServer.Infrastructure.Implementation
                 sql,
                 new { originalCode = originalCode.Trim() },
                 transaction: Tx,
+                commandTimeout: _commandTimeoutSeconds,
                 cancellationToken: ct);
 
             var result = await Conn.QueryFirstOrDefaultAsync<DocumentMapping>(cmd).ConfigureAwait(false);
@@ -200,6 +203,7 @@ namespace SqlServer.Infrastructure.Implementation
                 sql,
                 new { serbianName = serbianName.Trim() },
                 transaction: Tx,
+                commandTimeout: _commandTimeoutSeconds,
                 cancellationToken: ct);
 
             var result = await Conn.QueryFirstOrDefaultAsync<DocumentMapping>(cmd).ConfigureAwait(false);
@@ -252,6 +256,7 @@ namespace SqlServer.Infrastructure.Implementation
                 sql,
                 new { migratedName = migratedName.Trim() },
                 transaction: Tx,
+                commandTimeout: _commandTimeoutSeconds,
                 cancellationToken: ct);
 
             var result = await Conn.QueryFirstOrDefaultAsync<DocumentMapping>(cmd).ConfigureAwait(false);
@@ -316,7 +321,7 @@ namespace SqlServer.Infrastructure.Implementation
                 sql,
                 new { hasSearch = hasSearch ? 1 : 0, searchPattern, offset, pageSize },
                 transaction: Tx,
-                commandTimeout: 60, // 60 seconds timeout
+                commandTimeout: _commandTimeoutSeconds,
                 cancellationToken: ct);
 
             using var multi = await Conn.QueryMultipleAsync(cmd).ConfigureAwait(false);
@@ -406,6 +411,7 @@ namespace SqlServer.Infrastructure.Implementation
                 sql,
                 new { oznakaTipa = oznakaTipa.Trim() },
                 transaction: Tx,
+                commandTimeout: _commandTimeoutSeconds,
                 cancellationToken: ct);
 
             return await Conn.QueryFirstOrDefaultAsync<CategoryMapping>(cmd).ConfigureAwait(false);

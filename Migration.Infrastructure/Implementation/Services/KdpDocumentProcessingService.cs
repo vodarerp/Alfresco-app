@@ -463,7 +463,7 @@ namespace Migration.Infrastructure.Implementation.Services
             if (string.IsNullOrEmpty(path))
                 return null;
 
-            var match = Regex.Match(path, @"ACC-\d+");
+            var match = Regex.Match(path, @"ACC-\s*\d+");
             return match.Success ? match.Value : null;
         }
 
@@ -473,7 +473,7 @@ namespace Migration.Infrastructure.Implementation.Services
             if (string.IsNullOrEmpty(accFolderName))
                 return null;
 
-            return accFolderName.Replace("ACC-", "");
+            return accFolderName.Replace("ACC-", "").Trim();
         }
 
        

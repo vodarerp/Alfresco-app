@@ -15,11 +15,13 @@ namespace Migration.Infrastructure.Implementation.Alfresco
     public class AlfrescoDbReader : IAlfrescoDbReader
     {
         private readonly string? _connectionString;
+        private readonly int _commandTimeoutSeconds;
         private readonly ILogger<AlfrescoDbReader> _logger;
 
         public AlfrescoDbReader(IOptions<AlfrescoDbOptions> options, ILogger<AlfrescoDbReader> logger)
         {
             _connectionString = options.Value?.ConnectionString;
+            _commandTimeoutSeconds = options.Value?.CommandTimeoutSeconds ?? 120;
             _logger = logger;
         }
 
@@ -61,7 +63,7 @@ AND np.string_value LIKE @nameFilter";
                 await using var command = new NpgsqlCommand(sql, connection);
                 command.Parameters.AddWithValue("@rootUuid", rootFolderUuid);
                 command.Parameters.AddWithValue("@nameFilter", $"%{nameFilter}%");
-                command.CommandTimeout = 120; // 2 minutes for recursive query
+                command.CommandTimeout = _commandTimeoutSeconds;
 
                 var result = await command.ExecuteScalarAsync(ct).ConfigureAwait(false);
 
@@ -94,5 +96,11 @@ AND np.string_value LIKE @nameFilter";
         /// Example: "Host=localhost;Port=5432;Database=alfresco;Username=alfresco;Password=alfresco"
         /// </summary>
         public string? ConnectionString { get; set; }
+
+        /// <summary>
+        /// Command timeout in seconds for database queries.
+        /// Default: 120 seconds (2 minutes)
+        /// </summary>
+        public int CommandTimeoutSeconds { get; set; } = 120;
     }
 }

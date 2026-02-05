@@ -1,6 +1,7 @@
 using Alfresco.Contracts.Enums;
 using Alfresco.Contracts.Models;
 using Alfresco.Contracts.Oracle.Models;
+using Alfresco.Contracts.SqlServer;
 using Dapper;
 using Microsoft.Data.SqlClient;
 using Migration.Abstraction.Models;
@@ -17,7 +18,7 @@ namespace SqlServer.Infrastructure.Implementation
 {
     public class DocStagingRepository : SqlServerRepository<DocStaging, long>, IDocStagingRepository
     {
-        public DocStagingRepository(IUnitOfWork uow) : base(uow)
+        public DocStagingRepository(IUnitOfWork uow, SqlServerOptions sqlServerOptions) : base(uow, sqlServerOptions)
         {
         }
 
@@ -37,7 +38,7 @@ namespace SqlServer.Infrastructure.Implementation
             dp.Add("@error", error);
             dp.Add("@id", id);
 
-            var cmd = new CommandDefinition(sql, dp, Tx, cancellationToken: ct);
+            var cmd = new CommandDefinition(sql, dp, Tx, commandTimeout: _commandTimeoutSeconds, cancellationToken: ct);
 
             await Conn.ExecuteAsync(cmd).ConfigureAwait(false);
 
@@ -58,7 +59,7 @@ namespace SqlServer.Infrastructure.Implementation
             dp.Add("@status", status);
             dp.Add("@error", error);
             dp.Add("@id", id);
-            var cmd = new CommandDefinition(sql, dp, Tx, cancellationToken: ct);
+            var cmd = new CommandDefinition(sql, dp, Tx, commandTimeout: _commandTimeoutSeconds, cancellationToken: ct);
 
             await Conn.ExecuteAsync(cmd).ConfigureAwait(false);
         }
@@ -106,7 +107,7 @@ namespace SqlServer.Infrastructure.Implementation
 
             var dp = new DynamicParameters();
             dp.Add("@take", take);
-            var cmd = new CommandDefinition(sql, dp, Tx, cancellationToken: ct);
+            var cmd = new CommandDefinition(sql, dp, Tx, commandTimeout: _commandTimeoutSeconds, cancellationToken: ct);
 
             var res = await Conn.QueryAsync<DocStaging>(cmd).ConfigureAwait(false);
 
@@ -120,7 +121,7 @@ namespace SqlServer.Infrastructure.Implementation
                         WHERE status = 'PREPARED'
                           AND DestinationFolderId IS NOT NULL";
 
-            var cmd = new CommandDefinition(sql, transaction: Tx, cancellationToken: ct);
+            var cmd = new CommandDefinition(sql, transaction: Tx, commandTimeout: _commandTimeoutSeconds, cancellationToken: ct);
 
             var count = await Conn.ExecuteScalarAsync<long>(cmd).ConfigureAwait(false);
 
@@ -166,7 +167,7 @@ namespace SqlServer.Infrastructure.Implementation
   WHERE d.Status = 'READY'";
 
 
-            var cmd = new CommandDefinition(sql, transaction: Tx, cancellationToken: ct);
+            var cmd = new CommandDefinition(sql, transaction: Tx, commandTimeout: _commandTimeoutSeconds, cancellationToken: ct);
 
             var results = await Conn.QueryAsync<dynamic>(cmd).ConfigureAwait(false);
 
@@ -243,7 +244,7 @@ namespace SqlServer.Infrastructure.Implementation
             // Set ErrorMsg to clientApiError if present, otherwise empty string
             parameters.Add("@ErrorMsg", clientApiError ?? string.Empty);
 
-            var cmd = new CommandDefinition(sql, parameters, Tx, cancellationToken: ct);
+            var cmd = new CommandDefinition(sql, parameters, Tx, commandTimeout: _commandTimeoutSeconds, cancellationToken: ct);
 
             var rowsAffected = await Conn.ExecuteAsync(cmd).ConfigureAwait(false);
 

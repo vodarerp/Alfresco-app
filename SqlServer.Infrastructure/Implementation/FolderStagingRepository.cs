@@ -1,5 +1,6 @@
 using Alfresco.Contracts.Enums;
 using Alfresco.Contracts.Oracle.Models;
+using Alfresco.Contracts.SqlServer;
 using Dapper;
 using SqlServer.Abstraction.Interfaces;
 using Microsoft.Data.SqlClient;
@@ -8,7 +9,7 @@ namespace SqlServer.Infrastructure.Implementation
 {
     public class FolderStagingRepository : SqlServerRepository<FolderStaging, long>, IFolderStagingRepository
     {
-        public FolderStagingRepository(IUnitOfWork uow) : base(uow)
+        public FolderStagingRepository(IUnitOfWork uow, SqlServerOptions sqlServerOptions) : base(uow, sqlServerOptions)
         {
         }
 
@@ -28,7 +29,7 @@ namespace SqlServer.Infrastructure.Implementation
             dp.Add("@error", error);
             dp.Add("@id", id);
 
-            var cmd = new CommandDefinition(sql, dp, Tx, cancellationToken: ct);
+            var cmd = new CommandDefinition(sql, dp, Tx, commandTimeout: _commandTimeoutSeconds, cancellationToken: ct);
 
             await Conn.ExecuteAsync(cmd).ConfigureAwait(false);
         }
@@ -52,7 +53,7 @@ namespace SqlServer.Infrastructure.Implementation
                 dp.Add("@status", status);
                 dp.Add("@error", error);
                 dp.Add("@id", id);
-                var cmd = new CommandDefinition(sql, dp, Tx, cancellationToken: ct);
+                var cmd = new CommandDefinition(sql, dp, Tx, commandTimeout: _commandTimeoutSeconds, cancellationToken: ct);
 
                 await Conn.ExecuteAsync(cmd).ConfigureAwait(false);
             }
@@ -82,7 +83,7 @@ namespace SqlServer.Infrastructure.Implementation
 
             var dp = new DynamicParameters();
             dp.Add("@take", take);
-            var cmd = new CommandDefinition(sql, dp, Tx, cancellationToken: ct);
+            var cmd = new CommandDefinition(sql, dp, Tx, commandTimeout: _commandTimeoutSeconds, cancellationToken: ct);
 
             var res = await Conn.QueryAsync<FolderStaging>(cmd).ConfigureAwait(false);
 
@@ -94,7 +95,7 @@ namespace SqlServer.Infrastructure.Implementation
             var sql = @$"SELECT COUNT(*) FROM FolderStaging
                          WHERE status = '{MigrationStatus.Ready.ToDbString()}'";
 
-            var cmd = new CommandDefinition(sql, transaction: Tx, cancellationToken: ct);
+            var cmd = new CommandDefinition(sql, transaction: Tx, commandTimeout: _commandTimeoutSeconds, cancellationToken: ct);
 
             var count = await Conn.ExecuteScalarAsync<long>(cmd).ConfigureAwait(false);
 
@@ -182,7 +183,7 @@ namespace SqlServer.Infrastructure.Implementation
                     dp.Add("@TargetDossierType", folder.TargetDossierType);
                     dp.Add("@ClientSegment", folder.ClientSegment);
 
-                    var cmd = new CommandDefinition(sql, dp, Tx, cancellationToken: ct);
+                    var cmd = new CommandDefinition(sql, dp, Tx, commandTimeout: _commandTimeoutSeconds, cancellationToken: ct);
                     var rowsAffected = await Conn.ExecuteAsync(cmd).ConfigureAwait(false);
                     totalInserted += rowsAffected;
                 }

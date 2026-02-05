@@ -45,6 +45,7 @@ namespace Migration.Infrastructure.Implementation.Services
         private readonly GlobalErrorTracker _errorTracker;
 
         private readonly string _connectionString;
+        private readonly int _commandTimeoutSeconds;
         private readonly MigrationOptions _migrationOptions;
 
         public MigrationWorker(
@@ -73,6 +74,7 @@ namespace Migration.Infrastructure.Implementation.Services
             _logger = logger.CreateLogger("FileLogger");
             _uiLogger = logger.CreateLogger("UiLogger");
             _connectionString = sqlOptions?.Value?.ConnectionString ?? throw new ArgumentNullException(nameof(sqlOptions));
+            _commandTimeoutSeconds = sqlOptions.Value.CommandTimeoutSeconds;
             _migrationOptions = migrationOptions?.Value ?? throw new ArgumentNullException(nameof(migrationOptions));
             _scopeFactory = scopeFactory ?? throw new ArgumentNullException(nameof(scopeFactory));
             _errorTracker = errorTracker ?? throw new ArgumentNullException(nameof(errorTracker));
@@ -267,7 +269,7 @@ namespace Migration.Infrastructure.Implementation.Services
                 var checkpoints = await ExecuteCheckpointOperationAsync(async (uow) =>
                 {
                     var sql = "SELECT * FROM PhaseCheckpoints ORDER BY Phase ASC";
-                    var cmd = new CommandDefinition(sql, transaction: uow.Transaction, cancellationToken: ct);
+                    var cmd = new CommandDefinition(sql, transaction: uow.Transaction, commandTimeout: _commandTimeoutSeconds, cancellationToken: ct);
                     var results = await uow.Connection.QueryAsync<PhaseCheckpoint>(cmd); //((IDbConnection)uow.Connection)
                     return results.ToList();
                 }, ct);
@@ -347,7 +349,7 @@ namespace Migration.Infrastructure.Implementation.Services
                     {
                         status = (int)PhaseStatus.NotStarted,
                         updatedAt = DateTime.UtcNow
-                    }, transaction: uow.Transaction, cancellationToken: ct);
+                    }, transaction: uow.Transaction, commandTimeout: _commandTimeoutSeconds, cancellationToken: ct);
                     await uow.Connection.ExecuteAsync(cmd);
                 }, ct);
 
@@ -379,7 +381,7 @@ namespace Migration.Infrastructure.Implementation.Services
                         phase = (int)phase,
                         status = (int)PhaseStatus.NotStarted,
                         updatedAt = DateTime.UtcNow
-                    }, transaction: uow.Transaction, cancellationToken: ct);
+                    }, transaction: uow.Transaction, commandTimeout: _commandTimeoutSeconds, cancellationToken: ct);
                     await uow.Connection.ExecuteAsync(cmd);
                 }, ct);
 
@@ -412,7 +414,7 @@ namespace Migration.Infrastructure.Implementation.Services
                 checkpoint = await ExecuteCheckpointOperationAsync(async (uow) =>
                 {
                     var sql = "SELECT * FROM PhaseCheckpoints WHERE Phase = @phase";
-                    var cmd = new CommandDefinition(sql, new { phase = (int)phase }, transaction: uow.Transaction, cancellationToken: ct);
+                    var cmd = new CommandDefinition(sql, new { phase = (int)phase }, transaction: uow.Transaction, commandTimeout: _commandTimeoutSeconds, cancellationToken: ct);
                     return await uow.Connection.QueryFirstOrDefaultAsync<PhaseCheckpoint>(cmd);
                 }, ct);
 
@@ -437,7 +439,7 @@ namespace Migration.Infrastructure.Implementation.Services
                         status = (int)PhaseStatus.InProgress,
                         startedAt = DateTime.UtcNow,
                         updatedAt = DateTime.UtcNow
-                    }, transaction: uow.Transaction, cancellationToken: ct);
+                    }, transaction: uow.Transaction, commandTimeout: _commandTimeoutSeconds, cancellationToken: ct);
                     var rowsAffected = await uow.Connection.ExecuteAsync(cmd);
 
                     _logger.LogInformation("Phase {Phase} ({PhaseDisplayName}) marked as InProgress - {RowsAffected} rows updated",
@@ -465,7 +467,7 @@ namespace Migration.Infrastructure.Implementation.Services
                         status = (int)PhaseStatus.Completed,
                         completedAt = DateTime.UtcNow,
                         updatedAt = DateTime.UtcNow
-                    }, transaction: uow.Transaction, cancellationToken: ct);
+                    }, transaction: uow.Transaction, commandTimeout: _commandTimeoutSeconds, cancellationToken: ct);
                     await uow.Connection.ExecuteAsync(cmd);
                 }, ct);
 
@@ -552,7 +554,7 @@ namespace Migration.Infrastructure.Implementation.Services
                         status = (int)PhaseStatus.Failed,
                         errorMessage = errorMsg,
                         updatedAt = DateTime.UtcNow
-                    }, transaction: uow.Transaction, cancellationToken: ct);
+                    }, transaction: uow.Transaction, commandTimeout: _commandTimeoutSeconds, cancellationToken: ct);
                     await uow.Connection.ExecuteAsync(cmd);
                 }, ct);
             }
@@ -665,7 +667,7 @@ namespace Migration.Infrastructure.Implementation.Services
                 var checkpoint = await ExecuteCheckpointOperationAsync(async (uow) =>
                 {
                     var sql = "SELECT * FROM PhaseCheckpoints WHERE Phase = @phase";
-                    var cmd = new CommandDefinition(sql, new { phase = (int)MigrationPhase.FolderDiscovery }, transaction: uow.Transaction, cancellationToken: ct);
+                    var cmd = new CommandDefinition(sql, new { phase = (int)MigrationPhase.FolderDiscovery }, transaction: uow.Transaction, commandTimeout: _commandTimeoutSeconds, cancellationToken: ct);
                     return await uow.Connection.QueryFirstOrDefaultAsync<PhaseCheckpoint>(cmd);
                 }, ct);
 
@@ -690,7 +692,7 @@ namespace Migration.Infrastructure.Implementation.Services
                             phase = (int)MigrationPhase.FolderDiscovery,
                             docTypes = currentDocDescriptionsStr,
                             updatedAt = DateTime.UtcNow
-                        }, transaction: uow.Transaction, cancellationToken: ct);
+                        }, transaction: uow.Transaction, commandTimeout: _commandTimeoutSeconds, cancellationToken: ct);
                         await uow.Connection.ExecuteAsync(cmd);
                     }, ct);
                 }
@@ -725,7 +727,7 @@ namespace Migration.Infrastructure.Implementation.Services
                                 status = (int)PhaseStatus.NotStarted,
                                 docTypes = currentDocDescriptionsStr,
                                 updatedAt = DateTime.UtcNow
-                            }, transaction: uow.Transaction, cancellationToken: ct);
+                            }, transaction: uow.Transaction, commandTimeout: _commandTimeoutSeconds, cancellationToken: ct);
                             await uow.Connection.ExecuteAsync(cmd);
                         }, ct);
 
@@ -749,7 +751,7 @@ namespace Migration.Infrastructure.Implementation.Services
                                 move = (int)MigrationPhase.Move,
                                 status = (int)PhaseStatus.NotStarted,
                                 updatedAt = DateTime.UtcNow
-                            }, transaction: uow.Transaction, cancellationToken: ct);
+                            }, transaction: uow.Transaction, commandTimeout: _commandTimeoutSeconds, cancellationToken: ct);
                             await uow.Connection.ExecuteAsync(cmd);
                         }, ct);
 

@@ -1,5 +1,6 @@
 ﻿
 using Alfresco.Contracts.Mapper;
+using Alfresco.Contracts.SqlServer;
 using CA_MockData;
 using System.Diagnostics;
 using System.Net.Http.Headers;
@@ -30,7 +31,8 @@ public static class Program
 
         // Create repository and service
         // DocumentMappingRepository automatically handles CategoryMapping enrichment internally
-        var repository = new DocumentMappingRepository(uow, cache);
+        var sqlServerOptions = new SqlServerOptions { ConnectionString = connectionString };
+        var repository = new DocumentMappingRepository(uow, cache, sqlServerOptions);
         var documentMappingService = new DocumentMappingService(repository);
 
         var cfg = new Config()
