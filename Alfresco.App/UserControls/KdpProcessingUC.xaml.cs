@@ -1,5 +1,7 @@
+using Alfresco.Contracts.Options;
 using Alfresco.Contracts.Oracle.Models;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Options;
 using Migration.Abstraction.Interfaces;
 using SqlServer.Abstraction.Interfaces;
 using System;
@@ -19,6 +21,7 @@ namespace Alfresco.App.UserControls
     {
         private readonly IKdpDocumentProcessingService _kdpService;
         private readonly IKdpDocumentUpdateService? _updateService;
+        private readonly KdpProcessingOptions _kdpOptions;
         private CancellationTokenSource? _cts;
         private CancellationTokenSource? _searchCts;
 
@@ -51,6 +54,9 @@ namespace Alfresco.App.UserControls
                 ?? throw new InvalidOperationException("IKdpDocumentProcessingService nije registrovan u DI kontejneru");
 
             _updateService = App.AppHost.Services.GetService(typeof(IKdpDocumentUpdateService)) as IKdpDocumentUpdateService;
+
+            var migrationOptions = App.AppHost.Services.GetRequiredService<IOptions<MigrationOptions>>().Value;
+            _kdpOptions = migrationOptions.KdpProcessing;
 
             Loaded += KdpProcessingUC_Loaded;
         }
@@ -176,8 +182,8 @@ namespace Alfresco.App.UserControls
                 }
 
                 var updateResult = await _updateService.UpdateDocumentsAsync(
-                    batchSize: 1000,
-                    maxDegreeOfParallelism: 5,
+                    batchSize: _kdpOptions.BatchSize,
+                    maxDegreeOfParallelism: _kdpOptions.MaxDegreeOfParallelism,
                     progressCallback: OnProgress,
                     ct: _cts.Token);
 
