@@ -1,0 +1,155 @@
+<Window x:Class="Alfresco.DocStatusUpdater.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Alfresco DocStatus Updater" Height="750" Width="1200">
+
+    <Grid Margin="15">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*" MinHeight="300"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <!-- Title -->
+        <TextBlock Grid.Row="0" Text="DocStatus Update (1 -> 2)"
+                   FontSize="20" FontWeight="Bold" Margin="0,0,0,10"/>
+
+        <!-- Statistics and Actions -->
+        <Grid Grid.Row="1" Margin="0,0,0,10">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="Auto"/>
+            </Grid.ColumnDefinitions>
+
+            <!-- Statistics -->
+            <GroupBox Grid.Column="0" Header="Statistika" Margin="0,0,10,0" Padding="10">
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="*"/>
+                    </Grid.ColumnDefinitions>
+
+                    <StackPanel Grid.Column="0" Margin="5">
+                        <TextBlock Text="Ukupno pronadjeno:" FontWeight="SemiBold"/>
+                        <TextBlock x:Name="TxtTotalFound" Text="0" FontSize="18" Foreground="DodgerBlue"/>
+                    </StackPanel>
+
+                    <StackPanel Grid.Column="1" Margin="5">
+                        <TextBlock Text="Sa docStatus=1:" FontWeight="SemiBold"/>
+                        <TextBlock x:Name="TxtDocStatus1Count" Text="0" FontSize="18" Foreground="DarkOrange"/>
+                    </StackPanel>
+
+                    <StackPanel Grid.Column="2" Margin="5">
+                        <TextBlock Text="Uspesno azurirano:" FontWeight="SemiBold"/>
+                        <TextBlock x:Name="TxtUpdatedCount" Text="0" FontSize="18" Foreground="Green"/>
+                    </StackPanel>
+
+                    <StackPanel Grid.Column="3" Margin="5">
+                        <TextBlock Text="Neuspesno:" FontWeight="SemiBold"/>
+                        <TextBlock x:Name="TxtFailedCount" Text="0" FontSize="18" Foreground="Red"/>
+                    </StackPanel>
+
+                    <StackPanel Grid.Column="4" Margin="5">
+                        <TextBlock Text="Status:" FontWeight="SemiBold"/>
+                        <TextBlock x:Name="TxtStatus" Text="Spremno" FontSize="16" Foreground="Black"
+                                   TextWrapping="Wrap"/>
+                    </StackPanel>
+                </Grid>
+            </GroupBox>
+
+            <!-- Actions -->
+            <GroupBox Grid.Column="1" Header="Akcije" Padding="10" MinWidth="260">
+                <StackPanel>
+                    <Button x:Name="BtnSearch"
+                            Content="1. Pretrazi dokumente"
+                            Click="BtnSearch_Click"
+                            Height="35" Margin="3"
+                            Background="LightSkyBlue"
+                            ToolTip="Pretrazuje Alfresco (paginacija po 100) i filtrira docStatus=1"/>
+
+                    <Button x:Name="BtnUpdateAll"
+                            Content="2. Azuriraj sve (docStatus -> 2)"
+                            Click="BtnUpdateAll_Click"
+                            Height="35" Margin="3"
+                            Background="LightGreen"
+                            IsEnabled="False"
+                            ToolTip="Azurira ecm:docStatus na 2 za sve dokumente iz liste"/>
+
+                    <Button x:Name="BtnCancel"
+                            Content="Otkazi"
+                            Click="BtnCancel_Click"
+                            Height="35" Margin="3"
+                            Background="LightCoral"
+                            IsEnabled="False"/>
+                </StackPanel>
+            </GroupBox>
+        </Grid>
+
+        <!-- Progress Bar -->
+        <Grid Grid.Row="2" Margin="0,0,0,5">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="Auto"/>
+            </Grid.ColumnDefinitions>
+            <ProgressBar x:Name="ProgressBar" Grid.Column="0" Height="22" Minimum="0" Maximum="100" Value="0"/>
+            <TextBlock x:Name="TxtProgress" Grid.Column="1" VerticalAlignment="Center" Margin="10,0,0,0"
+                       Text="0 / 0" MinWidth="80"/>
+        </Grid>
+
+        <!-- TabControl: Data + Log -->
+        <TabControl Grid.Row="3" Margin="0,5,0,0">
+            <!-- Data Tab -->
+            <TabItem Header="Dokumenti (docStatus=1)">
+                <DataGrid x:Name="DgDocuments"
+                          AutoGenerateColumns="False"
+                          IsReadOnly="True"
+                          CanUserSortColumns="True"
+                          SelectionMode="Single"
+                          AlternatingRowBackground="AliceBlue"
+                          GridLinesVisibility="Horizontal"
+                          VirtualizingPanel.IsVirtualizing="True"
+                          VirtualizingPanel.VirtualizationMode="Recycling"
+                          EnableRowVirtualization="True"
+                          Margin="0,5">
+                    <DataGrid.Columns>
+                        <DataGridTextColumn Header="#" Binding="{Binding RowNumber}" Width="50"/>
+                        <DataGridTextColumn Header="Node ID" Binding="{Binding NodeId}" Width="280"/>
+                        <DataGridTextColumn Header="Ime dokumenta" Binding="{Binding Name}" Width="200"/>
+                        <DataGridTextColumn Header="docType" Binding="{Binding DocType}" Width="80"/>
+                        <DataGridTextColumn Header="docStatus" Binding="{Binding DocStatus}" Width="80"/>
+                        <DataGridTextColumn Header="Putanja" Binding="{Binding Path}" Width="300"/>
+                        <DataGridTextColumn Header="Datum kreiranja" Binding="{Binding CreatedAt, StringFormat=dd.MM.yyyy HH:mm}" Width="130"/>
+                        <DataGridCheckBoxColumn Header="Azurirano" Binding="{Binding IsUpdated}" Width="75"/>
+                        <DataGridTextColumn Header="Poruka" Binding="{Binding UpdateMessage}" Width="200"/>
+                    </DataGrid.Columns>
+                </DataGrid>
+            </TabItem>
+
+            <!-- Log Tab -->
+            <TabItem Header="Log">
+                <ScrollViewer VerticalScrollBarVisibility="Auto" Margin="5">
+                    <TextBox x:Name="TxtLog"
+                             IsReadOnly="True"
+                             TextWrapping="Wrap"
+                             FontFamily="Consolas"
+                             FontSize="11"
+                             BorderThickness="0"
+                             VerticalScrollBarVisibility="Auto"/>
+                </ScrollViewer>
+            </TabItem>
+        </TabControl>
+
+        <!-- Footer -->
+        <StackPanel Grid.Row="4" Orientation="Horizontal" Margin="0,5,0,0">
+            <TextBlock Text="Ukupno u listi: " FontWeight="SemiBold"/>
+            <TextBlock x:Name="TxtListCount" Text="0"/>
+            <TextBlock Text="  |  Neazurirano: " Margin="15,0,0,0"/>
+            <TextBlock x:Name="TxtNotUpdatedCount" Text="0"/>
+        </StackPanel>
+    </Grid>
+</Window>

@@ -40,14 +40,14 @@ public static class Program
             BaseUrl = "http://localhost:8080/",
             Username =  "admin",
             Password = "admin",
-            RootParentId = "cc",
-            FolderCount = 500,
+            RootParentId = "c68c2d21-8a53-4fc6-8c2d-218a537fc634",
+            FolderCount = 50,
             DocsPerFolder = 3,
             DegreeOfParallelism = 8,
             MaxRetries = 5,
             RetryBaseDelayMs = 100,
             UseNewFolderStructure = true,           // Enable new folder structure
-            ClientTypes = new[] { "PI", "LE", "D" },  // NOTE: ACC dossiers are created DURING migration, not as old dossiers
+            ClientTypes = new[] { "PI", "LE" },  // NOTE: ACC dossiers are created DURING migration, not as old dossiers
             StartingCoreId = 102206,                // Start from realistic CoreId
             AddFolderProperties = false,             // Set to true after deploying bankContentModel.xml
             DocumentMappingService = documentMappingService,  // Inject document mapping service
@@ -794,7 +794,8 @@ public static class Program
             await AddDocumentAsync("Specimen card for LE", customStatus: "poništen");
 
             // TC 12-14: Add KDP documents for LE (old documents that should be marked inactive)
-           // await AddDocumentAsync("KDP za pravna lica iz aplikacije"); // 00100 - nova verzija policy
+            await AddDocumentAsync("Specimen card for LE"); // 00100 - nova verzija policy
+            await AddDocumentAsync("Specimen Card for Authorized Person"); // 00101 - novi dokument policy
 
             // TC 15: Add exclusion document (should NOT be migrated)
             //await AddDocumentAsync("Ovlašćenje licima za donošenje instrumenata PP-a u Banku"); // 00702
