@@ -6,7 +6,7 @@
         xmlns:local="clr-namespace:Alfresco.App"
         xmlns:usercontrols="clr-namespace:Alfresco.App.UserControls"
         mc:Ignorable="d"
-        Title="Migration Ver 5.0.4" Height="750" Width="1200">
+        Title="Migration Ver 5.0.5" Height="750" Width="1200">
     <Grid>
         <usercontrols:Main />
     </Grid>
