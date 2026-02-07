@@ -52,7 +52,7 @@ namespace Migration.Infrastructure.Implementation.Services
             try
             {
                 // Očisti staging tabelu
-                await ClearStagingAsync(ct);
+                //await ClearStagingAsync(ct);
 
                 var kdpOptions = _options.Value.KdpProcessing;
                 var batchSize = kdpOptions.BatchSize;
@@ -68,11 +68,22 @@ namespace Migration.Infrastructure.Implementation.Services
                     return 0;
                 }
 
-               
+                var alreadyInserted = await CountStagingAsync(ct);
+                //var resumeFromSkip = (alreadyInserted / batchSize) * batchSize;
+                if (alreadyInserted == 0) 
+                    await ClearStagingAsync(ct);
+
                 var skipValues = Enumerable
                     .Range(0, (totalCount + batchSize - 1) / batchSize)
                     .Select(i => i * batchSize)
+                    .Where(s => s >= alreadyInserted)
                     .ToList();
+
+                //var skipValues = Enumerable
+                //    .Range(0, (totalCount + batchSize - 1) / batchSize)
+                //    .Select(i => (int)alreadyInserted + i * batchSize)
+                //    .ToList();
+
 
                 _logger.LogInformation("Broj batch-eva za obradu: {Count}", skipValues.Count);
 
@@ -306,7 +317,29 @@ namespace Migration.Infrastructure.Implementation.Services
             }
         }
 
-        
+        private async Task<long> CountStagingAsync(CancellationToken ct = default)
+        {
+            await using var scope = _scopeFactory.CreateAsyncScope();
+            var uow = scope.ServiceProvider.GetRequiredService<IUnitOfWork>();
+            var kdpStagingRepo = scope.ServiceProvider.GetRequiredService<IKdpDocumentStagingRepository>();
+          
+
+            await uow.BeginAsync(ct: ct).ConfigureAwait(false);
+            try
+            {
+                var stagingCount = await kdpStagingRepo.CountAsync(ct);  
+                await uow.CommitAsync(ct: ct).ConfigureAwait(false);
+                return stagingCount;
+            }
+            catch
+            {
+                await uow.RollbackAsync(ct: ct).ConfigureAwait(false);
+                throw;
+            }
+            //return 0;
+        }
+
+
         public async Task<KdpProcessingStatistics> GetStatisticsAsync(CancellationToken ct = default)
         {
             _logger.LogInformation("Učitavanje statistike...");
