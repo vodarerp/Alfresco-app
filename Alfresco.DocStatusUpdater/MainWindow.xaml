@@ -13,7 +13,7 @@
         </Grid.RowDefinitions>
 
         <!-- Title -->
-        <TextBlock Grid.Row="0" Text="DocStatus Update (1 -> 2)"
+        <TextBlock Grid.Row="0" Text="DocStatus Update"
                    FontSize="20" FontWeight="Bold" Margin="0,0,0,10"/>
 
         <!-- Statistics and Actions -->
@@ -70,10 +70,10 @@
                             Click="BtnSearch_Click"
                             Height="35" Margin="3"
                             Background="LightSkyBlue"
-                            ToolTip="Pretrazuje Alfresco (paginacija po 100) i filtrira docStatus=1"/>
+                            ToolTip="Pretrazuje Alfresco KDP 100 i 101 dokumenta i filtrira docStatus=1"/>
 
                     <Button x:Name="BtnUpdateAll"
-                            Content="2. Azuriraj sve (docStatus -> 2)"
+                            Content="2. Azuriraj KDP"
                             Click="BtnUpdateAll_Click"
                             Height="35" Margin="3"
                             Background="LightGreen"

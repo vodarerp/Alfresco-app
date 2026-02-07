@@ -2,7 +2,9 @@ using Alfresco.Abstraction.Interfaces;
 using Alfresco.Contracts.Request;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Newtonsoft.Json;
 using System.Collections.ObjectModel;
+using System.IO;
 using System.Windows;
 
 namespace Alfresco.DocStatusUpdater
@@ -137,6 +139,23 @@ namespace Alfresco.DocStatusUpdater
                 BtnUpdateAll.IsEnabled = _allItems.Count > 0;
 
                 AppendLog($"Pretraga zavrsena. Ukupno pronadjeno: {totalFound}, sa docStatus=1: {_allItems.Count}");
+
+                // Sacuvaj listu u txt fajl kao JSON
+                if (_allItems.Count > 0)
+                {
+                    try
+                    {
+                        var fileName = $"DocStatusSearch_{DateTime.Now:yyyyMMdd_HHmmss}.txt";
+                        var filePath = System.IO.Path.Combine(AppDomain.CurrentDomain.BaseDirectory, fileName);
+                        var json = JsonConvert.SerializeObject(_allItems, Formatting.Indented);
+                        await File.WriteAllTextAsync(filePath, json);
+                        AppendLog($"Lista sacuvana u fajl: {filePath}");
+                    }
+                    catch (Exception fileEx)
+                    {
+                        AppendLog($"UPOZORENJE: Nije moguce sacuvati fajl: {fileEx.Message}");
+                    }
+                }
             }
             catch (OperationCanceledException)
             {
@@ -210,9 +229,11 @@ namespace Alfresco.DocStatusUpdater
                 {
                     try
                     {
+                        //var tmpDoctype = item.DocType == "00825" ? "00101" : "00100";
                         var properties = new Dictionary<string, object>
                         {
                             { "ecm:docStatus", "2" }
+                            //{ "ecm:docType", tmpDoctype }
                         };
 
                         var updated = await _writeApi.UpdateNodePropertiesAsync(item.NodeId, properties, ct);
