@@ -167,16 +167,8 @@ namespace SqlServer.Infrastructure.Implementation
                         FROM KdpExportResult
                         where 1 = 1
                           and isnull(isUpdated, 0) = 0
-                          and isnull(action, 0) <> 0
-                          and isnull(izuzetak, 0) = 0
-                          and 1 = case
-                                when Action = 0 then 0
-                                when Action = 2 and isnull(OldDocumentStatus, '') = '1' and isnull(NewDocumentStatus, '') = '2' then 1
-                                when Action = 1 and isnull(OldDocumentStatus, '') = '2' and isnull(NewDocumentStatus, '') = '1' then 1
-                                when Action = 1 and isnull(OldDocumentStatus, '') = '1' and isnull(NewDocumentStatus, '') = '1'
-                                     and isnull(ListaRacunaUpdated, 0) = 1 then 1
-                                else 0
-                              end
+                          and isnull(action, 0) > 0
+                          and isnull(izuzetak, 0) = 0                          
                         ORDER BY Id";
 
             var cmd = new CommandDefinition(sql, new { BatchSize = batchSize }, transaction: Tx, commandTimeout: _commandTimeoutSeconds, cancellationToken: ct);
