@@ -216,6 +216,100 @@ namespace SqlServer.Infrastructure.Implementation
             };
         }
 
+        public async Task<int> InsertManyIgnoreDuplicatesAsync(IEnumerable<DocStaging> documents, CancellationToken ct)
+        {
+            var listDocs = documents.ToList();
+            if (listDocs.Count == 0) return 0;
+
+            int totalInserted = 0;
+            const int batchSize = 100;
+
+            for (int offset = 0; offset < listDocs.Count; offset += batchSize)
+            {
+                ct.ThrowIfCancellationRequested();
+
+                var batch = listDocs.Skip(offset).Take(batchSize).ToList();
+
+                foreach (var doc in batch)
+                {
+                    var sql = @"
+                        MERGE INTO DocStaging AS target
+                        USING (SELECT @NodeId AS NodeId) AS source
+                        ON target.NodeId = source.NodeId
+                        WHEN NOT MATCHED THEN
+                            INSERT (NodeId, Name, IsFolder, IsFile, NodeType, ParentId, FromPath, ToPath,
+                                    Status, ErrorMsg, CreatedAt, UpdatedAt, DocumentType, DocumentTypeMigration,
+                                    Source, IsActive, CategoryCode, CategoryName, OriginalCreatedAt,
+                                    ContractNumber, CoreId, Version, AccountNumbers, RequiresTypeTransformation,
+                                    FinalDocumentType, IsSigned, DutOfferId, ProductType,
+                                    OriginalDocumentName, NewDocumentName, OriginalDocumentCode, NewDocumentCode,
+                                    TipDosijea, TargetDossierType, ClientSegment, OldAlfrescoStatus, NewAlfrescoStatus,
+                                    WillReceiveMigrationSuffix, CodeWillChange, DocDescription,
+                                    DossierDestFolderId, DestinationFolderId, DossierDestFolderIsCreated)
+                            VALUES (@NodeId, @Name, @IsFolder, @IsFile, @NodeType, @ParentId, @FromPath, @ToPath,
+                                    @Status, @ErrorMsg, @CreatedAt, @UpdatedAt, @DocumentType, @DocumentTypeMigration,
+                                    @Source, @IsActive, @CategoryCode, @CategoryName, @OriginalCreatedAt,
+                                    @ContractNumber, @CoreId, @Version, @AccountNumbers, @RequiresTypeTransformation,
+                                    @FinalDocumentType, @IsSigned, @DutOfferId, @ProductType,
+                                    @OriginalDocumentName, @NewDocumentName, @OriginalDocumentCode, @NewDocumentCode,
+                                    @TipDosijea, @TargetDossierType, @ClientSegment, @OldAlfrescoStatus, @NewAlfrescoStatus,
+                                    @WillReceiveMigrationSuffix, @CodeWillChange, @DocDescription,
+                                    @DossierDestFolderId, @DestinationFolderId, @DossierDestFolderIsCreated);";
+
+                    var dp = new DynamicParameters();
+                    dp.Add("@NodeId", doc.NodeId);
+                    dp.Add("@Name", doc.Name);
+                    dp.Add("@IsFolder", doc.IsFolder);
+                    dp.Add("@IsFile", doc.IsFile);
+                    dp.Add("@NodeType", doc.NodeType);
+                    dp.Add("@ParentId", doc.ParentId);
+                    dp.Add("@FromPath", doc.FromPath);
+                    dp.Add("@ToPath", doc.ToPath);
+                    dp.Add("@Status", doc.Status);
+                    dp.Add("@ErrorMsg", doc.ErrorMsg);
+                    dp.Add("@CreatedAt", doc.CreatedAt);
+                    dp.Add("@UpdatedAt", doc.UpdatedAt);
+                    dp.Add("@DocumentType", doc.DocumentType);
+                    dp.Add("@DocumentTypeMigration", doc.DocumentTypeMigration);
+                    dp.Add("@Source", doc.Source);
+                    dp.Add("@IsActive", doc.IsActive);
+                    dp.Add("@CategoryCode", doc.CategoryCode);
+                    dp.Add("@CategoryName", doc.CategoryName);
+                    dp.Add("@OriginalCreatedAt", doc.OriginalCreatedAt);
+                    dp.Add("@ContractNumber", doc.ContractNumber);
+                    dp.Add("@CoreId", doc.CoreId);
+                    dp.Add("@Version", doc.Version);
+                    dp.Add("@AccountNumbers", doc.AccountNumbers);
+                    dp.Add("@RequiresTypeTransformation", doc.RequiresTypeTransformation);
+                    dp.Add("@FinalDocumentType", doc.FinalDocumentType);
+                    dp.Add("@IsSigned", doc.IsSigned);
+                    dp.Add("@DutOfferId", doc.DutOfferId);
+                    dp.Add("@ProductType", doc.ProductType);
+                    dp.Add("@OriginalDocumentName", doc.OriginalDocumentName);
+                    dp.Add("@NewDocumentName", doc.NewDocumentName);
+                    dp.Add("@OriginalDocumentCode", doc.OriginalDocumentCode);
+                    dp.Add("@NewDocumentCode", doc.NewDocumentCode);
+                    dp.Add("@TipDosijea", doc.TipDosijea);
+                    dp.Add("@TargetDossierType", doc.TargetDossierType);
+                    dp.Add("@ClientSegment", doc.ClientSegment);
+                    dp.Add("@OldAlfrescoStatus", doc.OldAlfrescoStatus);
+                    dp.Add("@NewAlfrescoStatus", doc.NewAlfrescoStatus);
+                    dp.Add("@WillReceiveMigrationSuffix", doc.WillReceiveMigrationSuffix);
+                    dp.Add("@CodeWillChange", doc.CodeWillChange);
+                    dp.Add("@DocDescription", doc.DocDescription);
+                    dp.Add("@DossierDestFolderId", doc.DossierDestFolderId);
+                    dp.Add("@DestinationFolderId", doc.DestinationFolderId);
+                    dp.Add("@DossierDestFolderIsCreated", doc.DossierDestFolderIsCreated);
+
+                    var cmd = new CommandDefinition(sql, dp, Tx, commandTimeout: _commandTimeoutSeconds, cancellationToken: ct);
+                    var rowsAffected = await Conn.ExecuteAsync(cmd).ConfigureAwait(false);
+                    totalInserted += rowsAffected;
+                }
+            }
+
+            return totalInserted;
+        }
+
         public async Task<int> UpdateDestinationFolderIdAsync(
             string dossierDestFolderId,
             string alfrescoFolderId,

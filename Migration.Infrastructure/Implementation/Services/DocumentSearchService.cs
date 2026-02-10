@@ -583,185 +583,401 @@ namespace Migration.Infrastructure.Implementation.Services
         public async Task<bool> RunLoopAsync(CancellationToken ct, Action<WorkerProgress>? progressCallback)
         {
             var sw = Stopwatch.StartNew();
-            var emptyResultCounter = 0;
-            var delay = _options.Value.IdleDelayInMs;
-            var maxEmptyResults = _options.Value.BreakEmptyResults;
             var batchSize = _options.Value.DocumentTypeDiscovery.BatchSize;
-            var completedSuccessfully = false;
+            var maxDocs = _options.Value.MaxDocumentsToProcess;
 
-            _fileLogger.LogInformation("DocumentSearch service started - IdleDelay: {IdleDelay}ms, MaxEmptyResults: {MaxEmptyResults}",
-                delay, maxEmptyResults);
+            _fileLogger.LogInformation("DocumentSearch service started (parallel mode)");
             _dbLogger.LogInformation("DocumentSearch service started");
-            _uiLogger.LogInformation("Document Search (by docDesc) started");
+            _uiLogger.LogInformation("Document Search (by docDesc) started - parallel mode");
 
             // Load checkpoint to resume from last position
             await LoadCheckpointAsync(ct).ConfigureAwait(false);
 
-            // Set TotalItems estimate for progress tracking (updated as we discover more)
+            // Set TotalItems estimate for progress tracking
             await UpdateTotalItemsEstimateAsync(ct).ConfigureAwait(false);
 
-            // Initial progress report
             var progress = new WorkerProgress
             {
                 TotalItems = 0,
                 ProcessedItems = _totalDocumentsProcessed,
                 BatchSize = batchSize,
                 CurrentBatch = 0,
-                Message = "Starting document search by ecm:docDesc..."
+                Message = "Starting document search by ecm:docDesc (parallel)..."
             };
             progressCallback?.Invoke(progress);
 
-            while (!ct.IsCancellationRequested)
+            try
             {
-                // Check if we've reached the maximum number of documents to process
-                var maxDocs = _options.Value.MaxDocumentsToProcess;
-                if (maxDocs > 0 && _totalDocumentsProcessed >= maxDocs)
-                {
-                    _fileLogger.LogInformation(
-                        "Reached maximum documents limit: {MaxDocs}. Total processed: {TotalProcessed}",
-                        maxDocs, _totalDocumentsProcessed);
-                    _dbLogger.LogInformation(
-                        "Migration stopped - reached max documents limit: {MaxDocs}",
-                        maxDocs);
-                    _uiLogger.LogInformation(
-                        "Reached max documents limit: {MaxDocs} documents processed",
-                        maxDocs);
+                // Initialize DOSSIER folders
+                _dossierFolders = await FindDossierSubfoldersAsync(ct).ConfigureAwait(false);
 
-                    progress.Message = $"Completed: Reached limit of {maxDocs} documents";
-                    progressCallback?.Invoke(progress);
-                    completedSuccessfully = true;
-                    break;
+                if (_dossierFolders.Count == 0)
+                {
+                    _fileLogger.LogWarning("No DOSSIER subfolders found matching criteria");
+                    _uiLogger.LogWarning("No DOSSIER subfolders found");
+                    return true;
                 }
 
-                using var batchScope = _fileLogger.BeginScope(new Dictionary<string, object>
-                {
-                    ["BatchCounter"] = _batchCounter + 1
-                });
+                _fileLogger.LogInformation("Found {Count} DOSSIER subfolders: {Types}",
+                    _dossierFolders.Count, string.Join(", ", _dossierFolders.Keys));
 
-                try
-                {
-                    _fileLogger.LogInformation("Starting batch {BatchCounter}", _batchCounter + 1);
+                var docDescriptions = _docDescriptionsOverride ?? _options.Value.DocumentTypeDiscovery.DocTypes;
+                var folderTypes = _dossierFolders.Keys.OrderBy(k => k).ToList();
 
-                    var result = await RunBatchAsync(ct).ConfigureAwait(false);
+                // Process each DOSSIER folder sequentially (PI, LE, D...)
+                // Parallelism is WITHIN each folder
+                foreach (var folderType in folderTypes)
+                {
+                    ct.ThrowIfCancellationRequested();
+
+                    // Check max documents limit before processing folder
+                    if (maxDocs > 0 && _totalDocumentsProcessed >= maxDocs)
+                    {
+                        _fileLogger.LogInformation(
+                            "Reached maximum documents limit: {MaxDocs}. Total processed: {TotalProcessed}",
+                            maxDocs, _totalDocumentsProcessed);
+                        break;
+                    }
+
+                    var folderId = _dossierFolders[folderType];
+
+                    _fileLogger.LogInformation("Processing DOSSIER-{Type} folder in parallel mode", folderType);
+                    _uiLogger.LogInformation("Processing DOSSIER-{Type}...", folderType);
+
+                    await ProcessDossierFolderParallelAsync(folderType, folderId, docDescriptions, ct).ConfigureAwait(false);
+
+                    // Save checkpoint after each DOSSIER folder
+                    await SaveCheckpointProgressAsync(ct).ConfigureAwait(false);
 
                     // Update progress
                     progress.ProcessedItems = _totalDocumentsProcessed;
                     progress.CurrentBatch = _batchCounter;
-                    progress.CurrentBatchCount = result.DocumentsInserted;
-                    progress.SuccessCount = result.DocumentsInserted;
-                    progress.FailedCount = (int)_totalFailed;
                     progress.Timestamp = DateTimeOffset.UtcNow;
-                    progress.Message = result.DocumentsFound > 0
-                        ? $"Processed {result.DocumentsInserted} documents, {result.FoldersInserted} new folders in batch {_batchCounter}"
-                        : "No more documents to process";
-
+                    progress.Message = $"Completed DOSSIER-{folderType}: {_totalDocumentsProcessed} total documents";
                     progressCallback?.Invoke(progress);
 
-                    if (result.DocumentsFound == 0)
-                    {
-                        emptyResultCounter++;
-                       
+                    _fileLogger.LogInformation(
+                        "Completed DOSSIER-{Type}. Running total: {TotalDocs} documents, {TotalFolders} folders",
+                        folderType, _totalDocumentsProcessed, _totalFoldersInserted);
+                }
 
-                        if (emptyResultCounter >= maxEmptyResults)
-                        {
-                            _fileLogger.LogInformation("Breaking after {Count} consecutive empty results", emptyResultCounter);
-                            _dbLogger.LogInformation("Breaking after {Count} consecutive empty results", emptyResultCounter);
-
-                            progress.Message = $"Completed: {_totalDocumentsProcessed} documents, {_totalFoldersInserted} folders processed";
-                            progressCallback?.Invoke(progress);
-                            completedSuccessfully = true;
-                            break;
-                        }
-
-                        await Task.Delay(delay, ct).ConfigureAwait(false);
-                    }
-                    else
-                    {
-                        emptyResultCounter = 0;
-
-                        var betweenDelay = _options.Value.DocumentTypeDiscovery.DelayBetweenBatchesInMs;
-                        if (betweenDelay > 0)
-                        {
-                            await Task.Delay(betweenDelay, ct).ConfigureAwait(false);
-                        }
-                    }
-                }
-                catch (OperationCanceledException)
-                {
-                    _fileLogger.LogInformation("DocumentSearch service cancelled by user");
-                    _dbLogger.LogInformation("DocumentSearch service cancelled");
-                    _uiLogger.LogInformation("Document Search cancelled");
-                    progress.Message = $"Cancelled after processing {_totalDocumentsProcessed} documents";
-                    progressCallback?.Invoke(progress);
-                    throw;
-                }
-                catch (AlfrescoTimeoutException timeoutEx)
-                {
-                    _fileLogger.LogError("DocumentSearch service stopped - Alfresco Timeout: {Message}", timeoutEx.Message);
-                    _dbLogger.LogError(timeoutEx, "DocumentSearch service stopped - Timeout");
-                    _uiLogger.LogError("Document Search stopped - Timeout: {Operation}", timeoutEx.Operation);
-                    throw; // Re-throw to stop migration
-                }
-                catch (AlfrescoRetryExhaustedException retryEx)
-                {
-                    _fileLogger.LogError("DocumentSearch service stopped - Alfresco Retry Exhausted: {Message}", retryEx.Message);
-                    _dbLogger.LogError(retryEx, "DocumentSearch service stopped - Retry Exhausted");
-                    _uiLogger.LogError("Document Search stopped - Retry Exhausted: {Operation}", retryEx.Operation);
-                    throw; // Re-throw to stop migration
-                }
-                catch (AlfrescoException alfrescoEx)
-                {
-                    _fileLogger.LogError("DocumentSearch service stopped - Alfresco Error: {Message}", alfrescoEx.Message);
-                    _dbLogger.LogError(alfrescoEx, "DocumentSearch service stopped - Alfresco Error");
-                    _uiLogger.LogError("Document Search stopped - Alfresco Error (Status: {StatusCode})", alfrescoEx.StatusCode);
-                    throw; // Re-throw to stop migration
-                }
-                catch (ClientApiTimeoutException clientTimeoutEx)
-                {
-                    _fileLogger.LogError("DocumentSearch service stopped - Client API Timeout: {Message}", clientTimeoutEx.Message);
-                    _dbLogger.LogError(clientTimeoutEx, "DocumentSearch service stopped - Client API Timeout");
-                    _uiLogger.LogError("Document Search stopped - Client API Timeout: {Operation}", clientTimeoutEx.Operation);
-                    throw; // Re-throw to stop migration
-                }
-                catch (ClientApiRetryExhaustedException clientRetryEx)
-                {
-                    _fileLogger.LogError("DocumentSearch service stopped - Client API Retry Exhausted: {Message}", clientRetryEx.Message);
-                    _dbLogger.LogError(clientRetryEx, "DocumentSearch service stopped - Client API Retry Exhausted");
-                    _uiLogger.LogError("Document Search stopped - Client API Retry Exhausted: {Operation}", clientRetryEx.Operation);
-                    throw; // Re-throw to stop migration
-                }
-                catch (ClientApiException clientEx)
-                {
-                    _fileLogger.LogError("DocumentSearch service stopped - Client API Error: {Message}", clientEx.Message);
-                    _dbLogger.LogError(clientEx, "DocumentSearch service stopped - Client API Error");
-                    _uiLogger.LogError("Document Search stopped - Client API Error (Status: {StatusCode})", clientEx.StatusCode);
-                    throw; // Re-throw to stop migration
-                }
-                catch (Exception ex)
-                {
-                    _fileLogger.LogError("Critical error in batch {BatchCounter}: {Error}", _batchCounter, ex.Message);
-                    _dbLogger.LogError(ex, "Error in batch {BatchCounter}", _batchCounter);
-                    _uiLogger.LogError("Error in batch {BatchCounter}", _batchCounter);
-
-                    progress.Message = $"Error in batch {_batchCounter}: {ex.Message}";
-                    progressCallback?.Invoke(progress);
-
-                    await Task.Delay(delay * 2, ct).ConfigureAwait(false);
-                }
+                // Mark phase completed
+                progress.Message = $"Completed: {_totalDocumentsProcessed} documents, {_totalFoldersInserted} folders processed";
+                progressCallback?.Invoke(progress);
+            }
+            catch (OperationCanceledException)
+            {
+                _fileLogger.LogInformation("DocumentSearch service cancelled by user");
+                _dbLogger.LogInformation("DocumentSearch service cancelled");
+                _uiLogger.LogInformation("Document Search cancelled");
+                progress.Message = $"Cancelled after processing {_totalDocumentsProcessed} documents";
+                progressCallback?.Invoke(progress);
+                throw;
+            }
+            catch (AlfrescoTimeoutException timeoutEx)
+            {
+                _fileLogger.LogError("DocumentSearch service stopped - Alfresco Timeout: {Message}", timeoutEx.Message);
+                _dbLogger.LogError(timeoutEx, "DocumentSearch service stopped - Timeout");
+                _uiLogger.LogError("Document Search stopped - Timeout: {Operation}", timeoutEx.Operation);
+                throw;
+            }
+            catch (AlfrescoRetryExhaustedException retryEx)
+            {
+                _fileLogger.LogError("DocumentSearch service stopped - Alfresco Retry Exhausted: {Message}", retryEx.Message);
+                _dbLogger.LogError(retryEx, "DocumentSearch service stopped - Retry Exhausted");
+                _uiLogger.LogError("Document Search stopped - Retry Exhausted: {Operation}", retryEx.Operation);
+                throw;
+            }
+            catch (AlfrescoException alfrescoEx)
+            {
+                _fileLogger.LogError("DocumentSearch service stopped - Alfresco Error: {Message}", alfrescoEx.Message);
+                _dbLogger.LogError(alfrescoEx, "DocumentSearch service stopped - Alfresco Error");
+                _uiLogger.LogError("Document Search stopped - Alfresco Error (Status: {StatusCode})", alfrescoEx.StatusCode);
+                throw;
+            }
+            catch (ClientApiTimeoutException clientTimeoutEx)
+            {
+                _fileLogger.LogError("DocumentSearch service stopped - Client API Timeout: {Message}", clientTimeoutEx.Message);
+                _dbLogger.LogError(clientTimeoutEx, "DocumentSearch service stopped - Client API Timeout");
+                _uiLogger.LogError("Document Search stopped - Client API Timeout: {Operation}", clientTimeoutEx.Operation);
+                throw;
+            }
+            catch (ClientApiRetryExhaustedException clientRetryEx)
+            {
+                _fileLogger.LogError("DocumentSearch service stopped - Client API Retry Exhausted: {Message}", clientRetryEx.Message);
+                _dbLogger.LogError(clientRetryEx, "DocumentSearch service stopped - Client API Retry Exhausted");
+                _uiLogger.LogError("Document Search stopped - Client API Retry Exhausted: {Operation}", clientRetryEx.Operation);
+                throw;
+            }
+            catch (ClientApiException clientEx)
+            {
+                _fileLogger.LogError("DocumentSearch service stopped - Client API Error: {Message}", clientEx.Message);
+                _dbLogger.LogError(clientEx, "DocumentSearch service stopped - Client API Error");
+                _uiLogger.LogError("Document Search stopped - Client API Error (Status: {StatusCode})", clientEx.StatusCode);
+                throw;
+            }
+            catch (Exception ex)
+            {
+                _fileLogger.LogError("Critical error in DocumentSearch: {Error}", ex.Message);
+                _dbLogger.LogError(ex, "Critical error in DocumentSearch");
+                _uiLogger.LogError("Document Search stopped - Critical Error");
+                throw;
             }
 
+            sw.Stop();
             _fileLogger.LogInformation(
-                "DocumentSearch service completed after {Count} batches. Total: {Docs} documents, {Folders} folders",
-                _batchCounter, _totalDocumentsProcessed, _totalFoldersInserted);
+                "DocumentSearch service completed in {Elapsed}. Total: {Docs} documents, {Folders} folders",
+                sw.Elapsed, _totalDocumentsProcessed, _totalFoldersInserted);
             _dbLogger.LogInformation(
                 "DocumentSearch service completed - Total: {Docs} documents, {Folders} folders",
                 _totalDocumentsProcessed, _totalFoldersInserted);
             _uiLogger.LogInformation("Document Search completed: {Docs} documents processed", _totalDocumentsProcessed);
 
-            return completedSuccessfully;
+            return true;
         }
 
         #region Private Methods
+
+        private async Task<int> GetTotalDocumentCountAsync(string query, CancellationToken ct)
+        {
+            var request = new PostSearchRequest
+            {
+                Query = new QueryRequest { Query = query, Language = "afts" },
+                Paging = new PagingRequest { MaxItems = 1, SkipCount = 0 }
+            };
+            var response = await _alfrescoReadApi.SearchAsync(request, ct).ConfigureAwait(false);
+            return response.List.Pagination.TotalItems;
+        }
+
+        private async Task ProcessDossierFolderParallelAsync(
+            string folderType,
+            string folderId,
+            List<string> docDescriptions,
+            CancellationToken ct)
+        {
+            var batchSize = _options.Value.DocumentTypeDiscovery.BatchSize;
+            var maxParallelism = _options.Value.DocumentTypeDiscovery.MaxDegreeOfParallelism > 0
+                ? _options.Value.DocumentTypeDiscovery.MaxDegreeOfParallelism
+                : 5;
+            var maxDocs = _options.Value.MaxDocumentsToProcess;
+
+            var query = BuildDocumentSearchQuery(folderId, docDescriptions);
+            var totalCount = await GetTotalDocumentCountAsync(query, ct).ConfigureAwait(false);
+
+            _fileLogger.LogInformation(
+                "DOSSIER-{Type}: Total documents from Alfresco: {TotalCount}, BatchSize: {BatchSize}, Parallelism: {Parallelism}",
+                folderType, totalCount, batchSize, maxParallelism);
+
+            if (totalCount == 0)
+            {
+                _fileLogger.LogInformation("DOSSIER-{Type}: No documents found, skipping", folderType);
+                return;
+            }
+
+            // Calculate skip values for all batches
+            var skipValues = Enumerable
+                .Range(0, (totalCount + batchSize - 1) / batchSize)
+                .Select(i => i * batchSize)
+                .ToList();
+
+            _fileLogger.LogInformation("DOSSIER-{Type}: Will process {BatchCount} batches", folderType, skipValues.Count);
+
+            // Prepare regex and hashset for post-filtering
+            var typeForRegex = folderType == "D" ? "DE" : folderType;
+            var regex = new Regex($"^{Regex.Escape(typeForRegex)}[0-9]", RegexOptions.IgnoreCase);
+            var docDescHashSet = new HashSet<string>(docDescriptions, StringComparer.OrdinalIgnoreCase);
+
+            // ConcurrentQueue for batched results
+            var pendingBatches = new ConcurrentQueue<(List<FolderStaging> Folders, List<DocStaging> Documents)>();
+            var dbWriteLock = new SemaphoreSlim(1, 1);
+            const int batchThreshold = 5;
+
+            var parallelOptions = new ParallelOptions
+            {
+                MaxDegreeOfParallelism = maxParallelism,
+                CancellationToken = ct
+            };
+
+            await Parallel.ForEachAsync(skipValues, parallelOptions, async (skipCount, token) =>
+            {
+                // Check max documents limit (rough check, no lock for simplicity)
+                if (maxDocs > 0 && Interlocked.Read(ref _totalDocumentsProcessed) >= maxDocs)
+                    return;
+
+                try
+                {
+                    // Fetch batch from Alfresco
+                    var searchResult = await SearchDocumentsByDescriptionAsync(folderId, docDescriptions, skipCount, batchSize, token)
+                        .ConfigureAwait(false);
+
+                    // Post-filter: regex + docDesc HashSet
+                    var filteredDocs = searchResult.Documents.Where(o =>
+                    {
+                        var lastParentName = o.Entry.Path?.Elements?.LastOrDefault()?.Name;
+                        return lastParentName != null && regex.IsMatch(lastParentName);
+                    }).Where(o =>
+                    {
+                        var docDesc = o.Entry.Properties?.GetValueOrDefault("ecm:docDesc")?.ToString();
+                        return docDesc != null && docDescHashSet.Contains(docDesc);
+                    }).ToList();
+
+                    if (filteredDocs.Count == 0) return;
+
+                    // Extract unique folders
+                    var uniqueFolders = ExtractUniqueFolders(filteredDocs, folderType);
+
+                    // Apply document mapping for each document
+                    var docsToInsert = new List<DocStaging>();
+                    foreach (var doc in filteredDocs)
+                    {
+                        var parentFolderId = GetParentFolderIdFromPath(doc.Entry);
+                        if (string.IsNullOrEmpty(parentFolderId)) continue;
+
+                        if (!uniqueFolders.TryGetValue(parentFolderId, out var folder))
+                        {
+                            _folderCache.TryGetValue(parentFolderId, out folder);
+                        }
+
+                        if (folder == null) continue;
+
+                        var docStaging = doc.Entry.ToDocStagingInsert();
+                        docStaging.Status = MigrationStatus.Ready.ToDbString();
+                        docStaging.ToPath = string.Empty;
+
+                        await ApplyDocumentMappingAsync(docStaging, folder, doc.Entry, token).ConfigureAwait(false);
+                        docsToInsert.Add(docStaging);
+                    }
+
+                    if (docsToInsert.Count == 0 && uniqueFolders.Count == 0) return;
+
+                    // Enqueue results
+                    pendingBatches.Enqueue((uniqueFolders.Values.ToList(), docsToInsert));
+
+                    _fileLogger.LogInformation(
+                        "DOSSIER-{Type} skip={Skip}: {DocsCount} docs, {FoldersCount} folders queued",
+                        folderType, skipCount, docsToInsert.Count, uniqueFolders.Count);
+
+                    // Periodic bulk insert when queue reaches threshold
+                    if (pendingBatches.Count >= batchThreshold)
+                    {
+                        var acquired = await dbWriteLock.WaitAsync(0, token).ConfigureAwait(false);
+                        if (acquired)
+                        {
+                            try
+                            {
+                                await FlushPendingBatchesAsync(pendingBatches, folderType, token).ConfigureAwait(false);
+                            }
+                            finally
+                            {
+                                dbWriteLock.Release();
+                            }
+                        }
+                    }
+                }
+                catch (OperationCanceledException) { throw; }
+                catch (Exception ex)
+                {
+                    _fileLogger.LogError(
+                        "DOSSIER-{Type} skip={Skip}: Error processing batch: {Error}",
+                        folderType, skipCount, ex.Message);
+                }
+            }).ConfigureAwait(false);
+
+            // Final flush - insert all remaining batches
+            if (!pendingBatches.IsEmpty)
+            {
+                _fileLogger.LogInformation("DOSSIER-{Type}: Final flush - {Count} batches remaining",
+                    folderType, pendingBatches.Count);
+
+                await FlushPendingBatchesAsync(pendingBatches, folderType, ct).ConfigureAwait(false);
+            }
+
+            _fileLogger.LogInformation(
+                "DOSSIER-{Type}: Parallel processing completed. Running total: {TotalDocs} documents, {TotalFolders} folders",
+                folderType, _totalDocumentsProcessed, _totalFoldersInserted);
+        }
+
+        private async Task FlushPendingBatchesAsync(
+            ConcurrentQueue<(List<FolderStaging> Folders, List<DocStaging> Documents)> pendingBatches,
+            string folderType,
+            CancellationToken ct)
+        {
+            var allFolders = new List<FolderStaging>();
+            var allDocs = new List<DocStaging>();
+
+            while (pendingBatches.TryDequeue(out var batch))
+            {
+                allFolders.AddRange(batch.Folders);
+                allDocs.AddRange(batch.Documents);
+            }
+
+            if (allFolders.Count == 0 && allDocs.Count == 0) return;
+
+            // Insert folders
+            if (allFolders.Count > 0)
+            {
+                var foldersInserted = await InsertFoldersIgnoreDuplicatesAsync(allFolders, ct).ConfigureAwait(false);
+                Interlocked.Add(ref _totalFoldersInserted, foldersInserted);
+            }
+
+            // Insert documents
+            if (allDocs.Count > 0)
+            {
+                var docsInserted = await InsertDocumentsIgnoreDuplicatesAsync(allDocs, ct).ConfigureAwait(false);
+                Interlocked.Add(ref _totalDocumentsProcessed, docsInserted);
+                Interlocked.Increment(ref _batchCounter);
+            }
+
+            _fileLogger.LogInformation(
+                "DOSSIER-{Type}: Flushed {FolderCount} folders, {DocCount} documents to DB",
+                folderType, allFolders.Count, allDocs.Count);
+        }
+
+        private async Task<int> InsertFoldersIgnoreDuplicatesAsync(List<FolderStaging> folders, CancellationToken ct)
+        {
+            if (folders.Count == 0) return 0;
+
+            await using var scope = _scopeFactory.CreateAsyncScope();
+            var uow = scope.ServiceProvider.GetRequiredService<IUnitOfWork>();
+            var folderRepo = scope.ServiceProvider.GetRequiredService<IFolderStagingRepository>();
+
+            await uow.BeginAsync(ct: ct).ConfigureAwait(false);
+            try
+            {
+                var inserted = await folderRepo.InsertManyIgnoreDuplicatesAsync(folders, ct).ConfigureAwait(false);
+                await uow.CommitAsync(ct: ct).ConfigureAwait(false);
+                return inserted;
+            }
+            catch (Exception ex)
+            {
+                _fileLogger.LogError("Failed to insert folders: {Error}", ex.Message);
+                await uow.RollbackAsync(ct: ct).ConfigureAwait(false);
+                throw;
+            }
+        }
+
+        private async Task<int> InsertDocumentsIgnoreDuplicatesAsync(List<DocStaging> documents, CancellationToken ct)
+        {
+            if (documents.Count == 0) return 0;
+
+            await using var scope = _scopeFactory.CreateAsyncScope();
+            var uow = scope.ServiceProvider.GetRequiredService<IUnitOfWork>();
+            var docRepo = scope.ServiceProvider.GetRequiredService<IDocStagingRepository>();
+
+            await uow.BeginAsync(ct: ct).ConfigureAwait(false);
+            try
+            {
+                var inserted = await docRepo.InsertManyIgnoreDuplicatesAsync(documents, ct).ConfigureAwait(false);
+                await uow.CommitAsync(ct: ct).ConfigureAwait(false);
+                return inserted;
+            }
+            catch (Exception ex)
+            {
+                _fileLogger.LogError("Failed to insert documents: {Error}", ex.Message);
+                await uow.RollbackAsync(ct: ct).ConfigureAwait(false);
+                throw;
+            }
+        }
 
         /// <summary>
         /// Finds DOSSIER-{type} subfolders in the root discovery folder

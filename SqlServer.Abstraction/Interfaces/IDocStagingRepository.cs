@@ -25,5 +25,7 @@ namespace SqlServer.Abstraction.Interfaces
             string finalDocumentType,
             string? clientApiError = null,
             CancellationToken ct = default);
+
+        Task<int> InsertManyIgnoreDuplicatesAsync(IEnumerable<DocStaging> documents, CancellationToken ct);
     }
 }

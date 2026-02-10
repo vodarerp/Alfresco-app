@@ -45,7 +45,8 @@
       "Bash(Select-String -Pattern \"error|Build succeeded|Build FAILED\" -Context 2,2)",
       "Bash(grep:*)",
       "Bash(cd:*)",
-      "Bash(dir:*)"
+      "Bash(dir:*)",
+      "Bash(Select-String -Pattern \"\\(error CS|Build succeeded|Build FAILED\\)\")"
     ],
     "deny": [],
     "ask": []

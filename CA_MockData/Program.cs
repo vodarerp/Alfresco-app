@@ -40,22 +40,22 @@ public static class Program
             BaseUrl = "http://localhost:8080/",
             Username =  "admin",
             Password = "admin",
-            RootParentId = "a1c08f4f-16b5-4163-808f-4f16b5d1630b",
-            FolderCount = 50,
-            DocsPerFolder = 3,
-            DegreeOfParallelism = 8,
+            RootParentId = "7ba5718f-fc8b-4f0b-a571-8ffc8b5f0ba3",
+            FolderCount = 100,
+            DocsPerFolder = 10,
+            DegreeOfParallelism = 5,
             MaxRetries = 5,
             RetryBaseDelayMs = 100,
             UseNewFolderStructure = true,           // Enable new folder structure
             ClientTypes = new[] { "PI", "LE" },  // NOTE: ACC dossiers are created DURING migration, not as old dossiers
-            StartingCoreId = 102206,                // Start from realistic CoreId
+            StartingCoreId = 100000,                // Start from realistic CoreId
             AddFolderProperties = false,             // Set to true after deploying bankContentModel.xml
             DocumentMappingService = documentMappingService,  // Inject document mapping service
 
             // KDP document generation settings
             // To generate ~5000 KDP documents: Set FolderCount=500 and KdpDocumentsPerFolder=10
             // Or: Set FolderCount=250 and KdpDocumentsPerFolder=20
-            GenerateOnlyKdpDocuments = true,       // Set to true to generate only KDP documents
+            GenerateOnlyKdpDocuments = false,       // Set to true to generate only KDP documents
             KdpDocumentsPerFolder = 15              // Number of KDP documents per folder
         };
 
@@ -136,7 +136,7 @@ public static class Program
                             var clientType = cfg.ClientTypes[i % cfg.ClientTypes.Length];
                             var coreId = cfg.StartingCoreId + i;
                             // Format: Create without "-" separator
-                            if (i % 4 == 0) folderName = $"LN{coreId}";
+                            if (i % 9 == 0) folderName = $"LN{coreId}";
                             else folderName = $"{clientType}{coreId}"; // e.g., PI102206, LE500342, ACC13001926
                             parentId = dosieFolders[clientType]; // DOSSIERS-PI, DOSSIERS-LE, etc.
                         }
