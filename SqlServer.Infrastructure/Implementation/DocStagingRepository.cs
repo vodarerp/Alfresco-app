@@ -101,7 +101,9 @@ namespace SqlServer.Infrastructure.Implementation
                     INSERTED.OriginalCreatedAt,
                     INSERTED.DossierDestFolderId,
                     INSERTED.DossierDestFolderIsCreated,
-                    INSERTED.FinalDocumentType
+                    INSERTED.FinalDocumentType,
+                    INSERTED.NewDocumentCode,
+                    INSERTED.NewDocumentName
                 FROM DocStaging d
                 INNER JOIN SelectedDocs s ON d.Id = s.Id";
 

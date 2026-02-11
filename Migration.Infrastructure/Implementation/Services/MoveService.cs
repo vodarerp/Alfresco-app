@@ -10,29 +10,21 @@ using Microsoft.Extensions.Options;
 using Migration.Abstraction.Interfaces;
 using Migration.Abstraction.Interfaces.Wrappers;
 using Migration.Abstraction.Models;
-//using Migration.Extensions.Oracle;
 using Migration.Extensions.SqlServer;
-//using Oracle.Abstraction.Interfaces;
 using SqlServer.Abstraction.Interfaces;
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Diagnostics;
-using System.Diagnostics.Metrics;
 using System.Linq;
-using System.Text;
-using System.Text.Json;
 using System.Threading.Tasks;
 
 namespace Migration.Infrastructure.Implementation.Services
 {
     public class MoveService : IMoveService
     {
-        private readonly IMoveReader _moveReader;
         private readonly IMoveExecutor _moveExecutor;
-        private readonly IDocStagingRepository _docRepo;
         private readonly IAlfrescoWriteApi _write;
-        private readonly IAlfrescoReadApi _read;
         private readonly IOptions<MigrationOptions> _options;
         private readonly IServiceScopeFactory _scopeFactory;
 
@@ -46,24 +38,14 @@ namespace Migration.Infrastructure.Implementation.Services
 
         private const string ServiceName = "Move";
 
-        // NOTE: Removed dependencies after refactoring:
-        // - IDocumentResolver: No longer needed - folders pre-resolved by FolderPreparationService
-        // - _folderCache and _folderLocks: Folder IDs stored in DocStaging.DestinationFolderId
-
-        public MoveService(IMoveReader moveService,
-                           IMoveExecutor moveExecutor,
-                           IDocStagingRepository docRepo,
+        public MoveService(IMoveExecutor moveExecutor,
                            IAlfrescoWriteApi write,
-                           IAlfrescoReadApi read,
                            IOptions<MigrationOptions> options,
                            IServiceScopeFactory scopeFactory,
                            ILoggerFactory logger)
         {
-            _moveReader = moveService;
             _moveExecutor = moveExecutor;
-            _docRepo = docRepo;
             _write = write;
-            _read = read;
             _options = options;
             _scopeFactory = scopeFactory;
             _dbLogger = logger.CreateLogger("DbLogger");
@@ -568,105 +550,13 @@ namespace Migration.Infrastructure.Implementation.Services
             try
             {
 
-                
-                // STEP 2: Get migrated docType and naziv from DocStaging with FALLBACK to DocumentMappingService
+
+                // STEP 2: Get migrated docType and naziv from DocStaging (populated by KdpDocumentProcessingService)
                 // ========================================
                 string? migratedDocType = doc.NewDocumentCode;
                 string? migratedNaziv = doc.NewDocumentName;
 
-                // FALLBACK: If DocStaging fields are not populated, lookup from DocumentMappingService
-                if (string.IsNullOrWhiteSpace(migratedNaziv) || string.IsNullOrWhiteSpace(migratedDocType))
-                {
-                    _fileLogger.LogWarning(
-                        "Document {DocId} has missing mapping fields (NewDocumentName='{NewName}', NewDocumentCode='{NewCode}'). Using fallback lookup via IDocumentMappingService.",
-                        doc.Id, migratedNaziv ?? "NULL", migratedDocType ?? "NULL");
-
-                    try
-                    {
-                        await using var mappingScope = _scopeFactory.CreateAsyncScope();
-                        var uow = mappingScope.ServiceProvider.GetRequiredService<IUnitOfWork>();
-                        var mappingService = mappingScope.ServiceProvider.GetRequiredService<IDocumentMappingService>();
-
-                        await uow.BeginAsync(ct: ct).ConfigureAwait(false);
-                        try
-                        {
-                            if (!string.IsNullOrWhiteSpace(doc.DocDescription))
-                            {
-                                if (string.IsNullOrWhiteSpace(migratedNaziv) || string.IsNullOrWhiteSpace(migratedDocType))
-                                {
-                                    var x = await mappingService.FindByOriginalNameAsync(doc.DocDescription, ct).ConfigureAwait(false);
-
-                                    if (x != null)
-                                    {
-                                        migratedNaziv = !string.IsNullOrWhiteSpace(migratedNaziv) ? migratedNaziv : x.NazivDokumentaMigracija;
-                                        migratedDocType = !string.IsNullOrWhiteSpace(migratedDocType) ? migratedDocType : x.SifraDokumentaMigracija;
-                                    }
-
-                                }
-                            }
-
-                            await uow.CommitAsync(ct: ct).ConfigureAwait(false);
-                        }
-                        catch
-                        {
-                            await uow.RollbackAsync(ct: ct).ConfigureAwait(false);
-                            throw;
-                        }
-                    }
-                    catch (Exception ex)
-                    {
-                        _fileLogger.LogWarning(
-                            "Fallback mapping lookup failed for document {DocId}: {ErrorType} - {Message}. Continuing without migrated values.",
-                            doc.Id, ex.GetType().Name, ex.Message);
-                        _dbLogger.LogWarning(ex,
-                            "Fallback mapping lookup failed for document {DocId}. Continuing without migrated values.",
-                            doc.Id);
-                        // Continue migration without the fallback values - don't fail the entire document
-                    }
-                }
-
                 _fileLogger.LogDebug("Updating properties for document {DocId} (NodeId: {NodeId})", doc.Id, doc.NodeId);
-
-                // ========================================
-                // STEP 2.5: Check if ecm:docClientType exists in moved Entry - if not, fetch from ClientAPI
-                // ========================================
-                string? docClientTypeFromApi = null;
-
-                // Check if property already exists on document (from Alfresco)
-                if (!movedEntry.Properties?.ContainsKey("ecm:docClientType") ?? true)
-                {
-                    _fileLogger.LogInformation(
-                        "Document {DocId} missing ecm:docClientType property - will fetch from ClientAPI",
-                        doc.Id);
-
-                    // Extract CoreId from folder or document
-                    var coreId = doc.CoreId; //?? DossierIdFormatter.ExtractCoreId(doc.DossierDestFolderId);
-
-                    if (!string.IsNullOrWhiteSpace(coreId))
-                    {
-                        try
-                        {
-                            await using var clientApiScope = _scopeFactory.CreateAsyncScope();
-                            var clientApi = clientApiScope.ServiceProvider.GetRequiredService<IClientApi>();
-
-                            // ✅ Fetch ClientData (will use MemoryCache from FAZA 3!)
-                            _fileLogger.LogDebug("Fetching ClientData for CoreId {CoreId} to determine ecm:docClientType", coreId);
-                            var clientData = await clientApi.GetClientDataAsync(coreId, ct).ConfigureAwait(false);
-
-                            // Determine ecm:docClientType from ClientData
-                            if (clientData != null)
-                                docClientTypeFromApi = clientData.Segment;
-                        }
-                        catch (ClientApiException ex)
-                        {
-                            _fileLogger.LogWarning(
-                                "ClientAPI error while fetching data for CoreId {CoreId}, document {DocId}: {Error}. Continuing without ecm:docClientType.",
-                                coreId, doc.Id, ex.Message);
-                            // Continue without the property - don't fail the migration
-                        }
-                    }
-                }
-               
 
 
                 var propertiesToUpdate = new Dictionary<string, object>();
@@ -683,16 +573,10 @@ namespace Migration.Infrastructure.Implementation.Services
                     _fileLogger.LogDebug("Will update ecm:docType to '{DocType}' (from DocStaging fallback) for document {DocId}", doc.DocumentType, doc.Id);
                 }
 
-                // ✅ Priority: 1) From ClientAPI (if fetched), 2) From DocStaging.FinalDocumentType
-                if (!string.IsNullOrWhiteSpace(docClientTypeFromApi))
-                {
-                    propertiesToUpdate["ecm:docClientType"] = docClientTypeFromApi;
-                    _fileLogger.LogDebug("Will update ecm:docClientType to '{Type}' (from ClientAPI) for document {DocId}", docClientTypeFromApi, doc.Id);
-                }
-                else if (!string.IsNullOrWhiteSpace(doc.FinalDocumentType))
+                if (!string.IsNullOrWhiteSpace(doc.FinalDocumentType))
                 {
                     propertiesToUpdate["ecm:docClientType"] = doc.FinalDocumentType;
-                    _fileLogger.LogDebug("Will update ecm:docClientType to '{FinalDocumentType}' (from DocStaging) for document {DocId}", doc.FinalDocumentType, doc.Id);
+                    _fileLogger.LogDebug("Will update ecm:docClientType to '{FinalDocumentType}' for document {DocId}", doc.FinalDocumentType, doc.Id);
                 }
 
                 if (!string.IsNullOrWhiteSpace(doc.CoreId))
