@@ -10,7 +10,6 @@ using Migration.Abstraction.Configuration;
 using Migration.Abstraction.Interfaces;
 using Migration.Abstraction.Models;
 
-//using Oracle.Abstraction.Interfaces;
 using SqlServer.Abstraction.Interfaces;
 using System;
 using System.Collections.Concurrent;
@@ -35,12 +34,7 @@ namespace Migration.Infrastructure.Implementation.Document
 
         private readonly ConcurrentDictionary<string, (string FolderId, bool IsCreated)> _folderCache = new();
         private readonly ConcurrentDictionary<string, (Entry Folder, bool IsCreated)> _folderCache_New = new();
-
-        /// <summary>
-        /// Cache for ClientAPI errors by folder path (DossierDestFolderId).
-        /// When ClientAPI returns "no data found" error, the error message is cached here
-        /// so it can be later written to DocStaging.ErrorMsg when updating DestinationFolderId.
-        /// </summary>
+       
         private readonly ConcurrentDictionary<string, string> _clientApiErrorCache = new();
 
 
@@ -63,14 +57,8 @@ namespace Migration.Infrastructure.Implementation.Document
             _dbLogger = loggerFactory.CreateLogger("DbLogger");
             _nodeTypeMapping = nodeTypeMapping?.Value ?? new FolderNodeTypeMappingConfig();
         }       
+              
        
-       
-        /// <summary>
-        /// Gets the cached ClientAPI error for a folder, if any.
-        /// Returns null if no error was cached for that folder.
-        /// </summary>
-        /// <param name="folderPath">The folder path (DossierDestFolderId) to check for errors</param>
-        /// <returns>Error message if ClientAPI failed for this folder, otherwise null</returns>
         public string? GetClientApiError(string folderPath)
         {
             _fileLogger.LogDebug("GetClientApiError: Looking for error with key '{FolderPath}'. Cache has {Count} entries: [{Keys}]",

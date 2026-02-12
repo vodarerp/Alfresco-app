@@ -5,7 +5,6 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Migration.Abstraction.Interfaces;
 using Migration.Abstraction.Models;
-//using Oracle.Abstraction.Interfaces;
 using SqlServer.Abstraction.Interfaces;
 using System;
 using System.Collections.Generic;

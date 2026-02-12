@@ -17,21 +17,21 @@ namespace Migration.Infrastructure.Implementation.Folder
     public class FolderReader : IFolderReader
     {
         private readonly IAlfrescoReadApi _read;
-        private readonly IAlfrescoDbReader? _dbReader;
+        
         private readonly ILogger _fileLogger;
         private readonly ILogger _dbLogger;
 
-        public FolderReader(IAlfrescoReadApi read, IServiceProvider serviceProvider, IAlfrescoDbReader? dbReader = null)
+        public FolderReader(IAlfrescoReadApi read, IServiceProvider serviceProvider )
         {
             _read = read;
-            _dbReader = dbReader;
+           
 
             var loggerFactory = serviceProvider.GetRequiredService<ILoggerFactory>();
             _fileLogger = loggerFactory.CreateLogger("FileLogger");
             _dbLogger = loggerFactory.CreateLogger("DbLogger");
         }
 
-        //public sealed record FolderReaderRequest(string RootId, string NameFilter, int Skip, int Take);
+        
         public async Task<FolderReaderResult> ReadBatchAsync(FolderReaderRequest inRequest, CancellationToken ct)
         {
             _fileLogger.LogDebug("Reading folders using AFTS from root {RootId} with filter '{NameFilter}', Take: {Take}",
@@ -141,10 +141,7 @@ namespace Migration.Infrastructure.Implementation.Folder
             return new FolderReaderResult(Items: result, Next: next, HasMoreItems: hasMoreItems);
         }
 
-        /// <summary>
-        /// Reads a batch of folders using CMIS query language with pagination support.
-        /// This method supports date filtering and proper skip/take logic for large result sets.
-        /// </summary>
+        
         public async Task<FolderReaderResult> ReadBatchAsync_v2(
             FolderReaderRequest inRequest,
             string? dateFrom,
@@ -254,9 +251,7 @@ namespace Migration.Infrastructure.Implementation.Folder
             return new FolderReaderResult(Items: result, Next: next, HasMoreItems: hasMoreItems);
         }
 
-        /// <summary>
-        /// Sanitizes input for AFTS (Lucene) queries to prevent injection attacks
-        /// </summary>
+        
         private string SanitizeAFTS(string value)
         {
             if (string.IsNullOrEmpty(value))
@@ -284,62 +279,7 @@ namespace Migration.Infrastructure.Implementation.Folder
                 .Replace("?", "\\?")
                 .Replace(":", "\\:");
         }
-
-        public async Task<long> CountTotalFoldersAsync(string rootId, string nameFilter, CancellationToken ct)
-        {
-            // Option 1: Try direct DB query first (most accurate)
-            if (_dbReader != null)
-            {
-                try
-                {
-                    var dbCount = await _dbReader.CountTotalFoldersAsync(rootId, nameFilter, ct).ConfigureAwait(false);
-                    if (dbCount >= 0)
-                    {
-                        return dbCount;
-                    }
-                }
-                catch
-                {
-                    // Fall through to CMIS attempt
-                }
-            }
-
-            // Option 2: Try CMIS count query (may not be supported)
-            var cmsLike = string.IsNullOrWhiteSpace(nameFilter) ? "" : nameFilter;
-            var countQuery = new StringBuilder();
-            countQuery.Append("SELECT cmis:objectId FROM cmis:folder ")
-                      .Append($"WHERE IN_TREE('{rootId}') ");
-
-            var req = new PostSearchRequest()
-            {
-                Query = new QueryRequest()
-                {
-                    Language = "cmis",
-                    Query = countQuery.ToString()
-                },
-                Paging = new PagingRequest()
-                {
-                    MaxItems = 1,
-                    SkipCount = 0
-                }
-            };
-
-            try
-            {
-                var result = await _read.SearchAsync(req, ct).ConfigureAwait(false);
-
-                if (result?.List?.Pagination?.TotalItems != null)
-                {
-                    return result.List.Pagination.TotalItems;
-                }
-
-                return -1; // Count not available
-            }
-            catch (Exception)
-            {
-                return -1; // Count not available
-            }
-        }
+       
 
         public async Task<Dictionary<string, string>> FindDossierSubfoldersAsync(string rootId, List<string>? folderTypes, CancellationToken ct)
         {

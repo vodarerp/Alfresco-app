@@ -25,4 +25,9 @@
     <ProjectReference Include="..\SqlServer.Abstraction\SqlServer.Abstraction.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <Folder Include="Implementation\Alfresco\" />
+    <Folder Include="PostMigration\" />
+  </ItemGroup>
+
 </Project>

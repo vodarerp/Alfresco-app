@@ -5,30 +5,10 @@ using System;
 
 namespace Migration.Infrastructure.Implementation
 {
-    /// <summary>
-    /// Određuje status dokumenta nakon migracije.
-    /// VERZIJA 3.0: Nova logika sa prioritetima i PolitikaCuvanja kolonom.
-    ///
-    /// STATUS VREDNOSTI:
-    /// - Status = "1" → AKTIVAN dokument (ecm:active=true)
-    /// - Status = "2" → PONIŠTEN dokument (ecm:active=false)
-    ///
-    /// PRIORITETI (od najvišeg ka najnižem):
-    /// 1. Ako SifraDokumentaMigracija = "00824" → AKTIVAN (Status="1")
-    /// 2. Ako PolitikaCuvanja = "Nova verzija" ili "Novi dokument" → NEAKTIVAN (Status="2")
-    /// 3. Ako PolitikaCuvanja je prazna/null, proverava se NazivDokumentaMigracija:
-    ///    - Ako ima sufiks '- migracija' → NEAKTIVAN (Status="2")
-    ///    - Ako nema sufiks '- migracija' → AKTIVAN (Status="1")
-    /// </summary>
+    
     public static class DocumentStatusDetectorV3
     {
-        /// <summary>
-        /// Određuje status dokumenta na osnovu mapiranja iz DocumentMapping tabele.
-        /// Koristi novu logiku sa prioritetima.
-        /// </summary>
-        /// <param name="mapping">DocumentMapping objekat iz tabele (može biti null ako nema mapiranja)</param>
-        /// <param name="existingStatus">Postojeći status dokumenta iz starog Alfresco sistema (opciono)</param>
-        /// <returns>DocumentStatusInfo sa kompletnim informacijama o statusu</returns>
+        
         public static DocumentStatusInfo DetermineStatus(
             DocumentMapping? mapping,
             string? existingStatus = null)
@@ -45,23 +25,7 @@ namespace Migration.Infrastructure.Implementation
                 };
             }
 
-            // PRIORITET 1: Provera šifre 00824
-            //if (!string.IsNullOrWhiteSpace(mapping.SifraDokumentaMigracija) &&
-            //    mapping.SifraDokumentaMigracija.Trim().Equals("00824", StringComparison.OrdinalIgnoreCase))
-            //{
-            //    return new DocumentStatusInfo
-            //    {
-            //        IsActive = true,
-            //        Status = "1",
-            //        DeterminationReason = "Prioritet 1: SifraDokumentaMigracija = '00824'",
-            //        Priority = 1,
-            //        MappingCode = mapping.SifraDokumentaMigracija,
-            //        MappingName = mapping.NazivDokumentaMigracija,
-            //        OriginalCode = mapping.SifraDokumenta
-            //    };
-            //}
-
-            // PRIORITET 2: Provera PolitikaCuvanja
+           
             if (!string.IsNullOrWhiteSpace(mapping.PolitikaCuvanja)  & false)
             {
                 var politikaTrimmed = mapping.PolitikaCuvanja.Trim();
@@ -83,7 +47,7 @@ namespace Migration.Infrastructure.Implementation
                 }
             }
 
-            // PRIORITET 3: Provera sufiks '- migracija' u NazivDokumentaMigracija
+            
             if (!string.IsNullOrWhiteSpace(mapping.NazivDokumentaMigracija))
             {
                 var naziv = mapping.NazivDokumentaMigracija.Trim();
@@ -134,11 +98,7 @@ namespace Migration.Infrastructure.Implementation
             };
         }
 
-        /// <summary>
-        /// Kompatibilnost sa starom verzijom - određuje status na osnovu opisa dokumenta.
-        /// NAPOMENA: Ova metoda NE koristi novu logiku sa PolitikaCuvanja i prioritetima!
-        /// Za novu logiku koristiti DetermineStatus() metodu.
-        /// </summary>
+        
         [Obsolete("Koristiti DetermineStatus() metodu umesto ove - ona koristi novu logiku sa prioritetima")]
         public static DocumentStatusInfo GetStatusInfoByOpis(
             string? opisDokumenta,
@@ -162,9 +122,7 @@ namespace Migration.Infrastructure.Implementation
             };
         }
 
-        /// <summary>
-        /// Proverava da li opis dokumenta sadrži sufiks "- migracija"
-        /// </summary>
+        
         private static bool HasMigrationSuffixInOpis(string? opisDokumenta)
         {
             if (string.IsNullOrWhiteSpace(opisDokumenta))

@@ -8,11 +8,9 @@
 
   <ItemGroup>
     <PackageReference Include="Dapper" Version="2.1.66" />
-    <PackageReference Include="Oracle.ManagedDataAccess" Version="23.9.1" />
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\Oracle.Abstraction\Oracle.Abstraction.csproj" />
     <ProjectReference Include="..\SqlServer.Abstraction\SqlServer.Abstraction.csproj" />
   </ItemGroup>
 

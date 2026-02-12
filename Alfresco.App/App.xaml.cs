@@ -8,7 +8,6 @@ using Alfresco.Client.Handlers;
 using Alfresco.Client.Helpers;
 using Alfresco.Client.Implementation;
 using Alfresco.Contracts.Options;
-using Alfresco.Contracts.Oracle;
 using Alfresco.Contracts.SqlServer;
 using Dapper;
 using log4net.Core;
@@ -23,7 +22,6 @@ using Migration.Abstraction.Interfaces;
 using Migration.Abstraction.Interfaces.Services;
 using Migration.Abstraction.Interfaces.Wrappers;
 using Migration.Infrastructure.Implementation;
-using Migration.Infrastructure.Implementation.Alfresco;
 using Migration.Infrastructure.Implementation.Document;
 using Migration.Infrastructure.Implementation.Folder;
 using Migration.Infrastructure.Implementation.Move;
@@ -201,9 +199,8 @@ namespace Alfresco.App
                     // Register CurrentUserService as Singleton (must be singleton to cache user data)
                     services.AddSingleton<ICurrentUserService, CurrentUserService>();
 
-                    //services.Configure<OracleOptions>(context.Configuration.GetSection("Oracle"));
                     services.Configure<Alfresco.Contracts.SqlServer.SqlServerOptions>(context.Configuration.GetSection("SqlServer"));
-                    services.Configure<AlfrescoDbOptions>(context.Configuration.GetSection(AlfrescoDbOptions.SectionName));
+                   
                     services.AddSingleton(sp => sp.GetRequiredService<IOptions<Alfresco.Contracts.SqlServer.SqlServerOptions>>().Value);                    
                     services.Configure<PollyPolicyOptions>(context.Configuration.GetSection(PollyPolicyOptions.SectionName));
                     services.Configure<Migration.Infrastructure.Implementation.ClientApiOptions>(
@@ -266,8 +263,6 @@ namespace Alfresco.App
                     services.AddScoped<SqlServer.Abstraction.Interfaces.IDocumentMappingRepository, SqlServer.Infrastructure.Implementation.DocumentMappingRepository>();
                     services.AddScoped<Migration.Abstraction.Interfaces.IDocumentMappingService, Migration.Infrastructure.Implementation.DocumentMappingService>();
                     services.AddScoped<Migration.Abstraction.Interfaces.IOpisToTipMapper, OpisToTipMapperV2>();
-                    services.AddScoped<Migration.Infrastructure.Implementation.DocumentStatusDetectorV2>();
-
                     services.Configure<MigrationOptions>(context.Configuration.GetSection("Migration"));
                     services.Configure<ErrorThresholdsOptions>(context.Configuration.GetSection(ErrorThresholdsOptions.SectionName));
                     services.Configure<FolderNodeTypeMappingConfig>(context.Configuration.GetSection("Migration:FolderNodeTypeMapping"));
@@ -287,10 +282,7 @@ namespace Alfresco.App
                     services.AddTransient<IMoveExecutor, MoveExecutor>();
 
                     services.AddSingleton<IDocumentResolver, DocumentResolver>();
-
-                    services.AddSingleton<IFolderDiscoveryService, FolderDiscoveryService>();
-                    services.AddSingleton<IFolderPathService, Migration.Infrastructure.Implementation.FolderPathService>();
-                    services.AddSingleton<IFolderManager, Migration.Infrastructure.Implementation.FolderManager>();
+                    services.AddSingleton<IFolderDiscoveryService, FolderDiscoveryService>();                              
                     services.AddSingleton<IDocumentDiscoveryService, DocumentDiscoveryService>();                   
                     services.AddSingleton<IDocumentSearchService, DocumentSearchService>();
                     services.AddSingleton<IKdpDocumentProcessingService, KdpDocumentProcessingService>();
@@ -301,7 +293,7 @@ namespace Alfresco.App
                     services.AddSingleton<IMigrationPreparationService, MigrationPreparationService>();
                     services.AddSingleton<GlobalErrorTracker>();
                     services.AddSingleton<IMigrationWorker, MigrationWorker>();
-                    services.AddSingleton<IAlfrescoDbReader, AlfrescoDbReader>();
+                   
 
                     services.AddMemoryCache();
 

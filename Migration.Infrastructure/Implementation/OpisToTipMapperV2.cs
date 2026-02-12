@@ -10,13 +10,7 @@ using System.Threading.Tasks;
 
 namespace Migration.Infrastructure.Implementation
 {
-    /// <summary>
-    /// Maps ecm:opisDokumenta (document description) to ecm:tipDokumenta (document type code).
-    /// Supports both Serbian and English descriptions from old Alfresco system.
-    ///
-    /// VERZIJA 3.0: Koristi DocumentMappingService koji čita podatke iz SQL tabele DocumentMappings.
-    /// Zamenjuje statički HeimdallDocumentMapper sa database-driven pristupom.
-    /// </summary>
+    
     public class OpisToTipMapperV2 : IOpisToTipMapper
     {
         private readonly IServiceScopeFactory _scopeFactory;

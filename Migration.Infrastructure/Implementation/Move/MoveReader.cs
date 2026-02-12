@@ -1,6 +1,5 @@
 ﻿using Migration.Abstraction.Interfaces;
 using Migration.Abstraction.Models;
-//using Oracle.Abstraction.Interfaces;
 using SqlServer.Abstraction.Interfaces;
 using System;
 using System.Collections.Generic;
@@ -23,28 +22,14 @@ namespace Migration.Infrastructure.Implementation.Move
 
             var list = await _doc.TakeReadyForProcessingAsync(take, ct).ConfigureAwait(false);
 
-
-            //var toRet = new List<MoveReaderResponse>(list.Count);
-
-            //foreach (var item in list)
-            //{
-            //    //string DocumentNodeId, string FolderDestId
-            //    toRet.Add(new MoveReaderResponse(item.NodeId, item.ToPath));
-            //}
-
             var toRet = list.Select(x => new MoveReaderResponse(x.Id,x.NodeId, x.ToPath)).ToList() ?? new();
 
-            //return list.Select(x => new MoveReaderResponse
-            //{
-            //    Id = x.Id,
-            //    NodeId = x.NodeId,
-            //    ToPath = x.ToPath
-            //}).ToList();
+            
 
             return toRet;
 
 
-           // throw new NotImplementedException();
+          
         }
     }
 }

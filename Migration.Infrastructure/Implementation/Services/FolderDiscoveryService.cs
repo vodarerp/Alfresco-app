@@ -13,7 +13,6 @@ using Migration.Abstraction.Interfaces;
 using Migration.Abstraction.Interfaces.Services;
 using Migration.Abstraction.Models;
 using Migration.Infrastructure.Extensions;
-//using Oracle.Abstraction.Interfaces;
 using SqlServer.Abstraction.Interfaces;
 using System;
 using System.Collections.Generic;
