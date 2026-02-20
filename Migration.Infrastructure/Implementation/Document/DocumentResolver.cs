@@ -646,11 +646,20 @@ namespace Migration.Infrastructure.Implementation.Document
             {
                 _fileLogger.LogInformation("EnrichPropertiesWithEcmData: Processing DEPOSIT dossier (Type 700), adding deposit-specific properties...");
 
+                var tmpTypeProd = string.Empty;
+                if (folderName.Contains("-00010-"))
+                    tmpTypeProd = "10";
+                else if (folderName.Contains("-00008-"))
+                    tmpTypeProd = "8";
+
+
+
+
                 // Add ecm:bnkTypeOfProduct from TipProizvoda
-                if (!string.IsNullOrEmpty(folderInfo.TipProizvoda))
+                if (!string.IsNullOrEmpty(tmpTypeProd))
                 {
-                    properties["ecm:bnkTypeOfProduct"] = folderInfo.TipProizvoda;
-                    _fileLogger.LogInformation("EnrichPropertiesWithEcmData: Added ecm:bnkTypeOfProduct = '{TipProizvoda}'", folderInfo.TipProizvoda);
+                    properties["ecm:bnkTypeOfProduct"] = tmpTypeProd;
+                    _fileLogger.LogInformation("EnrichPropertiesWithEcmData: Added ecm:bnkTypeOfProduct = '{TipProizvoda}'", tmpTypeProd);
                 }
 
                 // Add ecm:bnkNumberOfContract formatted as YYYYMMDD
@@ -661,10 +670,10 @@ namespace Migration.Infrastructure.Implementation.Document
                     _fileLogger.LogInformation("EnrichPropertiesWithEcmData: Added ecm:bnkNumberOfContract = '{ContractNumber}' (from CreationDate: {CreationDate})",
                         contractNumber, folderInfo.CreationDate.Value.ToString("yyyy-MM-dd"));
                 }
-                else
-                {
-                    _fileLogger.LogWarning("EnrichPropertiesWithEcmData: CreationDate is NULL for deposit folder '{FolderName}', skipping ecm:bnkNumberOfContract", folderName);
-                }
+                //else
+                //{
+                //    _fileLogger.LogWarning("EnrichPropertiesWithEcmData: CreationDate is NULL for deposit folder '{FolderName}', skipping ecm:bnkNumberOfContract", folderName);
+                //}
             }
 
             _fileLogger.LogInformation("EnrichPropertiesWithEcmData: Enrichment completed - Total properties: {Count}", properties.Count);
@@ -675,6 +684,12 @@ namespace Migration.Infrastructure.Implementation.Document
             }
 
             return properties;
+        }
+
+        private string MapTipProizvoda(string inTip)
+        {
+
+            return "";
         }
 
         private Dictionary<string, object> BuildPropertiesClientData(ClientData clientData, string folderName)
