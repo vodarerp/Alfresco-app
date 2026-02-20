@@ -647,7 +647,8 @@ namespace Migration.Infrastructure.Implementation.Services
                         doc.TargetDossierType ?? (int)DossierType.Unknown,
                         folder.ContractNumber,
                         productTypeToUse,
-                        folder.CoreId);
+                        folder.CoreId,
+                        doc.OriginalCreatedAt);
 
                     _fileLogger.LogTrace(
                         "Converted dossier ID: '{OldId}' (Type: {OldType}) → '{NewId}' (TargetType: {TargetType})",

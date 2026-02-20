@@ -670,18 +670,11 @@ namespace Migration.Infrastructure.Implementation.Document
                     _fileLogger.LogInformation("EnrichPropertiesWithEcmData: Added ecm:bnkNumberOfContract = '{ContractNumber}' (from CreationDate: {CreationDate})",
                         contractNumber, folderInfo.CreationDate.Value.ToString("yyyy-MM-dd"));
                 }
-                //else
-                //{
-                //    _fileLogger.LogWarning("EnrichPropertiesWithEcmData: CreationDate is NULL for deposit folder '{FolderName}', skipping ecm:bnkNumberOfContract", folderName);
-                //}
+               
             }
 
             _fileLogger.LogInformation("EnrichPropertiesWithEcmData: Enrichment completed - Total properties: {Count}", properties.Count);
-            _fileLogger.LogInformation("EnrichPropertiesWithEcmData: Final enriched properties:");
-            foreach (var kvp in properties)
-            {
-                _fileLogger.LogInformation("  {Key} = {Value}", kvp.Key, kvp.Value ?? "NULL");
-            }
+            _fileLogger.LogInformation("EnrichPropertiesWithEcmData: Final enriched properties:");           
 
             return properties;
         }

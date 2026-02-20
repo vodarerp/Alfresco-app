@@ -96,7 +96,7 @@ namespace Alfresco.Contracts.Mapper
             };
         }
        
-        public static string CreateDepositDossierId(string coreId, string? productType, string? contractNumber, string? folderName = null)
+        public static string CreateDepositDossierId(string coreId, string? productType, string? contractNumber, string? folderName = null, DateTime? docCreated = null)
         {
             // Determine productType from folderName if not provided
             // PI/FL folders → 00008 (Fizička lica - Depozitni proizvodi)
@@ -114,10 +114,15 @@ namespace Alfresco.Contracts.Mapper
                 };
             }
 
-            if (string.IsNullOrWhiteSpace(productType)) productType = "00008"; // Default to PI
-            if (string.IsNullOrWhiteSpace(contractNumber)) contractNumber = "20250102";
+            //if (string.IsNullOrWhiteSpace(productType)) productType = "00008"; // Default to PI
+            //if (string.IsNullOrWhiteSpace(contractNumber)) contractNumber = "20250102";
+                if (string.IsNullOrWhiteSpace(contractNumber))
+                {
+                    // Generate contract number based on docCreated date or use a default
+                    contractNumber = docCreated.HasValue ? docCreated.Value.ToString("yyyyMMdd") : "";
+            }
 
-            return $"DE-{coreId}-{productType}_{contractNumber}";
+            return $"DE-{coreId}-{productType}-{contractNumber}";
         }
        
         public static bool IsDepositDossier(string? dossierId)
@@ -188,7 +193,7 @@ namespace Alfresco.Contracts.Mapper
         }
 
        
-        public static string ConvertForTargetType(string folderName, int targetDossierType, string? contracNumber, string? productType, string? coreId)
+        public static string ConvertForTargetType(string folderName, int targetDossierType, string? contracNumber, string? productType, string? coreId, DateTime? docCreated)
         {
             if (string.IsNullOrWhiteSpace(folderName))
                 return string.Empty;
@@ -212,7 +217,7 @@ namespace Alfresco.Contracts.Mapper
 
             string toRet = targetDossierType switch
             {
-                700 => CreateDepositDossierId(coreId, productType, contracNumber, folderName),   // Deposit dossier - pass folderName to determine productType
+                700 => CreateDepositDossierId(coreId, productType, contracNumber, folderName, docCreated),   // Deposit dossier - pass folderName to determine productType
                 _ => CreateNewDossierId(newPrefix, coreId)//ExtractPrefix(oldDossierId) // Keep original prefix for unknown types
             };
 

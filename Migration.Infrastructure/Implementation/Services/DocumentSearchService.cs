@@ -1314,6 +1314,7 @@ namespace Migration.Infrastructure.Implementation.Services
                 string? contractNumber = null;
                 string? productType = null;
                 string? accountNumbers = null;
+                decimal? versionLabel = null;
 
                 if (alfrescoEntry.Properties != null)
                 {
@@ -1337,6 +1338,10 @@ namespace Migration.Infrastructure.Implementation.Services
 
                     if (alfrescoEntry.Properties.TryGetValue("ecm:source", out var sourceObj))
                         sourceFromDoc = sourceObj?.ToString();
+
+                    if (alfrescoEntry.Properties.TryGetValue("ecm:version", out var versionObj))
+                        if (Decimal.TryParse(versionObj.ToString(), out decimal parVersion))
+                            versionLabel = parVersion;
 
                     if (alfrescoEntry.Properties.TryGetValue("ecm:docCreationDate", out var creationDateObj))
                     {
@@ -1444,22 +1449,23 @@ namespace Migration.Infrastructure.Implementation.Services
                         doc.TargetDossierType ?? (int)DossierType.Unknown,
                         folder.ContractNumber,
                         productTypeToUse,
-                        folder.CoreId);
+                        folder.CoreId,
+                        doc.OriginalCreatedAt);
                 }
 
                 // Determine version
-                doc.Version = 1.1m;
+                doc.Version = versionLabel.GetValueOrDefault();
                 doc.IsSigned = false;
 
-                if (!string.IsNullOrWhiteSpace(alfrescoEntry.Name))
-                {
-                    var nameLower = alfrescoEntry.Name.ToLowerInvariant();
-                    if (nameLower.Contains("signed") || nameLower.Contains("potpisano") || nameLower.Contains("potpisan"))
-                    {
-                        doc.Version = 1.2m;
-                        doc.IsSigned = true;
-                    }
-                }
+                //if (!string.IsNullOrWhiteSpace(alfrescoEntry.Name))
+                //{
+                //    var nameLower = alfrescoEntry.Name.ToLowerInvariant();
+                //    if (nameLower.Contains("signed") || nameLower.Contains("potpisano") || nameLower.Contains("potpisan"))
+                //    {
+                //        doc.Version = 1.2m;
+                //        doc.IsSigned = true;
+                //    }
+                //}
             }
             catch (Exception ex)
             {

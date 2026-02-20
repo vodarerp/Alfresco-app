@@ -326,24 +326,8 @@ namespace Migration.Infrastructure.Implementation.Services
         {
             try
             {
-                _fileLogger.LogInformation(
-                        "CreateFolderAsync: Starting folder creation {@Folder}",
-                        new
-                        {
-                            folder.DestinationRootId,
-                            folder.FolderPath,
-                            CacheKey = folder.CacheKey ?? "NULL",
-                            TipProizvoda = folder.TipProizvoda ?? "NULL",
-                            CoreId = folder.CoreId ?? "NULL",
-                            CreationDate = folder.CreationDate?.ToString("yyyy-MM-dd HH:mm:ss") ?? "NULL",
-                            TargetDossierType = folder.TargetDossierType?.ToString() ?? "NULL",
-                            folder.IsCreated,
-                            PropertiesCount = folder.Properties?.Count ?? 0
-                        }
-                    );
 
-
-                // Log properties if they exist
+                
                 if (folder.Properties != null && folder.Properties.Count > 0)
                 {
                    
