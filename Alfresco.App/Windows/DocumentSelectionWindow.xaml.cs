@@ -18,15 +18,21 @@ namespace Alfresco.App.Windows
     {
         private readonly IDocumentMappingRepository _documentMappingRepository;
         private readonly IUnitOfWork _unitOfWork;
-        private ObservableCollection<DocumentMappingViewModel> _displayedDocuments = new();
+
+        // Three separate collections
+        private ObservableCollection<DocumentMappingViewModel> _dbDocuments = new();
+        private ObservableCollection<DocumentMappingViewModel> _selectedDocuments = new();
 
         private int _currentPage = 1;
         private const int _pageSize = 100;
         private int _totalCount = 0;
         private string _currentSearchText = "";
+        private string? _currentTipDosijea = null;
         private CancellationTokenSource? _searchCts;
         private bool _isLoading = false;
+        private bool _isSyncingSelection = false;
 
+        // toRet - populated on OK
         public List<string> SelectedDocDescriptions { get; private set; } = new();
 
         public DocumentSelectionWindow()
@@ -41,9 +47,14 @@ namespace Alfresco.App.Windows
         {
             try
             {
-                // Set ItemsSource once
-                lstDocuments.ItemsSource = _displayedDocuments;
+                lstDocuments.ItemsSource = _dbDocuments;
+                lstSelected.ItemsSource = _selectedDocuments;
+
+                await LoadTipDosijeaFilterAsync();
                 await LoadDocumentsAsync(resetPage: true);
+
+                // Subscribe to filter changes after initial load to avoid double-loading
+                cmbTipDosijea.SelectionChanged += cmbTipDosijea_SelectionChanged;
             }
             catch (Exception ex)
             {
@@ -53,9 +64,23 @@ namespace Alfresco.App.Windows
             }
         }
 
+        private async Task LoadTipDosijeaFilterAsync()
+        {
+            await _unitOfWork.BeginAsync(System.Data.IsolationLevel.ReadUncommitted);
+            var tipValues = await _documentMappingRepository.GetDistinctTipDosijeaAsync();
+            await _unitOfWork.CommitAsync();
+
+            cmbTipDosijea.Items.Clear();
+            cmbTipDosijea.Items.Add("Svi");
+            foreach (var tip in tipValues)
+            {
+                cmbTipDosijea.Items.Add(tip);
+            }
+            cmbTipDosijea.SelectedIndex = 0;
+        }
+
         private async Task LoadDocumentsAsync(bool resetPage = false)
         {
-            // Prevent overlapping database operations
             if (_isLoading) return;
 
             try
@@ -63,29 +88,28 @@ namespace Alfresco.App.Windows
                 _isLoading = true;
 
                 if (resetPage)
-                {
                     _currentPage = 1;
-                    _displayedDocuments.Clear();
-                }
 
-                // Begin transaction (read-only, but needed for connection)
+                _dbDocuments.Clear();
+
                 await _unitOfWork.BeginAsync(System.Data.IsolationLevel.ReadUncommitted);
 
                 var (items, totalCount) = await _documentMappingRepository.SearchWithPagingAsync(
                     _currentSearchText,
                     _currentPage,
-                    _pageSize);
+                    _pageSize,
+                    _currentTipDosijea);
 
                 await _unitOfWork.CommitAsync();
 
                 _totalCount = totalCount;
 
-                // Filter out mappings without Naziv (ecm:docDesc)
                 var validMappings = items.Where(m => !string.IsNullOrWhiteSpace(m.Naziv));
 
                 foreach (var mapping in validMappings)
                 {
-                    _displayedDocuments.Add(new DocumentMappingViewModel
+                    var isAlreadySelected = _selectedDocuments.Any(s => s.ID == mapping.ID);
+                    _dbDocuments.Add(new DocumentMappingViewModel
                     {
                         ID = mapping.ID,
                         Naziv = mapping.Naziv ?? "",
@@ -93,7 +117,7 @@ namespace Alfresco.App.Windows
                         NazivDokumenta = mapping.NazivDokumenta ?? "",
                         TipDosijea = mapping.TipDosijea ?? "",
                         BrojDokumenata = mapping.BrojDokumenata ?? 0,
-                        IsSelected = false
+                        IsSelected = isAlreadySelected
                     });
                 }
 
@@ -102,65 +126,105 @@ namespace Alfresco.App.Windows
             }
             catch (Exception ex)
             {
-                try
-                {
-                    await _unitOfWork.RollbackAsync();
-                }
-                catch { /* Ignore rollback errors */ }
+                try { await _unitOfWork.RollbackAsync(); } catch { }
                 MessageBox.Show($"Failed to load documents from database: {ex.Message}", "Error", MessageBoxButton.OK, MessageBoxImage.Error);
             }
-            
-                _isLoading = false;
-            
+
+            _isLoading = false;
         }
 
         private async void txtSearch_TextChanged(object sender, TextChangedEventArgs e)
         {
-            // Cancel previous search
             _searchCts?.Cancel();
             _searchCts = new CancellationTokenSource();
             var currentCts = _searchCts;
 
             try
             {
-                // Debounce - wait 500ms before searching
                 await Task.Delay(500, currentCts.Token);
-
                 _currentSearchText = txtSearch.Text?.Trim() ?? "";
                 await LoadDocumentsAsync(resetPage: true);
             }
-            catch (TaskCanceledException)
-            {
-                // Search was cancelled, ignore
-            }
+            catch (TaskCanceledException) { }
+        }
+
+        private async void cmbTipDosijea_SelectionChanged(object sender, SelectionChangedEventArgs e)
+        {
+            var selected = cmbTipDosijea.SelectedItem as string;
+            _currentTipDosijea = selected == "Svi" ? null : selected;
+            await LoadDocumentsAsync(resetPage: true);
         }
 
         private void chkSelectAll_Checked(object sender, RoutedEventArgs e)
         {
-            foreach (var doc in _displayedDocuments)
+            _isSyncingSelection = true;
+            foreach (var doc in _dbDocuments)
             {
                 doc.IsSelected = true;
+                if (!_selectedDocuments.Any(s => s.ID == doc.ID))
+                {
+                    _selectedDocuments.Add(CloneViewModel(doc));
+                }
             }
+            _isSyncingSelection = false;
             UpdateSelectionCount();
         }
 
         private void chkSelectAll_Unchecked(object sender, RoutedEventArgs e)
         {
-            foreach (var doc in _displayedDocuments)
+            _isSyncingSelection = true;
+            foreach (var doc in _dbDocuments)
             {
                 doc.IsSelected = false;
+                var existing = _selectedDocuments.FirstOrDefault(s => s.ID == doc.ID);
+                if (existing != null)
+                    _selectedDocuments.Remove(existing);
             }
+            _isSyncingSelection = false;
             UpdateSelectionCount();
         }
 
         private void DocumentCheckBox_Changed(object sender, RoutedEventArgs e)
         {
+            if (_isSyncingSelection) return;
+
+            if (sender is CheckBox chk && chk.DataContext is DocumentMappingViewModel vm)
+            {
+                if (vm.IsSelected)
+                {
+                    if (!_selectedDocuments.Any(s => s.ID == vm.ID))
+                        _selectedDocuments.Add(CloneViewModel(vm));
+                }
+                else
+                {
+                    var existing = _selectedDocuments.FirstOrDefault(s => s.ID == vm.ID);
+                    if (existing != null)
+                        _selectedDocuments.Remove(existing);
+                }
+            }
             UpdateSelectionCount();
+        }
+
+        private void btnRemoveSelected_Click(object sender, RoutedEventArgs e)
+        {
+            if (sender is Button btn && btn.DataContext is DocumentMappingViewModel vm)
+            {
+                _selectedDocuments.Remove(vm);
+
+                // Uncheck in db list if visible
+                var dbItem = _dbDocuments.FirstOrDefault(d => d.ID == vm.ID);
+                if (dbItem != null)
+                    dbItem.IsSelected = false;
+
+                UpdateSelectionCount();
+            }
         }
 
         private void UpdateSelectionCount()
         {
-            var selectedCount = _displayedDocuments.Count(d => d.IsSelected);
+            var selectedCount = _selectedDocuments.Count;
+
+            txtSelectedHeader.Text = $"Selected Documents ({selectedCount})";
 
             if (selectedCount == 0)
             {
@@ -178,28 +242,33 @@ namespace Alfresco.App.Windows
                 btnOk.IsEnabled = true;
             }
 
-            // Update Select All checkbox state
-            if (_displayedDocuments.Any())
-            {
-                if (_displayedDocuments.All(d => d.IsSelected))
-                {
-                    chkSelectAll.IsChecked = true;
-                }
-                else if (_displayedDocuments.All(d => !d.IsSelected))
-                {
-                    chkSelectAll.IsChecked = false;
-                }
-                else
-                {
-                    chkSelectAll.IsChecked = null; // Indeterminate state
-                }
-            }
+            // Update Select All checkbox state based on current page
+            UpdateSelectAllCheckbox();
+        }
+
+        private void UpdateSelectAllCheckbox()
+        {
+            if (!_dbDocuments.Any()) return;
+
+            // Temporarily detach events to avoid recursion
+            chkSelectAll.Checked -= chkSelectAll_Checked;
+            chkSelectAll.Unchecked -= chkSelectAll_Unchecked;
+
+            if (_dbDocuments.All(d => d.IsSelected))
+                chkSelectAll.IsChecked = true;
+            else if (_dbDocuments.All(d => !d.IsSelected))
+                chkSelectAll.IsChecked = false;
+            else
+                chkSelectAll.IsChecked = null;
+
+            chkSelectAll.Checked += chkSelectAll_Checked;
+            chkSelectAll.Unchecked += chkSelectAll_Unchecked;
         }
 
         private void UpdatePagingInfo()
         {
-            var totalPages = (_totalCount + _pageSize - 1) / _pageSize;
-            var showing = _displayedDocuments.Count;
+            var totalPages = Math.Max(1, (_totalCount + _pageSize - 1) / _pageSize);
+            var showing = _dbDocuments.Count;
             txtPagingInfo.Text = $"Showing {showing} of {_totalCount} documents (Page {_currentPage} of {totalPages})";
 
             btnPrevPage.IsEnabled = _currentPage > 1;
@@ -211,7 +280,7 @@ namespace Alfresco.App.Windows
             if (_currentPage > 1)
             {
                 _currentPage--;
-                await LoadDocumentsAsync(resetPage: true);
+                await LoadDocumentsAsync(resetPage: false);
             }
         }
 
@@ -221,15 +290,14 @@ namespace Alfresco.App.Windows
             if (_currentPage < totalPages)
             {
                 _currentPage++;
-                await LoadDocumentsAsync(resetPage: true);
+                await LoadDocumentsAsync(resetPage: false);
             }
         }
 
         private void btnOk_Click(object sender, RoutedEventArgs e)
         {
-            // Get selected document descriptions (ecm:docDesc values)
-            SelectedDocDescriptions = _displayedDocuments
-                .Where(d => d.IsSelected)
+            // toRet - build from selected collection
+            SelectedDocDescriptions = _selectedDocuments
                 .Select(d => d.Naziv)
                 .Where(n => !string.IsNullOrWhiteSpace(n))
                 .Distinct()
@@ -249,6 +317,20 @@ namespace Alfresco.App.Windows
         {
             DialogResult = false;
             Close();
+        }
+
+        private static DocumentMappingViewModel CloneViewModel(DocumentMappingViewModel source)
+        {
+            return new DocumentMappingViewModel
+            {
+                ID = source.ID,
+                Naziv = source.Naziv,
+                SifraDokumenta = source.SifraDokumenta,
+                NazivDokumenta = source.NazivDokumenta,
+                TipDosijea = source.TipDosijea,
+                BrojDokumenata = source.BrojDokumenata,
+                IsSelected = true
+            };
         }
     }
 

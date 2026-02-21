@@ -5,7 +5,7 @@
         xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
         mc:Ignorable="d"
         Title="Select Documents for Migration"
-        Height="600" Width="900"
+        Height="700" Width="1100"
         WindowStartupLocation="CenterOwner"
         Loaded="Window_Loaded">
     <Grid Margin="10">
@@ -26,12 +26,15 @@
             </StackPanel>
         </Border>
 
-        <!-- Search Box -->
+        <!-- Search + Filter Bar -->
         <Border Grid.Row="1" Background="#ECF0F1" Padding="10" Margin="0,0,0,10">
             <Grid>
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="Auto"/>
                     <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="20"/>
+                    <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="220"/>
                 </Grid.ColumnDefinitions>
                 <TextBlock Grid.Column="0" Text="Search:"
                            FontSize="12" VerticalAlignment="Center" Margin="0,0,10,0"/>
@@ -40,107 +43,196 @@
                          FontSize="12" Padding="5"
                          TextChanged="txtSearch_TextChanged"
                          ToolTip="Search by document name or code"/>
+                <TextBlock Grid.Column="3" Text="Tip Dosijea:"
+                           FontSize="12" VerticalAlignment="Center" Margin="0,0,10,0"/>
+                <ComboBox Grid.Column="4"
+                          x:Name="cmbTipDosijea"
+                          FontSize="12" Padding="5,3"
+                          ToolTip="Filter by dossier type"/>
             </Grid>
         </Border>
 
-        <!-- Document List -->
-        <Border Grid.Row="2" BorderBrush="#BDC3C7" BorderThickness="1" Background="White">
-            <Grid>
-                <Grid.RowDefinitions>
-                    <RowDefinition Height="Auto"/>
-                    <RowDefinition Height="*"/>
-                </Grid.RowDefinitions>
+        <!-- Main Content: Two Panels -->
+        <Grid Grid.Row="2">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="3*"/>
+                <ColumnDefinition Width="10"/>
+                <ColumnDefinition Width="2*"/>
+            </Grid.ColumnDefinitions>
 
-                <!-- Column Headers -->
-                <Border Grid.Row="0" Background="#34495E" Padding="10,8">
-                    <Grid>
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="40"/>
-                            <ColumnDefinition Width="80"/>
-                            <ColumnDefinition Width="*"/>
-                            <ColumnDefinition Width="150"/>
-                            <ColumnDefinition Width="100"/>
-                        </Grid.ColumnDefinitions>
-                        <CheckBox Grid.Column="0"
-                                  x:Name="chkSelectAll"
-                                  VerticalAlignment="Center"
-                                  Checked="chkSelectAll_Checked"
-                                  Unchecked="chkSelectAll_Unchecked"
-                                  ToolTip="Select/Deselect All"/>
-                        <TextBlock Grid.Column="1" Text="Code"
+            <!-- Left Panel: Database Documents -->
+            <Border Grid.Column="0" BorderBrush="#BDC3C7" BorderThickness="1" Background="White">
+                <Grid>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="*"/>
+                    </Grid.RowDefinitions>
+
+                    <!-- Column Headers -->
+                    <Border Grid.Row="0" Background="#34495E" Padding="10,8">
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="40"/>
+                                <ColumnDefinition Width="70"/>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="130"/>
+                                <ColumnDefinition Width="60"/>
+                            </Grid.ColumnDefinitions>
+                            <CheckBox Grid.Column="0"
+                                      x:Name="chkSelectAll"
+                                      VerticalAlignment="Center"
+                                      Checked="chkSelectAll_Checked"
+                                      Unchecked="chkSelectAll_Unchecked"
+                                      ToolTip="Select/Deselect All"/>
+                            <TextBlock Grid.Column="1" Text="Code"
+                                       Foreground="White" FontWeight="SemiBold" FontSize="11"/>
+                            <TextBlock Grid.Column="2" Text="Document Name"
+                                       Foreground="White" FontWeight="SemiBold" FontSize="11"/>
+                            <TextBlock Grid.Column="3" Text="Tip Dosijea"
+                                       Foreground="White" FontWeight="SemiBold" FontSize="11"/>
+                            <TextBlock Grid.Column="4" Text="Count"
+                                       Foreground="White" FontWeight="SemiBold" FontSize="11"/>
+                        </Grid>
+                    </Border>
+
+                    <!-- Scrollable List -->
+                    <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
+                        <ItemsControl x:Name="lstDocuments">
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate>
+                                    <Border BorderBrush="#E0E0E0" BorderThickness="0,0,0,1"
+                                            Background="White" Padding="10,6">
+                                        <Border.Style>
+                                            <Style TargetType="Border">
+                                                <Style.Triggers>
+                                                    <Trigger Property="IsMouseOver" Value="True">
+                                                        <Setter Property="Background" Value="#F5F5F5"/>
+                                                    </Trigger>
+                                                </Style.Triggers>
+                                            </Style>
+                                        </Border.Style>
+                                        <Grid>
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="40"/>
+                                                <ColumnDefinition Width="70"/>
+                                                <ColumnDefinition Width="*"/>
+                                                <ColumnDefinition Width="130"/>
+                                                <ColumnDefinition Width="60"/>
+                                            </Grid.ColumnDefinitions>
+
+                                            <CheckBox Grid.Column="0"
+                                                      IsChecked="{Binding IsSelected, Mode=TwoWay}"
+                                                      VerticalAlignment="Center"
+                                                      Checked="DocumentCheckBox_Changed"
+                                                      Unchecked="DocumentCheckBox_Changed"/>
+
+                                            <TextBlock Grid.Column="1"
+                                                       Text="{Binding SifraDokumenta}"
+                                                       FontSize="10" VerticalAlignment="Center"
+                                                       FontFamily="Consolas"/>
+
+                                            <StackPanel Grid.Column="2" VerticalAlignment="Center">
+                                                <TextBlock Text="{Binding Naziv}"
+                                                           FontSize="11" FontWeight="SemiBold"
+                                                           TextTrimming="CharacterEllipsis"/>
+                                                <TextBlock Text="{Binding NazivDokumenta}"
+                                                           FontSize="9" Foreground="#7F8C8D"
+                                                           Margin="0,2,0,0"
+                                                           TextTrimming="CharacterEllipsis"/>
+                                            </StackPanel>
+
+                                            <TextBlock Grid.Column="3"
+                                                       Text="{Binding TipDosijea}"
+                                                       FontSize="10" VerticalAlignment="Center"
+                                                       HorizontalAlignment="Center"
+                                                       Foreground="#2C3E50"
+                                                       TextTrimming="CharacterEllipsis"/>
+
+                                            <TextBlock Grid.Column="4"
+                                                       Text="{Binding BrojDokumenata}"
+                                                       FontSize="10" VerticalAlignment="Center"
+                                                       HorizontalAlignment="Center"
+                                                       Foreground="#3498DB"/>
+                                        </Grid>
+                                    </Border>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                    </ScrollViewer>
+                </Grid>
+            </Border>
+
+            <!-- Right Panel: Selected Documents -->
+            <Border Grid.Column="2" BorderBrush="#BDC3C7" BorderThickness="1" Background="White">
+                <Grid>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="*"/>
+                    </Grid.RowDefinitions>
+
+                    <!-- Selected Header -->
+                    <Border Grid.Row="0" Background="#27AE60" Padding="10,8">
+                        <TextBlock x:Name="txtSelectedHeader"
+                                   Text="Selected Documents (0)"
                                    Foreground="White" FontWeight="SemiBold" FontSize="12"/>
-                        <TextBlock Grid.Column="2" Text="Document Name"
-                                   Foreground="White" FontWeight="SemiBold" FontSize="12"/>
-                        <TextBlock Grid.Column="3" Text="Tip Dosijea"
-                                   Foreground="White" FontWeight="SemiBold" FontSize="12"/>
-                        <TextBlock Grid.Column="4" Text="Count"
-                                   Foreground="White" FontWeight="SemiBold" FontSize="12"/>
-                    </Grid>
-                </Border>
+                    </Border>
 
-                <!-- Scrollable List -->
-                <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
-                    <ItemsControl x:Name="lstDocuments">
-                        <ItemsControl.ItemTemplate>
-                            <DataTemplate>
-                                <Border BorderBrush="#E0E0E0" BorderThickness="0,0,0,1"
-                                        Background="White" Padding="10,8">
-                                    <Border.Style>
-                                        <Style TargetType="Border">
-                                            <Style.Triggers>
-                                                <Trigger Property="IsMouseOver" Value="True">
-                                                    <Setter Property="Background" Value="#F5F5F5"/>
-                                                </Trigger>
-                                            </Style.Triggers>
-                                        </Style>
-                                    </Border.Style>
-                                    <Grid>
-                                        <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="40"/>
-                                            <ColumnDefinition Width="80"/>
-                                            <ColumnDefinition Width="*"/>
-                                            <ColumnDefinition Width="150"/>
-                                            <ColumnDefinition Width="100"/>
-                                        </Grid.ColumnDefinitions>
+                    <!-- Selected List -->
+                    <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
+                        <ItemsControl x:Name="lstSelected">
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate>
+                                    <Border BorderBrush="#E0E0E0" BorderThickness="0,0,0,1"
+                                            Background="White" Padding="8,6">
+                                        <Border.Style>
+                                            <Style TargetType="Border">
+                                                <Style.Triggers>
+                                                    <Trigger Property="IsMouseOver" Value="True">
+                                                        <Setter Property="Background" Value="#FFF5F5"/>
+                                                    </Trigger>
+                                                </Style.Triggers>
+                                            </Style>
+                                        </Border.Style>
+                                        <Grid>
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="55"/>
+                                                <ColumnDefinition Width="*"/>
+                                                <ColumnDefinition Width="Auto"/>
+                                            </Grid.ColumnDefinitions>
 
-                                        <CheckBox Grid.Column="0"
-                                                  IsChecked="{Binding IsSelected, Mode=TwoWay}"
-                                                  VerticalAlignment="Center"
-                                                  Checked="DocumentCheckBox_Changed"
-                                                  Unchecked="DocumentCheckBox_Changed"/>
+                                            <TextBlock Grid.Column="0"
+                                                       Text="{Binding SifraDokumenta}"
+                                                       FontSize="10" VerticalAlignment="Center"
+                                                       FontFamily="Consolas" Foreground="#7F8C8D"/>
 
-                                        <TextBlock Grid.Column="1"
-                                                   Text="{Binding SifraDokumenta}"
-                                                   FontSize="11" VerticalAlignment="Center"
-                                                   FontFamily="Consolas"/>
+                                            <StackPanel Grid.Column="1" VerticalAlignment="Center" Margin="5,0">
+                                                <TextBlock Text="{Binding Naziv}"
+                                                           FontSize="11" FontWeight="SemiBold"
+                                                           TextTrimming="CharacterEllipsis"/>
+                                                <TextBlock Text="{Binding TipDosijea}"
+                                                           FontSize="9" Foreground="#7F8C8D"
+                                                           TextTrimming="CharacterEllipsis"/>
+                                            </StackPanel>
 
-                                        <StackPanel Grid.Column="2" VerticalAlignment="Center">
-                                            <TextBlock Text="{Binding Naziv}"
-                                                       FontSize="12" FontWeight="SemiBold"/>
-                                            <TextBlock Text="{Binding NazivDokumenta}"
-                                                       FontSize="10" Foreground="#7F8C8D"
-                                                       Margin="0,2,0,0"/>
-                                        </StackPanel>
-
-                                        <TextBlock Grid.Column="3"
-                                                   Text="{Binding TipDosijea}"
-                                                   FontSize="11" VerticalAlignment="Center"
-                                                   HorizontalAlignment="Center"
-                                                   Foreground="#2C3E50"/>
-
-                                        <TextBlock Grid.Column="4"
-                                                   Text="{Binding BrojDokumenata}"
-                                                   FontSize="11" VerticalAlignment="Center"
-                                                   HorizontalAlignment="Center"
-                                                   Foreground="#3498DB"/>
-                                    </Grid>
-                                </Border>
-                            </DataTemplate>
-                        </ItemsControl.ItemTemplate>
-                    </ItemsControl>
-                </ScrollViewer>
-            </Grid>
-        </Border>
+                                            <Button Grid.Column="2"
+                                                    Content="X"
+                                                    Click="btnRemoveSelected_Click"
+                                                    Width="24" Height="24"
+                                                    FontSize="11" FontWeight="Bold"
+                                                    Background="#E74C3C" Foreground="White"
+                                                    BorderThickness="0"
+                                                    VerticalAlignment="Center"
+                                                    ToolTip="Remove from selection"
+                                                    Cursor="Hand"/>
+                                        </Grid>
+                                    </Border>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                    </ScrollViewer>
+                </Grid>
+            </Border>
+        </Grid>
 
         <!-- Footer with paging, buttons and selection count -->
         <Border Grid.Row="3" Background="#ECF0F1" Padding="15" Margin="0,15,0,0">
@@ -166,14 +258,14 @@
 
                     <StackPanel Grid.Column="1" Orientation="Horizontal">
                         <Button x:Name="btnPrevPage"
-                                Content="◀ Previous"
+                                Content="&#9664; Previous"
                                 Click="btnPrevPage_Click"
                                 Padding="10,5" Margin="0,0,5,0"
                                 Background="#3498DB" Foreground="White"
                                 BorderThickness="0"
                                 FontSize="11"/>
                         <Button x:Name="btnNextPage"
-                                Content="Next ▶"
+                                Content="Next &#9654;"
                                 Click="btnNextPage_Click"
                                 Padding="10,5"
                                 Background="#3498DB" Foreground="White"

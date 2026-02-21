@@ -278,6 +278,7 @@ namespace SqlServer.Infrastructure.Implementation
             string? searchText,
             int pageNumber,
             int pageSize,
+            string? tipDosijea = null,
             CancellationToken ct = default)
         {
             if (pageNumber < 1) pageNumber = 1;
@@ -287,14 +288,15 @@ namespace SqlServer.Infrastructure.Implementation
             var offset = (pageNumber - 1) * pageSize;
             var hasSearch = !string.IsNullOrWhiteSpace(searchText);
             var searchPattern = hasSearch ? $"%{searchText!.Trim()}%" : null;
+            var hasTipDosijea = !string.IsNullOrWhiteSpace(tipDosijea);
 
             // Combined query to avoid MultipleActiveResultSets issue
             var sql = @"
                 -- Get total count
                 SELECT COUNT(*) AS TotalCount
                 FROM DocumentMappings WITH (NOLOCK)
-                WHERE (@hasSearch = 0 OR
-                       NAZIV LIKE @searchPattern);
+                WHERE (@hasSearch = 0 OR NAZIV LIKE @searchPattern)
+                  AND (@hasTipDosijea = 0 OR TipDosijea = @tipDosijea);
 
                 -- Get paged data
                 SELECT
@@ -311,15 +313,15 @@ namespace SqlServer.Infrastructure.Implementation
                     ExcelFileSheet,
                     PolitikaCuvanja
                 FROM DocumentMappings WITH (NOLOCK)
-                WHERE (@hasSearch = 0 OR
-                       NAZIV LIKE @searchPattern)
+                WHERE (@hasSearch = 0 OR NAZIV LIKE @searchPattern)
+                  AND (@hasTipDosijea = 0 OR TipDosijea = @tipDosijea)
                 ORDER BY NAZIV
                 OFFSET @offset ROWS
                 FETCH NEXT @pageSize ROWS ONLY;";
 
             var cmd = new CommandDefinition(
                 sql,
-                new { hasSearch = hasSearch ? 1 : 0, searchPattern, offset, pageSize },
+                new { hasSearch = hasSearch ? 1 : 0, searchPattern, hasTipDosijea = hasTipDosijea ? 1 : 0, tipDosijea, offset, pageSize },
                 transaction: Tx,
                 commandTimeout: _commandTimeoutSeconds,
                 cancellationToken: ct);
@@ -329,6 +331,24 @@ namespace SqlServer.Infrastructure.Implementation
             var items = await multi.ReadAsync<DocumentMapping>().ConfigureAwait(false);
 
             return (items.AsList().AsReadOnly(), totalCount);
+        }
+
+        public async Task<IReadOnlyList<string>> GetDistinctTipDosijeaAsync(CancellationToken ct = default)
+        {
+            var sql = @"
+                SELECT DISTINCT TipDosijea
+                FROM DocumentMappings WITH (NOLOCK)
+                WHERE TipDosijea IS NOT NULL AND TipDosijea <> ''
+                ORDER BY TipDosijea";
+
+            var cmd = new CommandDefinition(
+                sql,
+                transaction: Tx,
+                commandTimeout: _commandTimeoutSeconds,
+                cancellationToken: ct);
+
+            var results = await Conn.QueryAsync<string>(cmd).ConfigureAwait(false);
+            return results.AsList().AsReadOnly();
         }
 
         /// <summary>
