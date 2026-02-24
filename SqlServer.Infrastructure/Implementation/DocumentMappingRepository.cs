@@ -68,16 +68,41 @@ namespace SqlServer.Infrastructure.Implementation
             if (string.IsNullOrWhiteSpace(originalName))
                 return null;
 
-            var cacheKey = $"DocMapping_Name_{originalName.Trim().ToUpperInvariant()}";
+            var normalized = originalName.Trim().ToUpperInvariant();
 
-            if (_cache.TryGetValue(cacheKey, out DocumentMapping? cached))
+            // Slučaj A: GROUP wildcard pattern — "TEKUCI DEVIZNI RACUN *"
+            // Dolazi kada se u selekciji nalazi cela grupa (GroupSelection.ToAlfrescoPattern())
+            if (normalized.EndsWith(" *"))
             {
-                // Obogati sa kategorijom (CategoryMappingRepository ima svoj cache)
+                var baseFromPattern = normalized.Substring(0, normalized.Length - 2);
+                return await FindByGroupBaseInternalAsync(baseFromPattern, ct).ConfigureAwait(false);
+            }
+
+            var exactKey = $"DocMapping_Name_{normalized}";
+
+            // Slučaj B: konkretna varijanta — "TEKUCI DEVIZNI RACUN 123321"
+            // Provjeri exact cache prvo, pa base cache, pa DB
+
+            if (_cache.TryGetValue(exactKey, out DocumentMapping? cached))
+            {
                 await EnrichWithCategoryAsync(cached, ct).ConfigureAwait(false);
                 return cached;
             }
 
-            // SQL Server će koristiti indeks na NAZIV koloni (preporučuje se kreirati indeks)
+            // Provjeri base cache za numeričke varijante — jedan DB upit pokriva sve varijante grupe
+            var baseNaziv = ExtractBaseNaziv(normalized);
+            if (baseNaziv != null)
+            {
+                var fromBase = await FindByGroupBaseInternalAsync(baseNaziv, ct).ConfigureAwait(false);
+                if (fromBase != null)
+                {
+                    // Kešira i pod exact ključem radi brzine za ponovni isti naziv
+                    _cache.Set(exactKey, fromBase, DocumentCacheDuration);
+                    return fromBase;
+                }
+            }
+
+            // Slučaj C: naziv bez numeričkog sufiksa — tačan DB lookup
             var sql = @"SELECT TOP 1
                             ID,
                             NAZIV,
@@ -105,12 +130,83 @@ namespace SqlServer.Infrastructure.Implementation
 
             if (result != null)
             {
-                // Obogati sa kategorijom PRE keširanja
                 await EnrichWithCategoryAsync(result, ct).ConfigureAwait(false);
-                _cache.Set(cacheKey, result, DocumentCacheDuration);
+                _cache.Set(exactKey, result, DocumentCacheDuration);
             }
 
             return result;
+        }
+
+        /// <summary>
+        /// Nalazi mapping za grupu po baznom nazivu koristeći LIKE pretragu.
+        /// Npr. baseNaziv = "TEKUCI DEVIZNI RACUN" → WHERE NAZIV LIKE 'TEKUCI DEVIZNI RACUN %' TOP 1
+        /// Kešira pod "DocMapping_Base_{baseNaziv}" — sve varijante iste grupe dijele isti entry.
+        /// </summary>
+        private async Task<DocumentMapping?> FindByGroupBaseInternalAsync(string baseNaziv, CancellationToken ct)
+        {
+            var baseKey = $"DocMapping_Base_{baseNaziv}";
+
+            if (_cache.TryGetValue(baseKey, out DocumentMapping? cached))
+            {
+                await EnrichWithCategoryAsync(cached, ct).ConfigureAwait(false);
+                return cached;
+            }
+
+            var sql = @"SELECT TOP 1
+                            ID,
+                            NAZIV,
+                            BROJ_DOKUMENATA,
+                            sifraDokumenta,
+                            NazivDokumenta,
+                            TipDosijea,
+                            TipProizvoda,
+                            SifraDokumentaMigracija,
+                            NazivDokumentaMigracija,
+                            ExcelFileName,
+                            ExcelFileSheet,
+                            PolitikaCuvanja
+                        FROM DocumentMappings WITH (NOLOCK)
+                        WHERE NAZIV LIKE @likePattern
+                        ORDER BY NAZIV";
+
+            var cmd = new CommandDefinition(
+                sql,
+                new { likePattern = $"{baseNaziv} %" },
+                transaction: Tx,
+                commandTimeout: _commandTimeoutSeconds,
+                cancellationToken: ct);
+
+            var result = await Conn.QueryFirstOrDefaultAsync<DocumentMapping>(cmd).ConfigureAwait(false);
+
+            if (result != null)
+            {
+                await EnrichWithCategoryAsync(result, ct).ConfigureAwait(false);
+                _cache.Set(baseKey, result, DocumentCacheDuration);
+            }
+
+            return result;
+        }
+
+        /// <summary>
+        /// Detektuje numerički sufiks i vraća bazni naziv (uppercase).
+        /// "TEKUCI RACUNI 12345" → "TEKUCI RACUNI"
+        /// "TEKUCI RACUNI" → null (nema sufiksa)
+        /// "TEKUCI RACUNI ABC" → null (sufiks nije broj)
+        /// </summary>
+        private static string? ExtractBaseNaziv(string upperName)
+        {
+            var lastSpace = upperName.LastIndexOf(' ');
+            if (lastSpace <= 0) return null;
+            var suffix = upperName.Substring(lastSpace + 1);
+            if (suffix.Length == 0 || !IsAllDigits(suffix)) return null;
+            return upperName.Substring(0, lastSpace);
+        }
+
+        private static bool IsAllDigits(string s)
+        {
+            foreach (var c in s)
+                if (c < '0' || c > '9') return false;
+            return true;
         }
 
         /// <summary>
