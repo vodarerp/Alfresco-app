@@ -465,7 +465,7 @@ namespace Migration.Infrastructure.Implementation.Services
                         sourceFromDoc = sourceObj?.ToString();
 
                     // ecm:docCreationDate - Original creation date
-                    if (alfrescoEntry.Properties.TryGetValue("ecm:docCreationDate", out var creationDateObj))
+                    if (alfrescoEntry.Properties.TryGetValue("ecm:datumKreiranja", out var creationDateObj))
                     {
                         if (creationDateObj is DateTime dt)
                             docCreationDate = dt;

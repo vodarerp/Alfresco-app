@@ -431,7 +431,7 @@ namespace Migration.Infrastructure.Implementation.Services
             var coreId = ExtractCoreId(accFolderName);
 
             // Extract CreatedDate from ecm:docCreationDate property
-            var createdDate = GetDateTimePropertyValue(entry, "ecm:docCreationDate")                             
+            var createdDate = GetDateTimePropertyValue(entry, "ecm:datumKreiranja")                             
                               ?? null;
 
             var sysCreated = entry.CreatedAt.DateTime;

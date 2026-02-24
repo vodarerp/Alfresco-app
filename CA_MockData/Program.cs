@@ -40,7 +40,7 @@ public static class Program
             BaseUrl = "http://localhost:8080/",
             Username =  "admin",
             Password = "admin",
-            RootParentId = "fd7e431b-9f63-40bf-be43-1b9f6310bff9",
+            RootParentId = "143a59de-fcba-4460-ba59-defcbab46052",
             FolderCount = 100,
             DocsPerFolder = 10,
             DegreeOfParallelism = 5,
@@ -103,6 +103,41 @@ public static class Program
             }
             Console.WriteLine($"All dosie folders ready. Starting client folder creation...\n");
         }
+
+        // Flat list of account items (GroupName, AccountNumber) - assigned 1-to-1 per folder index
+        var allAccountItems = new (string GroupName, string AccountNumber)[]
+        {
+            ("TEKUCI RACUN", "00100461025"),
+            ("TEKUCI RACUN", "10000036022"),
+            ("TEKUCI RACUN", "10000104005"),
+            ("TEKUCI RACUN", "10000141004"),
+            ("TEKUCI RACUN", "10000684013"),
+            ("TEKUCI RACUN", "10000693013"),
+            ("TEKUCI RACUN", "10001394012"),
+            ("TEKUCI RACUN", "10001565003"),
+            ("TEKUCI RACUN", "10001645008"),
+            ("TEKUCI RACUN", "10001662005"),
+            ("TEKUCI DEVIZNI RACUN", "10001676011"),
+            ("TEKUCI DEVIZNI RACUN", "10001718008"),
+            ("TEKUCI DEVIZNI RACUN", "10001751016"),
+            ("TEKUCI DEVIZNI RACUN", "10002204009"),
+            ("TEKUCI DEVIZNI RACUN", "10002403000"),
+            ("TEKUCI DEVIZNI RACUN", "10002542000"),
+            ("TEKUCI DEVIZNI RACUN", "10002628002"),
+            ("TEKUCI DEVIZNI RACUN", "10002668000"),
+            ("TEKUCI DEVIZNI RACUN", "10002740000"),
+            ("TEKUCI DEVIZNI RACUN", "10002781003"),
+            ("STANDARD PAKET RACUN", "10003095011"),
+            ("STANDARD PAKET RACUN", "10003184005"),
+            ("STANDARD PAKET RACUN", "10003410004"),
+            ("STANDARD PAKET RACUN", "10003412015"),
+            ("STANDARD PAKET RACUN", "10003534011"),
+            ("STANDARD PAKET RACUN", "10003557019"),
+            ("STANDARD PAKET RACUN", "10003694003"),
+            ("STANDARD PAKET RACUN", "10003769002"),
+            ("STANDARD PAKET RACUN", "10004570016"),
+            ("STANDARD PAKET RACUN", "10005683003"),
+        };
 
         var ch = Channel.CreateBounded<int>(new BoundedChannelOptions(cfg.DegreeOfParallelism * 8)
         {
@@ -247,6 +282,29 @@ public static class Program
                                 catch (Exception ex)
                                 {
                                     Console.WriteLine($"[ERROR] Failed to create deposit documents in folder {folderName}: {ex.Message}");
+                                }
+                            }
+
+                            // Add account group document into the same PI/LE client folder (first 30 folders)
+                            if (!cfg.GenerateOnlyKdpDocuments && i < allAccountItems.Length)
+                            {
+                                var (groupName, accountNumber) = allAccountItems[i];
+                                var docDesc = $"{groupName} {accountNumber}";
+                                var docName = $"{groupName.Replace(" ", "_")}_{accountNumber}.pdf";
+                                var tipDosiea = clientType == "PI" ? "Dosije klijenta FL" : "Dosije klijenta PL";
+                                var acctRandom = new Random(coreId);
+                                var acctProps = CreateDocumentProps(clientType, coreId, string.Empty, docDesc, tipDosiea, "validiran", acctRandom);
+                                acctProps["ecm:bnkAccountNumber"] = accountNumber;
+
+                                try
+                                {
+                                    using var acctContent = GenerateDoc(i, 2000, docName);
+                                    await CreateDocumentAsync(http, cfg, folderId, docName, acctContent, cts.Token, acctProps);
+                                    Interlocked.Increment(ref createdDocument);
+                                }
+                                catch (Exception ex)
+                                {
+                                    Console.WriteLine($"[WARNING] Failed to create account group document {docName}: {ex.Message}");
                                 }
                             }
 
@@ -899,8 +957,8 @@ public static class Program
         var random = new Random(coreId);
         var usedFileNames = new HashSet<string>();
 
-        // Helper function to create deposit document with version support (TC 22)
-        async Task AddDepositDocumentAsync(string documentName, int? versionNumber = null)
+        // Helper function to create deposit document with version and/or date support
+        async Task AddDepositDocumentAsync(string documentName, int? versionNumber = null, DateTime? datumKreiranja = null)
         {
             var docTypeCode = await GetDocumentTypeCodeAsync(cfg, documentName, ct);
 
@@ -911,23 +969,29 @@ public static class Program
             }
 
             var baseFileName = documentName.Replace(" ", "_").Replace("/", "_");
-            var fileName = baseFileName + ".pdf";
+            string fileName;
 
-            // Add version number to filename if specified
-            if (usedFileNames.Contains(fileName) || versionNumber.HasValue)
+            // Build unique filename from date and/or version
+            if (datumKreiranja.HasValue && versionNumber.HasValue)
             {
-                if (versionNumber.HasValue)
+                fileName = $"{baseFileName}_{datumKreiranja.Value:yyyyMMdd}_v{versionNumber.Value}.pdf";
+            }
+            else if (datumKreiranja.HasValue)
+            {
+                fileName = $"{baseFileName}_{datumKreiranja.Value:yyyyMMdd}.pdf";
+            }
+            else if (versionNumber.HasValue)
+            {
+                fileName = $"{baseFileName}_v{versionNumber.Value}.pdf";
+            }
+            else
+            {
+                fileName = baseFileName + ".pdf";
+                int counter = 1;
+                while (usedFileNames.Contains(fileName))
                 {
-                    fileName = $"{baseFileName}_v{versionNumber.Value}.pdf";
-                }
-                else
-                {
-                    int counter = 1;
-                    while (usedFileNames.Contains(fileName))
-                    {
-                        fileName = $"{baseFileName}_{counter}.pdf";
-                        counter++;
-                    }
+                    fileName = $"{baseFileName}_{counter}.pdf";
+                    counter++;
                 }
             }
 
@@ -972,9 +1036,9 @@ public static class Program
             // Contract number - CRITICAL for deposit documents
             props["ecm:contractNumber"] = contractNumber;
 
-            // Dates
-            var creationDate = DateTime.ParseExact(contractNumber, "yyyyMMdd", null);
-            props["ecm:docCreationDate"] = creationDate.ToString("o");
+            // Dates: datumKreiranja drives the creation date when provided
+            var baseDate = DateTime.ParseExact(contractNumber, "yyyyMMdd", null);
+            props["ecm:datumKreiranja"] = (datumKreiranja ?? baseDate).ToString("o");
 
             // TC 22: Add version label if specified
             if (versionNumber.HasValue)
@@ -999,39 +1063,56 @@ public static class Program
             }
         }
 
+        // Helper to add same deposit document multiple times with different ecm:datumKreiranja
+        async Task AddDepositDocumentWithDatesAsync(string documentName, DateTime[] dates)
+        {
+            foreach (var date in dates)
+            {
+                await AddDepositDocumentAsync(documentName, datumKreiranja: date);
+            }
+        }
+
+        // Multiple creation dates - simulates same document uploaded on different days
+        var depositDates = new[]
+        {
+            new DateTime(2026, 2, 20),
+            new DateTime(2026, 2, 21),
+            new DateTime(2026, 2, 23)
+        };
+
         // Generate deposit documents based on client type
         if (clientType == "PI")
         {
             // TC 24: Minimum required deposit documents for PI (00008)
-            // 1. Ugovor o oročenom depozitu
-            await AddDepositDocumentWithVersionsAsync("PiVazeciUgovorOroceniDepozitDvojezicniRSD", versionCount: 3);
+            // 1. Ugovor o oročenom depozitu - multiple dates
+            await AddDepositDocumentWithDatesAsync("PiVazeciUgovorOroceniDepozitDvojezicniRSD", depositDates);
 
-            // 2. Ponuda (REQUIRED - previously missing)
-            await AddDepositDocumentAsync("PiPonuda");
+            // 2. Ponuda - multiple dates
+            await AddDepositDocumentWithDatesAsync("PiPonuda", depositDates);
 
-            // 3. Plan isplate depozita (REQUIRED - previously missing)
-            await AddDepositDocumentAsync("PiAnuitetniPlan");
+            // 3. Plan isplate depozita - multiple dates
+            await AddDepositDocumentWithDatesAsync("PiAnuitetniPlan", depositDates);
 
-            // 4. Obavezni elementi Ugovora
-            await AddDepositDocumentWithVersionsAsync("PiObavezniElementiUgovora", versionCount: 2);
+            // 4. Obavezni elementi Ugovora - multiple dates
+            await AddDepositDocumentWithDatesAsync("PiObavezniElementiUgovora", depositDates);
 
-            // TC 22: Additional deposit documents with versions
-            await AddDepositDocumentWithVersionsAsync("ZahtevZaOtvaranjeRacunaOrocenogDepozita", versionCount: 2);
+            // Additional deposit documents - multiple dates
+            await AddDepositDocumentWithDatesAsync("ZahtevZaOtvaranjeRacunaOrocenogDepozita", depositDates);
         }
         else if (clientType == "LE")
         {
             // TC 24: Minimum required deposit documents for LE (00010)
-            // 1. Ugovor o oročenom depozitu
-            await AddDepositDocumentWithVersionsAsync("SmeUgovorOroceniDepozitPreduzetnici", versionCount: 3);
+            // 1. Ugovor o oročenom depozitu - multiple dates
+            await AddDepositDocumentWithDatesAsync("SmeUgovorOroceniDepozitPreduzetnici", depositDates);
 
-            // 2. Ponuda (REQUIRED - previously missing)
-            await AddDepositDocumentAsync("SmePonuda");
+            // 2. Ponuda - multiple dates
+            await AddDepositDocumentWithDatesAsync("SmePonuda", depositDates);
 
-            // 3. Plan isplate depozita (REQUIRED - previously missing)
-            await AddDepositDocumentAsync("SmeAnuitetniPlan");
+            // 3. Plan isplate depozita - multiple dates
+            await AddDepositDocumentWithDatesAsync("SmeAnuitetniPlan", depositDates);
 
-            // 4. Obavezni elementi Ugovora (REQUIRED - previously missing)
-            await AddDepositDocumentWithVersionsAsync("SmeObavezniElementiUgovora", versionCount: 2);
+            // 4. Obavezni elementi Ugovora - multiple dates
+            await AddDepositDocumentWithDatesAsync("SmeObavezniElementiUgovora", depositDates);
         }
 
         return documents;
@@ -1193,31 +1274,31 @@ public static class Program
 
         // Dates
         var creationDate = DateTime.UtcNow.AddDays(-random.Next(1, 365));
-        properties["ecm:docCreationDate"] = creationDate.ToString("o");
+        properties["ecm:datumKreiranja"] = creationDate.ToString("o");
 
         // TC 16: KDP 00824 edge case - account number validation
         // If includeAccountNumber is explicitly set, respect it; otherwise use default logic
-        if (docTypeCode == "00824")
-        {
-            if (includeAccountNumber == true)
-            {
-                // Include account number - document should be active after migration
-                properties["ecm:contractNumber"] = $"{coreId}_{random.Next(100, 999)}";
-            }
-            else if (includeAccountNumber == false)
-            {
-                // Explicitly exclude account number - document should NOT be active
-                // Do not add ecm:contractNumber property
-            }
-            else
-            {
-                // Default behavior: add account number if status is validiran
-                if (docStatus == "validiran")
-                {
-                    properties["ecm:contractNumber"] = $"{coreId}_{random.Next(100, 999)}";
-                }
-            }
-        }
+        //if (docTypeCode == "00824")
+        //{
+        //    if (includeAccountNumber == true)
+        //    {
+        //        // Include account number - document should be active after migration
+        //        properties["ecm:contractNumber"] = $"{coreId}_{random.Next(100, 999)}";
+        //    }
+        //    else if (includeAccountNumber == false)
+        //    {
+        //        // Explicitly exclude account number - document should NOT be active
+        //        // Do not add ecm:contractNumber property
+        //    }
+        //    else
+        //    {
+        //        // Default behavior: add account number if status is validiran
+        //        if (docStatus == "validiran")
+        //        {
+        //            properties["ecm:contractNumber"] = $"{coreId}_{random.Next(100, 999)}";
+        //        }
+        //    }
+        //}
 
         return properties;
     }

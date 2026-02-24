@@ -1437,7 +1437,7 @@ namespace Migration.Infrastructure.Implementation.Services
                         if (Decimal.TryParse(versionObj.ToString(), out decimal parVersion))
                             versionLabel = parVersion;
 
-                    if (alfrescoEntry.Properties.TryGetValue("ecm:docCreationDate", out var creationDateObj))
+                    if (alfrescoEntry.Properties.TryGetValue("ecm:datumKreiranja", out var creationDateObj))
                     {
                         if (creationDateObj is DateTime dt)
                             docCreationDate = dt;
