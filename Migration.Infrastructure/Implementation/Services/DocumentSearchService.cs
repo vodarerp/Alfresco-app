@@ -1,4 +1,5 @@
 using Alfresco.Abstraction.Interfaces;
+using Alfresco.Contracts.DtoModels;
 using Alfresco.Abstraction.Models;
 using Alfresco.Contracts.Enums;
 using Alfresco.Contracts.Extensions;
@@ -46,8 +47,11 @@ namespace Migration.Infrastructure.Implementation.Services
         // Cache for processed folders (to avoid duplicate API calls within session)
         private readonly ConcurrentDictionary<string, FolderStaging> _folderCache = new();
 
-        // Runtime override for DocDescriptions (takes precedence over appsettings)
+        // Runtime override za DocDescriptions (legacy — ručni text unos)
         private List<string>? _docDescriptionsOverride = null;
+
+        // Runtime override za grupisanu selekciju iz DocumentSelectionWindow
+        private DocumentSelectionResult? _selectionOverride = null;
 
         private const string ServiceName = "DocumentSearch";
 
@@ -73,9 +77,22 @@ namespace Migration.Infrastructure.Implementation.Services
         public void SetDocDescriptions(List<string> docDescriptions)
         {
             _docDescriptionsOverride = docDescriptions;
+            _selectionOverride = null;
             _fileLogger.LogInformation("DocDescriptions override set: {DocDescriptions}", string.Join(", ", docDescriptions));
 
-            // Reset folder iteration when docDescriptions change - start from beginning
+            _currentFolderTypeIndex = 0;
+            _currentSkipCount = 0;
+            _fileLogger.LogInformation("Reset folder iteration - starting from folder index 0");
+        }
+
+        public void SetDocumentSelection(DocumentSelectionResult selection)
+        {
+            _selectionOverride = selection;
+            _docDescriptionsOverride = null;
+            _fileLogger.LogInformation(
+                "DocumentSelection override set: {ExactCount} exact, {GroupCount} groups",
+                selection.ExactDescriptions.Count, selection.GroupSelections.Count);
+
             _currentFolderTypeIndex = 0;
             _currentSkipCount = 0;
             _fileLogger.LogInformation("Reset folder iteration - starting from folder index 0");
@@ -83,6 +100,12 @@ namespace Migration.Infrastructure.Implementation.Services
 
         public List<string> GetCurrentDocDescriptions()
         {
+            if (_selectionOverride != null)
+            {
+                var all = new List<string>(_selectionOverride.ExactDescriptions);
+                all.AddRange(_selectionOverride.GroupSelections.Select(g => g.ToAlfrescoPattern()));
+                return all;
+            }
             return _docDescriptionsOverride ?? _options.Value.DocumentTypeDiscovery.DocTypes;
         }
 
@@ -167,7 +190,7 @@ namespace Migration.Infrastructure.Implementation.Services
                 // Apply filters
                 var typeForRegex = currentType == "D" ? "DE" : currentType;
                 var regex = new Regex($"^{Regex.Escape(typeForRegex)}[0-9]", RegexOptions.IgnoreCase);
-                var docDescHashSet = new HashSet<string>(docDescriptions, StringComparer.OrdinalIgnoreCase);
+                var docDescVerifier = BuildDocDescVerifier(_selectionOverride, docDescriptions);
 
                 finalDocuments = searchResult.Documents.Where(o =>
                 {
@@ -176,8 +199,7 @@ namespace Migration.Infrastructure.Implementation.Services
                 }).Where(o =>
                 {
                     var docDesc = o.Entry.Properties?.GetValueOrDefault("ecm:docDesc")?.ToString();
-                    return docDesc != null && docDescHashSet.Contains(docDesc);
-
+                    return docDesc != null && docDescVerifier(docDesc);
                 }).ToList();
 
                 result.DocumentsFound = finalDocuments.Count;
@@ -761,7 +783,9 @@ namespace Migration.Infrastructure.Implementation.Services
                 : 5;
             var maxDocs = _options.Value.MaxDocumentsToProcess;
 
-            var query = BuildDocumentSearchQuery(folderId, docDescriptions);
+            var query = _selectionOverride != null
+                ? BuildDocumentSearchQuery(folderId, _selectionOverride)
+                : BuildDocumentSearchQuery(folderId, docDescriptions);
             var totalCount = await GetTotalDocumentCountAsync(query, ct).ConfigureAwait(false);
 
             _fileLogger.LogInformation(
@@ -782,10 +806,10 @@ namespace Migration.Infrastructure.Implementation.Services
 
             _fileLogger.LogInformation("DOSSIER-{Type}: Will process {BatchCount} batches", folderType, skipValues.Count);
 
-            // Prepare regex and hashset for post-filtering
+            // Prepare regex and verifier for post-filtering
             var typeForRegex = folderType == "D" ? "DE" : folderType;
             var regex = new Regex($"^{Regex.Escape(typeForRegex)}[0-9]", RegexOptions.IgnoreCase);
-            var docDescHashSet = new HashSet<string>(docDescriptions, StringComparer.OrdinalIgnoreCase);
+            var docDescVerifier = BuildDocDescVerifier(_selectionOverride, docDescriptions);
 
             // ConcurrentQueue for batched results
             var pendingBatches = new ConcurrentQueue<(List<FolderStaging> Folders, List<DocStaging> Documents)>();
@@ -807,10 +831,10 @@ namespace Migration.Infrastructure.Implementation.Services
                 try
                 {
                     // Fetch batch from Alfresco
-                    var searchResult = await SearchDocumentsByDescriptionAsync(folderId, docDescriptions, skipCount, batchSize, token)
+                    var searchResult = await SearchDocumentsByDescriptionAsync(folderId, docDescriptions, skipCount, batchSize, token, _selectionOverride)
                         .ConfigureAwait(false);
 
-                    // Post-filter: regex + docDesc HashSet
+                    // Post-filter: regex + docDesc verifier (exact ili wildcard)
                     var filteredDocs = searchResult.Documents.Where(o =>
                     {
                         var lastParentName = o.Entry.Path?.Elements?.LastOrDefault()?.Name;
@@ -818,7 +842,7 @@ namespace Migration.Infrastructure.Implementation.Services
                     }).Where(o =>
                     {
                         var docDesc = o.Entry.Properties?.GetValueOrDefault("ecm:docDesc")?.ToString();
-                        return docDesc != null && docDescHashSet.Contains(docDesc);
+                        return docDesc != null && docDescVerifier(docDesc);
                     }).ToList();
 
                     if (filteredDocs.Count == 0) return;
@@ -1060,9 +1084,12 @@ namespace Migration.Infrastructure.Implementation.Services
             List<string> docDescriptions,
             int skipCount,
             int maxItems,
-            CancellationToken ct)
+            CancellationToken ct,
+            DocumentSelectionResult? selectionOverride = null)
         {
-            var query = BuildDocumentSearchQuery(ancestorId, docDescriptions);
+            var query = selectionOverride != null
+                ? BuildDocumentSearchQuery(ancestorId, selectionOverride)
+                : BuildDocumentSearchQuery(ancestorId, docDescriptions);
 
             _fileLogger.LogInformation("AFTS Query: {Query}, Skip: {Skip}, Max: {Max}", query, skipCount, maxItems);
 
@@ -1132,6 +1159,73 @@ namespace Migration.Infrastructure.Implementation.Services
             }
 
             return query;
+        }
+
+        /// <summary>
+        /// Overload za grupisanu selekciju — generiše mešani exact + wildcard AFTS query.
+        /// Exact: =ecm\:docDesc:"NAZIV" (term equality, bez analize)
+        /// Wildcard: ecm\:docDesc:"BASE *" (phrase search, podržava wildcard)
+        /// </summary>
+        private string BuildDocumentSearchQuery(string ancestorId, DocumentSelectionResult selection)
+        {
+            var conditions = new List<string>();
+
+            foreach (var desc in selection.ExactDescriptions)
+                conditions.Add($"=ecm\\:docDesc:\"{desc}\"");
+
+            foreach (var group in selection.GroupSelections)
+                conditions.Add($"ecm\\:docDesc:\"{group.ToAlfrescoPattern()}\"");
+
+            var query = $"({string.Join(" OR ", conditions)}) " +
+                        $"AND ANCESTOR:\"{ancestorId}\" " +
+                        $"AND TYPE:\"cm:content\"";
+
+            if (_options.Value.DocumentTypeDiscovery.UseDateFilter)
+            {
+                var dateFrom = _options.Value.DocumentTypeDiscovery.DateFrom;
+                var dateTo = _options.Value.DocumentTypeDiscovery.DateTo;
+
+                if (!string.IsNullOrWhiteSpace(dateFrom) && !string.IsNullOrWhiteSpace(dateTo))
+                {
+                    if (DateTime.TryParse(dateFrom, out var fromDate) && DateTime.TryParse(dateTo, out var toDate))
+                        query += $" AND cm\\:created:[{fromDate:yyyy-MM-dd} TO {toDate:yyyy-MM-dd}]";
+                }
+            }
+
+            return query;
+        }
+
+        /// <summary>
+        /// Gradi verifier funkciju za post-filter proveru ecm:docDesc vrednosti.
+        /// Ako je selection null, koristi legacy HashSet exact match.
+        /// Ako je selection postavljena, kombinuje exact HashSet + regex za grupe.
+        /// </summary>
+        private static Func<string, bool> BuildDocDescVerifier(
+            DocumentSelectionResult? selection,
+            List<string> legacyList)
+        {
+            if (selection == null)
+            {
+                var hashSet = new HashSet<string>(legacyList, StringComparer.OrdinalIgnoreCase);
+                return desc => hashSet.Contains(desc);
+            }
+
+            var exactSet = new HashSet<string>(
+                selection.ExactDescriptions,
+                StringComparer.OrdinalIgnoreCase);
+
+            // Regex za svaku grupu: "^BaseNaziv \d+$" ili "^BaseNaziv InvoiceFilter\d*$"
+            var groupRegexes = selection.GroupSelections
+                .Select(g => new Regex(
+                    $@"^{Regex.Escape(g.BaseNaziv)} " +
+                    (g.InvoiceFilter != null ? Regex.Escape(g.InvoiceFilter) : "") +
+                    @"\d*$",
+                    RegexOptions.IgnoreCase | RegexOptions.Compiled))
+                .ToList();
+
+            return desc =>
+                exactSet.Contains(desc) ||
+                groupRegexes.Any(r => r.IsMatch(desc));
         }
 
         /// <summary>

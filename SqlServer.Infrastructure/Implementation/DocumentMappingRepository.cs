@@ -1,3 +1,4 @@
+using Alfresco.Contracts.DtoModels;
 using Alfresco.Contracts.Oracle.Models;
 using Alfresco.Contracts.SqlServer;
 using Dapper;
@@ -283,22 +284,23 @@ namespace SqlServer.Infrastructure.Implementation
         {
             if (pageNumber < 1) pageNumber = 1;
             if (pageSize < 1) pageSize = 50;
-            if (pageSize > 500) pageSize = 500; // Max limit
+            if (pageSize > 500) pageSize = 500;
+
+            var cacheKey = $"DocSearch_{searchText?.Trim()}_{tipDosijea}_{pageNumber}_{pageSize}";
+            if (_cache.TryGetValue(cacheKey, out (IReadOnlyList<DocumentMapping>, int) cached))
+                return cached;
 
             var offset = (pageNumber - 1) * pageSize;
             var hasSearch = !string.IsNullOrWhiteSpace(searchText);
             var searchPattern = hasSearch ? $"%{searchText!.Trim()}%" : null;
             var hasTipDosijea = !string.IsNullOrWhiteSpace(tipDosijea);
 
-            // Combined query to avoid MultipleActiveResultSets issue
             var sql = @"
-                -- Get total count
                 SELECT COUNT(*) AS TotalCount
                 FROM DocumentMappings WITH (NOLOCK)
                 WHERE (@hasSearch = 0 OR NAZIV LIKE @searchPattern)
                   AND (@hasTipDosijea = 0 OR TipDosijea = @tipDosijea);
 
-                -- Get paged data
                 SELECT
                     ID,
                     NAZIV,
@@ -330,7 +332,9 @@ namespace SqlServer.Infrastructure.Implementation
             var totalCount = await multi.ReadFirstAsync<int>().ConfigureAwait(false);
             var items = await multi.ReadAsync<DocumentMapping>().ConfigureAwait(false);
 
-            return (items.AsList().AsReadOnly(), totalCount);
+            var result = (items.AsList().AsReadOnly() as IReadOnlyList<DocumentMapping>, totalCount);
+            _cache.Set(cacheKey, result, TimeSpan.FromMinutes(5));
+            return result;
         }
 
         public async Task<IReadOnlyList<string>> GetDistinctTipDosijeaAsync(CancellationToken ct = default)
@@ -349,6 +353,198 @@ namespace SqlServer.Infrastructure.Implementation
 
             var results = await Conn.QueryAsync<string>(cmd).ConfigureAwait(false);
             return results.AsList().AsReadOnly();
+        }
+
+        /// <summary>
+        /// Vraća grupisani prikaz dokumenata (GROUP + SINGLE redovi).
+        /// Koristi CTE sa CASE expression za detekciju numeričkog sufiksa — bez ALTER TABLE.
+        /// Rezultat se keširata 10 minuta (full scan je skup za 70k+ redova).
+        /// </summary>
+        public async Task<(IReadOnlyList<GroupedDocumentRow> Items, int TotalCount)> GetGroupedViewAsync(
+            string? searchText,
+            string? tipDosijea,
+            int pageNumber,
+            int pageSize,
+            CancellationToken ct = default)
+        {
+            if (pageNumber < 1) pageNumber = 1;
+            if (pageSize < 1) pageSize = 50;
+            if (pageSize > 500) pageSize = 500;
+
+            // Kešira CIJELI rezultat za dati filter (bez page) — straničenje se radi u memoriji.
+            // Na taj način page 2, 3, ... su instant (bez ponovnog pokretanja skupog CTE-a).
+            var allCacheKey = $"GroupedViewAll_{searchText?.Trim()}_{tipDosijea}";
+            if (!_cache.TryGetValue(allCacheKey, out IReadOnlyList<GroupedDocumentRow>? allRows))
+            {
+                var hasSearch = !string.IsNullOrWhiteSpace(searchText);
+                var searchPattern = hasSearch ? $"%{searchText!.Trim()}%" : null;
+                var hasTipDosijea = !string.IsNullOrWhiteSpace(tipDosijea);
+
+                // Bez OFFSET/FETCH i COUNT(*) OVER() — dohvatamo sve odjednom, paginiramo u C#
+                var sql = @"
+                    WITH DocWithBase AS (
+                        SELECT
+                            ID,
+                            NAZIV,
+                            ISNULL(BROJ_DOKUMENATA, 0) AS BROJ_DOKUMENATA,
+                            TipDosijea,
+                            sifraDokumenta,
+                            CASE
+                                WHEN CHARINDEX(' ', NAZIV) > 0
+                                 AND LEN(SUBSTRING(NAZIV,
+                                         LEN(NAZIV) + 2 - CHARINDEX(' ', REVERSE(NAZIV)),
+                                         LEN(NAZIV))) > 0
+                                 AND SUBSTRING(NAZIV,
+                                         LEN(NAZIV) + 2 - CHARINDEX(' ', REVERSE(NAZIV)),
+                                         LEN(NAZIV)) NOT LIKE '%[^0-9]%'
+                                THEN LEFT(NAZIV, LEN(NAZIV) - CHARINDEX(' ', REVERSE(NAZIV)))
+                                ELSE NULL
+                            END AS BaseNaziv
+                        FROM DocumentMappings WITH (NOLOCK)
+                        WHERE NAZIV IS NOT NULL
+                          AND (@hasSearch = 0 OR NAZIV LIKE @searchPattern)
+                          AND (@hasTipDosijea = 0 OR TipDosijea = @tipDosijea)
+                    ),
+                    GroupCounts AS (
+                        SELECT BaseNaziv, COUNT(*) AS Cnt
+                        FROM DocWithBase
+                        WHERE BaseNaziv IS NOT NULL
+                        GROUP BY BaseNaziv
+                    )
+                    SELECT
+                        'GROUP'           AS RowType,
+                        gc.BaseNaziv      AS DisplayNaziv,
+                        gc.Cnt            AS VariantCount,
+                        SUM(d.BROJ_DOKUMENATA) AS TotalDocuments,
+                        MIN(d.TipDosijea) AS TipDosijea,
+                        NULL              AS SifraDokumenta,
+                        NULL              AS Id,
+                        0                 AS TotalCount
+                    FROM DocWithBase d
+                    INNER JOIN GroupCounts gc ON d.BaseNaziv = gc.BaseNaziv AND gc.Cnt > 1
+                    GROUP BY gc.BaseNaziv, gc.Cnt
+
+                    UNION ALL
+
+                    SELECT
+                        'SINGLE'          AS RowType,
+                        d.NAZIV           AS DisplayNaziv,
+                        1                 AS VariantCount,
+                        d.BROJ_DOKUMENATA AS TotalDocuments,
+                        d.TipDosijea,
+                        d.sifraDokumenta  AS SifraDokumenta,
+                        d.ID              AS Id,
+                        0                 AS TotalCount
+                    FROM DocWithBase d
+                    LEFT JOIN GroupCounts gc ON d.BaseNaziv = gc.BaseNaziv
+                    WHERE d.BaseNaziv IS NULL
+                       OR ISNULL(gc.Cnt, 1) = 1
+
+                    ORDER BY DisplayNaziv;";
+
+                var cmd = new CommandDefinition(
+                    sql,
+                    new
+                    {
+                        hasSearch = hasSearch ? 1 : 0,
+                        searchPattern,
+                        hasTipDosijea = hasTipDosijea ? 1 : 0,
+                        tipDosijea
+                    },
+                    transaction: Tx,
+                    commandTimeout: _commandTimeoutSeconds,
+                    cancellationToken: ct);
+
+                var rows = (await Conn.QueryAsync<GroupedDocumentRow>(cmd).ConfigureAwait(false)).AsList();
+                allRows = rows.AsReadOnly();
+                _cache.Set(allCacheKey, allRows, TimeSpan.FromMinutes(10));
+            }
+
+            var totalCount = allRows.Count;
+            var offset = (pageNumber - 1) * pageSize;
+            var page = allRows.Skip(offset).Take(pageSize).ToList().AsReadOnly();
+            return (page, totalCount);
+        }
+
+        /// <summary>
+        /// Straničena pretraga dokumenata unutar jedne grupe.
+        /// Koristi NAZIV LIKE 'BaseNaziv %' — može da iskoristi index na NAZIV koloni.
+        /// </summary>
+        public async Task<(IReadOnlyList<DocumentMapping> Items, int TotalCount)> SearchWithinGroupAsync(
+            string baseNaziv,
+            string? invoiceNumberFilter,
+            int pageNumber,
+            int pageSize,
+            CancellationToken ct = default)
+        {
+            if (pageNumber < 1) pageNumber = 1;
+            if (pageSize < 1) pageSize = 50;
+            if (pageSize > 500) pageSize = 500;
+
+            var offset = (pageNumber - 1) * pageSize;
+            var baseNazivLike = $"{baseNaziv.Trim()} %";
+            var hasInvoiceFilter = !string.IsNullOrWhiteSpace(invoiceNumberFilter);
+            var invoiceFilterLike = hasInvoiceFilter ? $"{baseNaziv.Trim()} {invoiceNumberFilter!.Trim()}%" : null;
+
+            var sql = @"
+                SELECT
+                    ID,
+                    NAZIV,
+                    ISNULL(BROJ_DOKUMENATA, 0) AS BROJ_DOKUMENATA,
+                    sifraDokumenta,
+                    NazivDokumenta,
+                    TipDosijea,
+                    TipProizvoda,
+                    SifraDokumentaMigracija,
+                    NazivDokumentaMigracija,
+                    ExcelFileName,
+                    ExcelFileSheet,
+                    PolitikaCuvanja,
+                    COUNT(*) OVER() AS TotalCount
+                FROM DocumentMappings WITH (NOLOCK)
+                WHERE NAZIV LIKE @baseNazivLike
+                  AND CHARINDEX(' ', NAZIV) > 0
+                  AND SUBSTRING(NAZIV, LEN(NAZIV)+2-CHARINDEX(' ',REVERSE(NAZIV)), LEN(NAZIV))
+                      NOT LIKE '%[^0-9]%'
+                  AND (@hasInvoiceFilter = 0 OR NAZIV LIKE @invoiceFilterLike)
+                ORDER BY NAZIV
+                OFFSET @offset ROWS FETCH NEXT @pageSize ROWS ONLY;";
+
+            var cmd = new CommandDefinition(
+                sql,
+                new
+                {
+                    baseNazivLike,
+                    hasInvoiceFilter = hasInvoiceFilter ? 1 : 0,
+                    invoiceFilterLike,
+                    offset,
+                    pageSize
+                },
+                transaction: Tx,
+                commandTimeout: _commandTimeoutSeconds,
+                cancellationToken: ct);
+
+            // TotalCount nije polje na DocumentMapping — koristimo dynamic pa mapiramo
+            var rows = (await Conn.QueryAsync<dynamic>(cmd).ConfigureAwait(false)).AsList();
+            var totalCount = rows.Count > 0 ? (int)rows[0].TotalCount : 0;
+
+            var items = rows.Select(r => new DocumentMapping
+            {
+                ID = (int)r.ID,
+                Naziv = (string?)r.NAZIV,
+                BrojDokumenata = (int?)r.BROJ_DOKUMENATA,
+                SifraDokumenta = (string?)r.sifraDokumenta,
+                NazivDokumenta = (string?)r.NazivDokumenta,
+                TipDosijea = (string?)r.TipDosijea,
+                TipProizvoda = (string?)r.TipProizvoda,
+                SifraDokumentaMigracija = (string?)r.SifraDokumentaMigracija,
+                NazivDokumentaMigracija = (string?)r.NazivDokumentaMigracija,
+                ExcelFileName = (string?)r.ExcelFileName,
+                ExcelFileSheet = (string?)r.ExcelFileSheet,
+                PolitikaCuvanja = (string?)r.PolitikaCuvanja
+            }).ToList().AsReadOnly() as IReadOnlyList<DocumentMapping>;
+
+            return (items, totalCount);
         }
 
         /// <summary>

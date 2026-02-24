@@ -1,3 +1,4 @@
+using Alfresco.Contracts.DtoModels;
 using Alfresco.Contracts.Oracle.Models;
 using System;
 using System.Collections.Generic;
@@ -57,5 +58,29 @@ namespace SqlServer.Abstraction.Interfaces
         /// Vraća distinct vrednosti TipDosijea kolone
         /// </summary>
         Task<IReadOnlyList<string>> GetDistinctTipDosijeaAsync(CancellationToken ct = default);
+
+        /// <summary>
+        /// Vraća grupisani prikaz dokumenata:
+        ///   - GROUP redovi: dokumenti čiji NAZIV prati "BaseNaziv &lt;broj&gt;" pattern, 2+ varijanti
+        ///   - SINGLE redovi: svi ostali (bez numeričkog sufiksa, ili singleton)
+        /// Bez izmene sheme baze — logika je u SQL-u.
+        /// </summary>
+        Task<(IReadOnlyList<GroupedDocumentRow> Items, int TotalCount)> GetGroupedViewAsync(
+            string? searchText,
+            string? tipDosijea,
+            int pageNumber,
+            int pageSize,
+            CancellationToken ct = default);
+
+        /// <summary>
+        /// Straničena pretraga dokumenata unutar jedne grupe.
+        /// Koristi NAZIV LIKE 'BaseNaziv %' — može da iskoristi index na NAZIV koloni.
+        /// </summary>
+        Task<(IReadOnlyList<DocumentMapping> Items, int TotalCount)> SearchWithinGroupAsync(
+            string baseNaziv,
+            string? invoiceNumberFilter,
+            int pageNumber,
+            int pageSize,
+            CancellationToken ct = default);
     }
 }

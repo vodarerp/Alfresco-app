@@ -8,6 +8,9 @@
         Height="700" Width="1100"
         WindowStartupLocation="CenterOwner"
         Loaded="Window_Loaded">
+    <Window.Resources>
+        <BooleanToVisibilityConverter x:Key="BoolToVisibilityConverter"/>
+    </Window.Resources>
     <Grid Margin="10">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>
@@ -35,6 +38,8 @@
                     <ColumnDefinition Width="20"/>
                     <ColumnDefinition Width="Auto"/>
                     <ColumnDefinition Width="220"/>
+                    <ColumnDefinition Width="30"/>
+                    <ColumnDefinition Width="Auto"/>
                 </Grid.ColumnDefinitions>
                 <TextBlock Grid.Column="0" Text="Search:"
                            FontSize="12" VerticalAlignment="Center" Margin="0,0,10,0"/>
@@ -49,6 +54,16 @@
                           x:Name="cmbTipDosijea"
                           FontSize="12" Padding="5,3"
                           ToolTip="Filter by dossier type"/>
+                <!-- View Mode toggle -->
+                <StackPanel Grid.Column="6" Orientation="Horizontal" VerticalAlignment="Center">
+                    <RadioButton x:Name="rbStandard" Content="Standardni"
+                                 FontSize="12" IsChecked="True"
+                                 Margin="0,0,12,0"
+                                 Checked="rbStandard_Checked"/>
+                    <RadioButton x:Name="rbGrouped" Content="Grupisani"
+                                 FontSize="12"
+                                 Checked="rbGrouped_Checked"/>
+                </StackPanel>
             </Grid>
         </Border>
 
@@ -68,8 +83,8 @@
                         <RowDefinition Height="*"/>
                     </Grid.RowDefinitions>
 
-                    <!-- Column Headers -->
-                    <Border Grid.Row="0" Background="#34495E" Padding="10,8">
+                    <!-- ===== STANDARD MOD: Headers ===== -->
+                    <Border x:Name="pnlStandardHeader" Grid.Row="0" Background="#34495E" Padding="10,8">
                         <Grid>
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="40"/>
@@ -95,8 +110,33 @@
                         </Grid>
                     </Border>
 
-                    <!-- Scrollable List -->
-                    <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
+                    <!-- ===== GRUPISANI MOD: Headers (hidden by default) ===== -->
+                    <Border x:Name="pnlGroupedHeader" Grid.Row="0" Background="#34495E" Padding="10,8"
+                            Visibility="Collapsed">
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="36"/>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="70"/>
+                                <ColumnDefinition Width="80"/>
+                                <ColumnDefinition Width="100"/>
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Grid.Column="1" Text="Naziv dokumenta"
+                                       Foreground="White" FontWeight="SemiBold" FontSize="11"/>
+                            <TextBlock Grid.Column="2" Text="Varijanti"
+                                       Foreground="White" FontWeight="SemiBold" FontSize="11"
+                                       HorizontalAlignment="Right"/>
+                            <TextBlock Grid.Column="3" Text="Br. dok."
+                                       Foreground="White" FontWeight="SemiBold" FontSize="11"
+                                       HorizontalAlignment="Right"/>
+                            <TextBlock Grid.Column="4" Text="TipDosijea"
+                                       Foreground="White" FontWeight="SemiBold" FontSize="11"
+                                       HorizontalAlignment="Center"/>
+                        </Grid>
+                    </Border>
+
+                    <!-- ===== STANDARD MOD: List ===== -->
+                    <ScrollViewer x:Name="pnlStandardList" Grid.Row="1" VerticalScrollBarVisibility="Auto">
                         <ItemsControl x:Name="lstDocuments">
                             <ItemsControl.ItemTemplate>
                                 <DataTemplate>
@@ -159,6 +199,65 @@
                             </ItemsControl.ItemTemplate>
                         </ItemsControl>
                     </ScrollViewer>
+
+                    <!-- ===== GRUPISANI MOD: List (hidden by default) ===== -->
+                    <ScrollViewer x:Name="pnlGroupedList" Grid.Row="1" VerticalScrollBarVisibility="Auto"
+                                  Visibility="Collapsed">
+                        <ItemsControl x:Name="lstGroupedDocuments">
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate>
+                                    <Border BorderBrush="#E0E0E0" BorderThickness="0,0,0,1"
+                                            Background="{Binding RowBackground}" Padding="10,6">
+                                        <Grid>
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="36"/>
+                                                <ColumnDefinition Width="*"/>
+                                                <ColumnDefinition Width="70"/>
+                                                <ColumnDefinition Width="80"/>
+                                                <ColumnDefinition Width="100"/>
+                                            </Grid.ColumnDefinitions>
+
+                                            <!-- Checkbox za oba tipa (GROUP i SINGLE) -->
+                                            <CheckBox Grid.Column="0" VerticalAlignment="Center"
+                                                      IsChecked="{Binding IsSelected, Mode=TwoWay}"
+                                                      Checked="GroupedDocumentCheckBox_Changed"
+                                                      Unchecked="GroupedDocumentCheckBox_Changed"/>
+
+                                            <!-- Naziv -->
+                                            <TextBlock Grid.Column="1"
+                                                       Text="{Binding DisplayNaziv}"
+                                                       FontSize="11"
+                                                       FontWeight="{Binding NameWeight}"
+                                                       VerticalAlignment="Center"
+                                                       TextTrimming="CharacterEllipsis"/>
+
+                                            <!-- Varijanti -->
+                                            <TextBlock Grid.Column="2"
+                                                       Text="{Binding VariantCountDisplay}"
+                                                       FontSize="10" VerticalAlignment="Center"
+                                                       HorizontalAlignment="Right"
+                                                       Foreground="#8E44AD"/>
+
+                                            <!-- Br. dok. -->
+                                            <TextBlock Grid.Column="3"
+                                                       Text="{Binding TotalDocumentsDisplay}"
+                                                       FontSize="10" VerticalAlignment="Center"
+                                                       HorizontalAlignment="Right"
+                                                       Foreground="#3498DB"/>
+
+                                            <!-- TipDosijea -->
+                                            <TextBlock Grid.Column="4"
+                                                       Text="{Binding TipDosijea}"
+                                                       FontSize="10" VerticalAlignment="Center"
+                                                       HorizontalAlignment="Center"
+                                                       Foreground="#2C3E50"
+                                                       TextTrimming="CharacterEllipsis"/>
+                                        </Grid>
+                                    </Border>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                    </ScrollViewer>
                 </Grid>
             </Border>
 
@@ -195,18 +294,24 @@
                                         </Border.Style>
                                         <Grid>
                                             <Grid.ColumnDefinitions>
-                                                <ColumnDefinition Width="55"/>
+                                                <ColumnDefinition Width="28"/>
                                                 <ColumnDefinition Width="*"/>
                                                 <ColumnDefinition Width="Auto"/>
                                             </Grid.ColumnDefinitions>
 
-                                            <TextBlock Grid.Column="0"
-                                                       Text="{Binding SifraDokumenta}"
-                                                       FontSize="10" VerticalAlignment="Center"
-                                                       FontFamily="Consolas" Foreground="#7F8C8D"/>
+                                            <!-- Tag [G] ili [D] -->
+                                            <Border Grid.Column="0"
+                                                    Background="{Binding TagColor}"
+                                                    CornerRadius="3" Padding="4,2"
+                                                    VerticalAlignment="Center"
+                                                    HorizontalAlignment="Left">
+                                                <TextBlock Text="{Binding TagLabel}"
+                                                           Foreground="White" FontSize="10"
+                                                           FontWeight="Bold"/>
+                                            </Border>
 
-                                            <StackPanel Grid.Column="1" VerticalAlignment="Center" Margin="5,0">
-                                                <TextBlock Text="{Binding Naziv}"
+                                            <StackPanel Grid.Column="1" VerticalAlignment="Center" Margin="6,0">
+                                                <TextBlock Text="{Binding DisplayName}"
                                                            FontSize="11" FontWeight="SemiBold"
                                                            TextTrimming="CharacterEllipsis"/>
                                                 <TextBlock Text="{Binding TipDosijea}"

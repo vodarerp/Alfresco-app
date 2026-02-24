@@ -1,4 +1,5 @@
 using Alfresco.Abstraction.Models;
+using Alfresco.Contracts.DtoModels;
 using Alfresco.Contracts.Enums;
 using Alfresco.Contracts.Options;
 using Microsoft.Extensions.DependencyInjection;
@@ -26,6 +27,11 @@ namespace Alfresco.App.UserControls
         private readonly IMigrationWorker _migrationWorker;
         private readonly IDocumentSearchService? _documentSearchService;
         private readonly MigrationOptions _migrationOptions;
+
+        // Grupna selekcija iz DocumentSelectionWindow — null = ručni text unos
+        private DocumentSelectionResult? _currentSelection;
+        // Flag da sprečimo reset _currentSelection pri programskom setovanju DocDescriptions
+        private bool _suppressSelectionReset = false;
         private readonly DispatcherTimer _updateTimer;
         private CancellationTokenSource? _migrationCts;
 
@@ -79,7 +85,14 @@ namespace Alfresco.App.UserControls
         public string DocDescriptions
         {
             get => _docDescriptions;
-            set { _docDescriptions = value; NotifyPropertyChanged(); }
+            set
+            {
+                _docDescriptions = value;
+                NotifyPropertyChanged();
+                // Ako korisnik ručno menja tekst, poništi selekciju iz prozora
+                if (!_suppressSelectionReset)
+                    _currentSelection = null;
+            }
         }
 
         #region -IsMigrationByDocument- property
@@ -331,23 +344,31 @@ namespace Alfresco.App.UserControls
                         return;
                     }
 
-                    // Parse DocDescriptions from UI (comma-separated)
-                    var docDescList = DocDescriptions
-                        .Split(new[] { ',', ';' }, StringSplitOptions.RemoveEmptyEntries)
-                        .Select(dt => dt.Trim())
-                        .Where(dt => !string.IsNullOrWhiteSpace(dt))
-                        .ToList();
-
-                    if (!docDescList.Any())
+                    if (_currentSelection != null && _currentSelection.HasAny)
                     {
-                        MessageBox.Show("Please enter valid document descriptions separated by comma.",
-                            "Validation Error", MessageBoxButton.OK, MessageBoxImage.Warning);
-                        return;
+                        // Putanja kroz DocumentSelectionWindow — exact + wildcard grupne selekcije
+                        _documentSearchService.SetDocumentSelection(_currentSelection);
+                        StatusMessage = $"Selection applied: {_currentSelection.TotalSelectionCount} item(s)";
                     }
+                    else
+                    {
+                        // Legacy: ručni text unos
+                        var docDescList = DocDescriptions
+                            .Split(new[] { ',', ';' }, StringSplitOptions.RemoveEmptyEntries)
+                            .Select(dt => dt.Trim())
+                            .Where(dt => !string.IsNullOrWhiteSpace(dt))
+                            .ToList();
 
-                    // Apply DocDescriptions override to DocumentSearchService
-                    _documentSearchService.SetDocDescriptions(docDescList);
-                    StatusMessage = $"DocDescriptions set: {string.Join(", ", docDescList)}";
+                        if (!docDescList.Any())
+                        {
+                            MessageBox.Show("Please enter valid document descriptions separated by comma.",
+                                "Validation Error", MessageBoxButton.OK, MessageBoxImage.Warning);
+                            return;
+                        }
+
+                        _documentSearchService.SetDocDescriptions(docDescList);
+                        StatusMessage = $"DocDescriptions set: {string.Join(", ", docDescList)}";
+                    }
                 }
 
                 // All validations passed - disable start button and enable stop button
@@ -580,15 +601,27 @@ namespace Alfresco.App.UserControls
 
                 if (window.ShowDialog() == true)
                 {
-                    // Update the DocDescriptions textbox with selected values
-                    DocDescriptions = string.Join(", ", window.SelectedDocDescriptions);
-                    StatusMessage = $"Selected {window.SelectedDocDescriptions.Count} document(s) for migration";
+                    _currentSelection = window.SelectionResult;
+
+                    _suppressSelectionReset = true;
+                    DocDescriptions = BuildSelectionDisplayString(_currentSelection);
+                    _suppressSelectionReset = false;
+
+                    StatusMessage = $"Selected {_currentSelection.TotalSelectionCount} item(s) for migration";
                 }
             }
             catch (Exception ex)
             {
                 MessageBox.Show($"Failed to open document selection window: {ex.Message}", "Error", MessageBoxButton.OK, MessageBoxImage.Error);
             }
+        }
+
+        private static string BuildSelectionDisplayString(DocumentSelectionResult result)
+        {
+            var parts = new List<string>();
+            parts.AddRange(result.ExactDescriptions);
+            parts.AddRange(result.GroupSelections.Select(g => g.DisplayName));
+            return string.Join(", ", parts);
         }
 
         #region INotifyPropertyChanged

@@ -1,3 +1,4 @@
+using Alfresco.Contracts.DtoModels;
 using Migration.Abstraction.Models;
 using System;
 using System.Threading;
@@ -18,10 +19,16 @@ namespace Migration.Abstraction.Interfaces.Wrappers
     public interface IDocumentSearchService
     {
         /// <summary>
-        /// Sets the document descriptions to search for (overrides appsettings configuration)
+        /// Sets the document descriptions to search for (overrides appsettings configuration).
+        /// Koristi se za ručni text unos (backwards compat).
         /// </summary>
-        /// <param name="docDescriptions">List of document descriptions (ecm:docDesc values)</param>
         void SetDocDescriptions(List<string> docDescriptions);
+
+        /// <summary>
+        /// Postavlja selekciju sa podrškom za grupne wildcard selekcije.
+        /// Zamenjuje SetDocDescriptions() kada selekcija sadrži grupe iz DocumentSelectionWindow.
+        /// </summary>
+        void SetDocumentSelection(DocumentSelectionResult selection);
 
         /// <summary>
         /// Gets the current document descriptions (either from override or appsettings)
