@@ -641,7 +641,7 @@ namespace Migration.Infrastructure.Implementation.Services
                         var s when s.StartsWith("ACC-", StringComparison.OrdinalIgnoreCase) => "ACC",
                         var s when s.StartsWith("PI-", StringComparison.OrdinalIgnoreCase) => "PI",
                         var s when s.StartsWith("LE-", StringComparison.OrdinalIgnoreCase) => "LE",
-                        var s when s.StartsWith("DE-", StringComparison.OrdinalIgnoreCase) => "DE",
+                        var s when s.StartsWith("DE-", StringComparison.OrdinalIgnoreCase) => "D",
                         _ => ""
                     };
 
