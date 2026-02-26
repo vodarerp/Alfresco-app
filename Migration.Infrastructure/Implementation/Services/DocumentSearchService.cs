@@ -798,13 +798,28 @@ namespace Migration.Infrastructure.Implementation.Services
                 return;
             }
 
+            // Limit batches based on remaining maxDocs budget
+            var remainingDocs = maxDocs > 0
+                ? Math.Max(0, maxDocs - Interlocked.Read(ref _totalDocumentsProcessed))
+                : totalCount;
+            var effectiveTotal = (int)Math.Min(totalCount, remainingDocs > 0 ? remainingDocs : totalCount);
+
+            if (maxDocs > 0 && remainingDocs <= 0)
+            {
+                _fileLogger.LogInformation("DOSSIER-{Type}: MaxDocuments limit ({MaxDocs}) already reached, skipping",
+                    folderType, maxDocs);
+                return;
+            }
+
             // Calculate skip values for all batches
             var skipValues = Enumerable
-                .Range(0, (totalCount + batchSize - 1) / batchSize)
+                .Range(0, (effectiveTotal + batchSize - 1) / batchSize)
                 .Select(i => i * batchSize)
                 .ToList();
 
-            _fileLogger.LogInformation("DOSSIER-{Type}: Will process {BatchCount} batches", folderType, skipValues.Count);
+            _fileLogger.LogInformation(
+                "DOSSIER-{Type}: Will process {BatchCount} batches (effectiveTotal: {EffectiveTotal} of {TotalCount})",
+                folderType, skipValues.Count, effectiveTotal, totalCount);
 
             // Prepare regex and verifier for post-filtering
             var typeForRegex = folderType == "D" ? "DE" : folderType;
@@ -846,6 +861,15 @@ namespace Migration.Infrastructure.Implementation.Services
                     }).ToList();
 
                     if (filteredDocs.Count == 0) return;
+
+                    // Trim filtered docs to remaining maxDocs budget
+                    if (maxDocs > 0)
+                    {
+                        var remaining = maxDocs - Interlocked.Read(ref _totalDocumentsProcessed);
+                        if (remaining <= 0) return;
+                        if (filteredDocs.Count > remaining)
+                            filteredDocs = filteredDocs.Take((int)remaining).ToList();
+                    }
 
                     // Extract unique folders
                     var uniqueFolders = ExtractUniqueFolders(filteredDocs, folderType);
