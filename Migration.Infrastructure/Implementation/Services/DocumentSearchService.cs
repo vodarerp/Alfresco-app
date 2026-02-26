@@ -1195,11 +1195,7 @@ namespace Migration.Infrastructure.Implementation.Services
             return query;
         }
 
-        /// <summary>
-        /// Gradi verifier funkciju za post-filter proveru ecm:docDesc vrednosti.
-        /// Ako je selection null, koristi legacy HashSet exact match.
-        /// Ako je selection postavljena, kombinuje exact HashSet + regex za grupe.
-        /// </summary>
+        
         private static Func<string, bool> BuildDocDescVerifier(
             DocumentSelectionResult? selection,
             List<string> legacyList)
@@ -1214,18 +1210,16 @@ namespace Migration.Infrastructure.Implementation.Services
                 selection.ExactDescriptions,
                 StringComparer.OrdinalIgnoreCase);
 
-            // Regex za svaku grupu: "^BaseNaziv \d+$" ili "^BaseNaziv InvoiceFilter\d*$"
-            var groupRegexes = selection.GroupSelections
-                .Select(g => new Regex(
-                    $@"^{Regex.Escape(g.BaseNaziv)} " +
-                    (g.InvoiceFilter != null ? Regex.Escape(g.InvoiceFilter) : "") +
-                    @"\d*$",
-                    RegexOptions.IgnoreCase | RegexOptions.Compiled))
+           
+            var groupPrefixes = selection.GroupSelections
+                .Select(g => g.InvoiceFilter == null
+                    ? g.BaseNaziv + " "
+                    : g.BaseNaziv + " " + g.InvoiceFilter)
                 .ToList();
 
             return desc =>
                 exactSet.Contains(desc) ||
-                groupRegexes.Any(r => r.IsMatch(desc));
+                groupPrefixes.Any(prefix => desc.StartsWith(prefix, StringComparison.OrdinalIgnoreCase));
         }
 
         /// <summary>

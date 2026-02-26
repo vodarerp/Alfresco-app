@@ -48,7 +48,7 @@ public static class Program
             RetryBaseDelayMs = 100,
             UseNewFolderStructure = true,           // Enable new folder structure
             ClientTypes = new[] { "PI", "LE" },  // NOTE: ACC dossiers are created DURING migration, not as old dossiers
-            StartingCoreId = 100000,                // Start from realistic CoreId
+            StartingCoreId = 100000,                // Start from realistic CoreId 
             AddFolderProperties = false,             // Set to true after deploying bankContentModel.xml
             DocumentMappingService = documentMappingService,  // Inject document mapping service
 

@@ -366,8 +366,30 @@ namespace Alfresco.App.UserControls
                             return;
                         }
 
-                        _documentSearchService.SetDocDescriptions(docDescList);
-                        StatusMessage = $"DocDescriptions set: {string.Join(", ", docDescList)}";
+                        // Ako postoje wildcard unosi (npr. "TEKUCI DEVIZNI RACUN *"),
+                        // konvertovati u DocumentSelectionResult da bi BuildDocDescVerifier radio ispravno
+                        var groupEntries = docDescList.Where(d => d.EndsWith(" *", StringComparison.OrdinalIgnoreCase)).ToList();
+                        var exactEntries = docDescList.Where(d => !d.EndsWith(" *", StringComparison.OrdinalIgnoreCase)).ToList();
+
+                        if (groupEntries.Any())
+                        {
+                            var selection = new Alfresco.Contracts.DtoModels.DocumentSelectionResult
+                            {
+                                ExactDescriptions = exactEntries,
+                                GroupSelections = groupEntries.Select(g => new Alfresco.Contracts.DtoModels.GroupSelection
+                                {
+                                    BaseNaziv = g.Substring(0, g.Length - 2).TrimEnd(),
+                                    InvoiceFilter = null
+                                }).ToList()
+                            };
+                            _documentSearchService.SetDocumentSelection(selection);
+                            StatusMessage = $"Selection applied: {exactEntries.Count} exact, {groupEntries.Count} group(s)";
+                        }
+                        else
+                        {
+                            _documentSearchService.SetDocDescriptions(exactEntries);
+                            StatusMessage = $"DocDescriptions set: {string.Join(", ", exactEntries)}";
+                        }
                     }
                 }
 
