@@ -29,15 +29,14 @@ namespace Alfresco.Contracts.Mapper
         public static string ExtractCoreId(string dossierId)
         {
             if (string.IsNullOrWhiteSpace(dossierId))
-                return string.Empty;
+                return string.Empty;    
 
-            // Remove hyphen first to normalize
-            var normalized = dossierId.Replace("-", "");
+            var parts = dossierId.Split('-');
+            if (parts.Length >= 2)
+                if (int.TryParse(parts[1], out _)) 
+                    return parts[1]; 
 
-            // Extract all digits starting from the first digit
-            var coreId = new string(normalized.SkipWhile(c => !char.IsDigit(c)).ToArray());
-
-            return coreId;
+            return string.Empty;
         }
        
         public static string ExtractPrefix(string dossierId)
