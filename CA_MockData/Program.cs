@@ -16,6 +16,30 @@ using Microsoft.Data.SqlClient;
 
 public static class Program
 {
+    private static readonly string[] DocumentDescriptions = new[]
+    {
+        "KYC Questionnaire",
+        "KYC Questionnaire MDOC",
+        "KYC Questionnaire for LE",
+        "Specimen card",
+        "Specimen card for LE",
+        "Specimen Card for Authorized Person",
+        "Personal Notice",
+        "Communication Consent",
+        "Pre-Contract Info",
+        "Contact Data Change Email",
+        "Contact Data Change Phone",
+        "Current Accounts Contract",
+        "Saving Accounts Contract",
+        "Account Package",
+        "Travel Insurance",
+        "GDPR Revoke",
+        "GL Transaction",
+        "FX Transaction",
+        "Prestige Package Tariff for LE",
+        "PiPonuda",
+    };
+
     private static async Task Main(string[] args)
     {
         //var cfg = new ConfigureAwaitOptions {}
@@ -40,8 +64,8 @@ public static class Program
             BaseUrl = "http://localhost:8080/",
             Username =  "admin",
             Password = "admin",
-            RootParentId = "7540101c-d190-4f5a-8010-1cd190cf5aaf",
-            FolderCount = 100,
+            RootParentId = "5ef83a59-0a84-4915-b83a-590a84e9155b",
+            FolderCount = 200,
             DocsPerFolder = 10,
             DegreeOfParallelism = 5,
             MaxRetries = 5,
@@ -56,7 +80,14 @@ public static class Program
             // To generate ~5000 KDP documents: Set FolderCount=500 and KdpDocumentsPerFolder=10
             // Or: Set FolderCount=250 and KdpDocumentsPerFolder=20
             GenerateOnlyKdpDocuments = false,       // Set to true to generate only KDP documents
-            KdpDocumentsPerFolder = 15              // Number of KDP documents per folder
+            KdpDocumentsPerFolder = 15,             // Number of KDP documents per folder
+
+            // Random document generation settings
+            // Each dossier gets a random number of documents between Min and Max
+            // Document descriptions are picked randomly from the static DocumentDescriptions list
+            GenerateRandomDocuments = true,         // Set to true to generate random documents
+            MinDocsPerFolder = 15,                  // Minimum documents per dossier
+            MaxDocsPerFolder = 35                   // Maximum documents per dossier
         };
 
 
@@ -72,7 +103,9 @@ public static class Program
         var start = DateTime.UtcNow;
         var totalDocs = cfg.GenerateOnlyKdpDocuments
             ? (long)cfg.FolderCount * cfg.KdpDocumentsPerFolder
-            : (long)cfg.FolderCount * cfg.DocsPerFolder;
+            : cfg.GenerateRandomDocuments
+                ? (long)cfg.FolderCount * ((cfg.MinDocsPerFolder + cfg.MaxDocsPerFolder) / 2)
+                : (long)cfg.FolderCount * cfg.DocsPerFolder;
         using var http = CreateHttpClient(cfg);
         using var cts = new CancellationTokenSource();
         Console.CancelKeyPress += (_, e) => { e.Cancel = true; cts.Cancel(); };
@@ -216,6 +249,11 @@ public static class Program
                             {
                                 // Generate only KDP documents with decreasing dates
                                 testDocs = await GenerateKdpDocumentsAsync(cfg, clientType, coreId, i, cts.Token);
+                            }
+                            else if (cfg.GenerateRandomDocuments)
+                            {
+                                // Generate random documents from static list
+                                testDocs = await GenerateRandomDocumentsAsync(cfg, clientType, coreId, i, cts.Token);
                             }
                             else
                             {
@@ -857,6 +895,70 @@ public static class Program
 
             // TC 15: Add exclusion document (should NOT be migrated)
             //await AddDocumentAsync("Ovlašćenje licima za donošenje instrumenata PP-a u Banku"); // 00702
+        }
+
+        return documents;
+    }
+
+    /// <summary>
+    /// Generates random documents from the static DocumentDescriptions list.
+    /// Count is random between Config.MinDocsPerFolder and Config.MaxDocsPerFolder.
+    /// </summary>
+    private static async Task<List<TestDocument>> GenerateRandomDocumentsAsync(Config cfg, string clientType, int coreId, int folderIndex, CancellationToken ct)
+    {
+        var documents = new List<TestDocument>();
+        var random = new Random(coreId);
+        var usedFileNames = new HashSet<string>();
+
+        var docCount = random.Next(cfg.MinDocsPerFolder, cfg.MaxDocsPerFolder + 1);
+
+        for (int d = 0; d < docCount; d++)
+        {
+            var docDescription = DocumentDescriptions[random.Next(DocumentDescriptions.Length)];
+
+            var docTypeCode = await GetDocumentTypeCodeAsync(cfg, docDescription, ct);
+            if (string.IsNullOrEmpty(docTypeCode))
+            {
+                Console.WriteLine($"[WARNING] Document '{docDescription}' not found in IDocumentMappingService");
+                continue;
+            }
+
+            var mapping = await cfg.DocumentMappingService.FindByOriginalNameAsync(docDescription, ct);
+
+            string opisDokumenta;
+            string tipDosiea;
+            if (mapping != null)
+            {
+                opisDokumenta = mapping.Naziv;
+                tipDosiea = mapping.TipDosijea;
+            }
+            else
+            {
+                opisDokumenta = docDescription;
+                tipDosiea = clientType == "PI" ? "Dosije klijenta FL" : "Dosije klijenta PL";
+            }
+
+            var baseFileName = docDescription.Replace(" ", "_").Replace("/", "_");
+            var fileName = baseFileName + ".pdf";
+
+            if (usedFileNames.Contains(fileName))
+            {
+                int counter = 1;
+                while (usedFileNames.Contains(fileName))
+                {
+                    fileName = $"{baseFileName}_{counter}.pdf";
+                    counter++;
+                }
+            }
+            usedFileNames.Add(fileName);
+
+            var props = CreateDocumentProps(clientType, coreId, docTypeCode, opisDokumenta, tipDosiea, "validiran", random);
+
+            documents.Add(new TestDocument
+            {
+                Name = fileName,
+                Properties = props
+            });
         }
 
         return documents;

@@ -59,5 +59,20 @@ namespace CA_MockData
         /// Number of KDP documents to generate per folder (used when GenerateOnlyKdpDocuments = true)
         /// </summary>
         public int KdpDocumentsPerFolder { get; set; } = 10;
+
+        /// <summary>
+        /// Minimum number of documents per dossier (used when GenerateRandomDocuments = true)
+        /// </summary>
+        public int MinDocsPerFolder { get; set; } = 3;
+
+        /// <summary>
+        /// Maximum number of documents per dossier (used when GenerateRandomDocuments = true)
+        /// </summary>
+        public int MaxDocsPerFolder { get; set; } = 15;
+
+        /// <summary>
+        /// If true, generates random documents from DocumentDescriptions list with random count between Min/MaxDocsPerFolder
+        /// </summary>
+        public bool GenerateRandomDocuments { get; set; } = false;
     }
 }
