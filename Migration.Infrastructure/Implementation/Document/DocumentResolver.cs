@@ -694,7 +694,10 @@ namespace Migration.Infrastructure.Implementation.Document
             // Standard ECM properties for all dossiers
             properties.Add("ecm:bnkStatus", "ACTIVE");
             properties.Add("ecm:typeId", "dosije");
-            properties.Add("ecm:bnkSource", "Heimdall");
+            if (folderName.StartsWith("DE"))
+                properties.Add("ecm:bnkSource", "DUT");
+            else 
+                properties.Add("ecm:bnkSource", "Heimdall");
 
             _fileLogger.LogInformation("BuildPropertiesClientData: Added standard ECM properties (bnkStatus, typeId, bnkSource)");
 
