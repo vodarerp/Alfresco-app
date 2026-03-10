@@ -191,34 +191,41 @@ namespace Migration.Extensions.SqlServer
         #region Migration Preparation Extensions
 
         /// <summary>
-        /// Deletes all incomplete documents from DocStaging table.
-        /// Incomplete = Status is NOT 'DONE' and NOT 'ERROR' (includes READY, PREPARATION, PREPARED, IN_PROGRESS, NULL).
-        /// ERROR documents are preserved because they may have been physically moved but failed on property update.
-        /// Use this before starting migration to ensure clean state.
+        /// Resets incomplete documents in DocStaging to their safe restart state:
+        /// - PREPARATION → READY (folder prep was in progress when interrupted)
+        /// - IN_PROGRESS → PREPARED (move was in progress when interrupted)
+        /// - NULL → READY (documents inserted without status)
+        /// READY, PREPARED, DONE, ERROR remain unchanged.
         /// </summary>
-        public static async Task<int> DeleteIncompleteDocumentsAsync(
+        public static async Task<int> ResetIncompleteDocumentsAsync(
             this IDocStagingRepository repo,
             IDbConnection conn,
             IDbTransaction tran,
             CancellationToken ct = default,
             int? commandTimeout = null)
         {
-            // NE brišemo ERROR dokumente jer mogu biti fizički premešteni ali sa neuspešnim update-om propertija
             var sql = @"
-                DELETE FROM DocStaging
-                WHERE (Status != 'DONE' AND Status != 'ERROR')
-                   OR Status IS NULL";
+                UPDATE DocStaging
+                SET Status = 'READY',
+                    UpdatedAt = GETUTCDATE()
+                WHERE Status = 'PREPARED' OR Status IS NULL;
+
+                UPDATE DocStaging
+                SET Status = 'PREPARED',
+                    UpdatedAt = GETUTCDATE()
+                WHERE Status = 'IN_PROGRESS';";
 
             var cmd = new CommandDefinition(sql, transaction: tran, commandTimeout: commandTimeout, cancellationToken: ct);
             return await conn.ExecuteAsync(cmd).ConfigureAwait(false);
         }
 
         /// <summary>
-        /// Deletes all incomplete folders from FolderStaging table.
-        /// Incomplete = Status does NOT start with 'DONE' (includes READY, IN_PROGRESS, ERROR, RESETED, NULL).
-        /// Use this before starting migration to ensure clean state.
+        /// Resets incomplete folders in FolderStaging to their safe restart state:
+        /// - IN_PROGRESS → READY (folder creation was in progress when interrupted)
+        /// - NULL → READY (folders inserted without status)
+        /// READY, DONE*, ERROR remain unchanged.
         /// </summary>
-        public static async Task<int> DeleteIncompleteFoldersAsync(
+        public static async Task<int> ResetIncompleteFoldersAsync(
             this IFolderStagingRepository repo,
             IDbConnection conn,
             IDbTransaction tran,
@@ -226,31 +233,30 @@ namespace Migration.Extensions.SqlServer
             int? commandTimeout = null)
         {
             var sql = @"
-                DELETE FROM FolderStaging
-                WHERE Status NOT LIKE 'DONE%'
-                   OR Status IS NULL";
+                UPDATE FolderStaging
+                SET Status = 'READY',
+                    UpdatedAt = GETUTCDATE()
+                WHERE Status = 'IN_PROGRESS' OR Status IS NULL";
 
             var cmd = new CommandDefinition(sql, transaction: tran, commandTimeout: commandTimeout, cancellationToken: ct);
             return await conn.ExecuteAsync(cmd).ConfigureAwait(false);
         }
 
         /// <summary>
-        /// Gets count of incomplete documents in DocStaging.
-        /// Excludes ERROR documents (same logic as DeleteIncompleteDocumentsAsync).
-        /// Useful for logging before deletion.
+        /// Gets count of resettable documents in DocStaging.
+        /// Counts documents that would be affected by ResetIncompleteDocumentsAsync.
         /// </summary>
-        public static async Task<long> CountIncompleteDocumentsAsync(
+        public static async Task<long> CountResettableDocumentsAsync(
             this IDocStagingRepository repo,
             IDbConnection conn,
             IDbTransaction tran,
             CancellationToken ct = default,
             int? commandTimeout = null)
         {
-            // Konzistentno sa DeleteIncompleteDocumentsAsync - NE brojimo ERROR dokumente
             var sql = @"
                 SELECT COUNT(*)
                 FROM DocStaging
-                WHERE (Status != 'DONE' AND Status != 'ERROR')
+                WHERE Status IN ('PREPARATION', 'IN_PROGRESS')
                    OR Status IS NULL";
 
             var cmd = new CommandDefinition(sql, transaction: tran, commandTimeout: commandTimeout, cancellationToken: ct);
@@ -258,10 +264,10 @@ namespace Migration.Extensions.SqlServer
         }
 
         /// <summary>
-        /// Gets count of incomplete folders in FolderStaging.
-        /// Useful for logging before deletion.
+        /// Gets count of resettable folders in FolderStaging.
+        /// Counts folders that would be affected by ResetIncompleteFoldersAsync.
         /// </summary>
-        public static async Task<long> CountIncompleteFoldersAsync(
+        public static async Task<long> CountResettableFoldersAsync(
             this IFolderStagingRepository repo,
             IDbConnection conn,
             IDbTransaction tran,
@@ -271,7 +277,7 @@ namespace Migration.Extensions.SqlServer
             var sql = @"
                 SELECT COUNT(*)
                 FROM FolderStaging
-                WHERE Status NOT LIKE 'DONE%'
+                WHERE Status = 'IN_PROGRESS'
                    OR Status IS NULL";
 
             var cmd = new CommandDefinition(sql, transaction: tran, commandTimeout: commandTimeout, cancellationToken: ct);

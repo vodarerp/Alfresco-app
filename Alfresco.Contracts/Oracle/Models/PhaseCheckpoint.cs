@@ -30,8 +30,9 @@ namespace Alfresco.Contracts.Oracle.Models
         public int? LastProcessedIndex { get; set; }
 
         /// <summary>
-        /// For resumability: last processed item ID within the phase
-        /// Used by the service to resume from checkpoint
+        /// For resumability: last processed item ID within the phase.
+        /// For DocumentSearch phase: stores JSON with fetched counts per folder
+        /// (e.g. {"PI":45000,"LE":12000}) to enable skipCount-based resume.
         /// </summary>
         public string? LastProcessedId { get; set; }
 

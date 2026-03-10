@@ -2,24 +2,26 @@ namespace Migration.Abstraction.Interfaces
 {
     /// <summary>
     /// Result of database preparation before migration.
-    /// Contains statistics about deleted incomplete items.
+    /// Contains statistics about reset incomplete items for resume support.
     /// </summary>
     public class MigrationPreparationResult
     {
         /// <summary>
-        /// Number of incomplete documents deleted from DocStaging
+        /// Number of incomplete documents reset in DocStaging
+        /// (PREPARATION → READY, IN_PROGRESS → PREPARED, NULL → READY)
         /// </summary>
-        public int DeletedDocuments { get; set; }
+        public int ResetDocuments { get; set; }
 
         /// <summary>
-        /// Number of incomplete folders deleted from FolderStaging
+        /// Number of incomplete folders reset in FolderStaging
+        /// (IN_PROGRESS → READY, NULL → READY)
         /// </summary>
-        public int DeletedFolders { get; set; }
+        public int ResetFolders { get; set; }
 
         /// <summary>
-        /// Total number of items deleted
+        /// Total number of items reset
         /// </summary>
-        public int TotalDeleted => DeletedDocuments + DeletedFolders;
+        public int TotalReset => ResetDocuments + ResetFolders;
 
         /// <summary>
         /// Whether preparation was successful

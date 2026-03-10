@@ -94,5 +94,27 @@ namespace Migration.Abstraction.Interfaces.Wrappers
         /// Overall migration status message
         /// </summary>
         public string StatusMessage { get; set; } = string.Empty;
+
+        /// <summary>
+        /// True if a previous migration was interrupted (InProgress or Failed phase exists).
+        /// UI should prompt the user to choose: resume or start fresh.
+        /// </summary>
+        public bool HasPendingMigration { get; set; }
+
+        /// <summary>
+        /// The phase where the previous migration was interrupted (only set when HasPendingMigration=true)
+        /// </summary>
+        public MigrationPhase? PendingPhase { get; set; }
+
+        /// <summary>
+        /// Timestamp of the last activity on the pending migration
+        /// </summary>
+        public DateTime? LastAttemptAt { get; set; }
+
+        /// <summary>
+        /// DocTypes (docDesc) used in the pending migration checkpoint.
+        /// Allows UI to detect if user changed docDesc since last run.
+        /// </summary>
+        public string? PendingDocTypes { get; set; }
     }
 }

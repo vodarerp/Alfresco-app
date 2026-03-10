@@ -334,6 +334,130 @@ namespace Alfresco.App.UserControls
                     return;
                 }
 
+                // Check for pending (interrupted) migration and prompt user
+                try
+                {
+                    var currentStatus = await _migrationWorker.GetStatusAsync();
+                    if (currentStatus.HasPendingMigration)
+                    {
+                        var phaseName = currentStatus.PendingPhase switch
+                        {
+                            MigrationPhase.FolderDiscovery => _migrationOptions.MigrationByDocument ? "Document Search" : "Folder Discovery",
+                            MigrationPhase.DocumentDiscovery => "Document Discovery",
+                            MigrationPhase.FolderPreparation => "Folder Preparation",
+                            MigrationPhase.Move => "Document Move",
+                            _ => "Unknown"
+                        };
+
+                        var lastAttempt = currentStatus.LastAttemptAt.HasValue
+                            ? currentStatus.LastAttemptAt.Value.ToLocalTime().ToString("dd.MM.yyyy HH:mm:ss")
+                            : "N/A";
+
+                        // Detect if docDesc changed since last run
+                        var currentDocDesc = DocDescriptions?.Trim() ?? "";
+                        var pendingDocDesc = currentStatus.PendingDocTypes ?? "";
+                        var docDescChanged = !string.IsNullOrEmpty(pendingDocDesc) &&
+                            !string.Equals(
+                                string.Join(",", pendingDocDesc.Split(',').Select(d => d.Trim()).OrderBy(d => d)),
+                                string.Join(",", currentDocDesc.Split(new[] { ',', ';' }, StringSplitOptions.RemoveEmptyEntries).Select(d => d.Trim()).OrderBy(d => d)),
+                                StringComparison.OrdinalIgnoreCase);
+
+                        MessageBoxResult resumeResult;
+
+                        if (docDescChanged)
+                        {
+                            // DocDesc changed - offer 3 options
+                            resumeResult = MessageBox.Show(
+                                $"Prethodna migracija je prekinuta!\n\n" +
+                                $"Faza: {phaseName}\n" +
+                                $"Obradjeno: {currentStatus.TotalProcessed} stavki\n" +
+                                $"Poslednji pokušaj: {lastAttempt}\n\n" +
+                                $"Prethodni docDesc: {pendingDocDesc}\n" +
+                                $"Novi docDesc: {currentDocDesc}\n\n" +
+                                $"[Da] = Nastavi PRETHODNU migraciju (docDesc: {pendingDocDesc})\n" +
+                                $"[Ne] = Pokreni NOVU migraciju (docDesc: {currentDocDesc})\n" +
+                                $"         (DocumentSearch kreće ispočetka, stari dokumenti ostaju)\n" +
+                                $"[Cancel] = Otkaži",
+                                "Promena docDesc - prethodna migracija pronađena",
+                                MessageBoxButton.YesNoCancel,
+                                MessageBoxImage.Question);
+
+                            if (resumeResult == MessageBoxResult.Cancel)
+                            {
+                                return; // User cancelled
+                            }
+
+                            if (resumeResult == MessageBoxResult.Yes)
+                            {
+                                // Resume previous migration with PREVIOUS docDesc
+                                // Override UI docDesc with the one from checkpoint
+                                var previousDocDescList = pendingDocDesc
+                                    .Split(',')
+                                    .Select(d => d.Trim())
+                                    .Where(d => !string.IsNullOrWhiteSpace(d))
+                                    .ToList();
+
+                                if (_documentSearchService != null)
+                                {
+                                    _documentSearchService.SetDocDescriptions(previousDocDescList);
+                                }
+
+                                // Update UI textbox to reflect the actual docDesc being used
+                                _suppressSelectionReset = true;
+                                DocDescriptions = pendingDocDesc;
+                                _suppressSelectionReset = false;
+                                _currentSelection = null;
+
+                                StatusMessage = $"Resuming previous migration with docDesc: {pendingDocDesc}";
+                            }
+                            else
+                            {
+                                // Fresh start with NEW docDesc
+                                // Reset checkpoint phases, old documents remain in staging
+                                await _migrationWorker.ResetAsync();
+                                StatusMessage = $"DocumentSearch reset for new docDesc. Old documents preserved.";
+                            }
+                        }
+                        else
+                        {
+                            // Same docDesc - offer resume or fresh start
+                            resumeResult = MessageBox.Show(
+                                $"Prethodna migracija je prekinuta!\n\n" +
+                                $"Faza: {phaseName}\n" +
+                                $"Progress: {currentStatus.CurrentPhaseProgress}%\n" +
+                                $"Obradjeno: {currentStatus.TotalProcessed} stavki\n" +
+                                $"DocDesc: {pendingDocDesc}\n" +
+                                $"Poslednji pokušaj: {lastAttempt}\n\n" +
+                                $"Da li želite da NASTAVITE od mesta prekida?\n\n" +
+                                $"[Da] = Nastavi od mesta prekida\n" +
+                                $"[Ne] = Pokreni ispočetka (resetuj faze, zadrži dokumente)\n" +
+                                $"[Cancel] = Otkaži",
+                                "Prethodna migracija pronađena",
+                                MessageBoxButton.YesNoCancel,
+                                MessageBoxImage.Question);
+
+                            if (resumeResult == MessageBoxResult.Cancel)
+                            {
+                                return; // User cancelled
+                            }
+
+                            if (resumeResult == MessageBoxResult.No)
+                            {
+                                // Fresh start with same docDesc - reset phases, keep documents
+                                await _migrationWorker.ResetAsync();
+                                StatusMessage = "All phases reset - starting fresh migration";
+                            }
+                            // Yes = resume from checkpoint
+                        }
+                    }
+                }
+                catch (Exception statusEx)
+                {
+                    // If we can't check status, continue with normal start
+                    // (first-time run with empty PhaseCheckpoints table)
+                    System.Diagnostics.Debug.WriteLine($"Status check failed: {statusEx.Message}");
+                }
+
                 // If MigrationByDocument mode, validate and apply DocDescriptions from UI
                 if (_migrationOptions.MigrationByDocument && _documentSearchService != null)
                 {

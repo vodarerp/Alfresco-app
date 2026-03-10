@@ -19,6 +19,7 @@ using SqlServer.Abstraction.Interfaces;
 using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Text;
+using System.Text.Json;
 using System.Text.RegularExpressions;
 
 namespace Migration.Infrastructure.Implementation.Services
@@ -43,6 +44,10 @@ namespace Migration.Infrastructure.Implementation.Services
         private long _totalFoldersInserted = 0;
         private long _totalFailed = 0;
         private int _batchCounter = 0;
+
+        // Resume support: total documents fetched from Alfresco per folder (before filtering)
+        // Used to calculate startSkipCount on resume
+        private ConcurrentDictionary<string, long> _fetchedCountsPerFolder = new();
 
         // Cache for processed folders (to avoid duplicate API calls within session)
         private readonly ConcurrentDictionary<string, FolderStaging> _folderCache = new();
@@ -80,9 +85,7 @@ namespace Migration.Infrastructure.Implementation.Services
             _selectionOverride = null;
             _fileLogger.LogInformation("DocDescriptions override set: {DocDescriptions}", string.Join(", ", docDescriptions));
 
-            _currentFolderTypeIndex = 0;
-            _currentSkipCount = 0;
-            _fileLogger.LogInformation("Reset folder iteration - starting from folder index 0");
+            ResetInMemoryState();
         }
 
         public void SetDocumentSelection(DocumentSelectionResult selection)
@@ -93,9 +96,23 @@ namespace Migration.Infrastructure.Implementation.Services
                 "DocumentSelection override set: {ExactCount} exact, {GroupCount} groups",
                 selection.ExactDescriptions.Count, selection.GroupSelections.Count);
 
+            ResetInMemoryState();
+        }
+
+        /// <summary>
+        /// Resets all in-memory state for a fresh start.
+        /// Called when docDesc selection changes or before loading checkpoint.
+        /// </summary>
+        private void ResetInMemoryState()
+        {
             _currentFolderTypeIndex = 0;
             _currentSkipCount = 0;
-            _fileLogger.LogInformation("Reset folder iteration - starting from folder index 0");
+            _totalDocumentsProcessed = 0;
+            _totalFoldersInserted = 0;
+            _batchCounter = 0;
+            _fetchedCountsPerFolder = new ConcurrentDictionary<string, long>();
+            _dossierFolders = null;
+            _fileLogger.LogInformation("Reset all in-memory state - starting fresh");
         }
 
         public List<string> GetCurrentDocDescriptions()
@@ -648,7 +665,8 @@ namespace Migration.Infrastructure.Implementation.Services
 
                 // Process each DOSSIER folder sequentially (PI, LE, D...)
                 // Parallelism is WITHIN each folder
-                foreach (var folderType in folderTypes)
+                // Resume: start from _currentFolderTypeIndex (restored from checkpoint)
+                for (int i = _currentFolderTypeIndex; i < folderTypes.Count; i++)
                 {
                     ct.ThrowIfCancellationRequested();
 
@@ -661,14 +679,30 @@ namespace Migration.Infrastructure.Implementation.Services
                         break;
                     }
 
+                    var folderType = folderTypes[i];
+                    _currentFolderTypeIndex = i;
                     var folderId = _dossierFolders[folderType];
 
-                    _fileLogger.LogInformation("Processing DOSSIER-{Type} folder in parallel mode", folderType);
-                    _uiLogger.LogInformation("Processing DOSSIER-{Type}...", folderType);
+                    // Determine startSkipCount for resume
+                    var startSkipCount = 0;
+                    if (_fetchedCountsPerFolder.TryGetValue(folderType, out var savedFetchedCount))
+                    {
+                        startSkipCount = (int)savedFetchedCount;
+                        _fileLogger.LogInformation(
+                            "Resuming DOSSIER-{Type} from skipCount={StartSkip} ({FetchedCount} previously fetched)",
+                            folderType, startSkipCount, savedFetchedCount);
+                        _uiLogger.LogInformation("Resuming DOSSIER-{Type} from position {StartSkip}...", folderType, startSkipCount);
+                    }
+                    else
+                    {
+                        _fileLogger.LogInformation("Processing DOSSIER-{Type} folder in parallel mode", folderType);
+                        _uiLogger.LogInformation("Processing DOSSIER-{Type}...", folderType);
+                    }
 
-                    await ProcessDossierFolderParallelAsync(folderType, folderId, docDescriptions, ct).ConfigureAwait(false);
+                    await ProcessDossierFolderParallelAsync(folderType, folderId, docDescriptions, ct, startSkipCount).ConfigureAwait(false);
 
                     // Save checkpoint after each DOSSIER folder
+                    _currentFolderTypeIndex = i + 1; // Mark this folder as completed
                     await SaveCheckpointProgressAsync(ct).ConfigureAwait(false);
 
                     // Update progress
@@ -775,7 +809,8 @@ namespace Migration.Infrastructure.Implementation.Services
             string folderType,
             string folderId,
             List<string> docDescriptions,
-            CancellationToken ct)
+            CancellationToken ct,
+            int startSkipCount = 0)
         {
             var batchSize = _options.Value.DocumentTypeDiscovery.BatchSize;
             var maxParallelism = _options.Value.DocumentTypeDiscovery.MaxDegreeOfParallelism > 0
@@ -789,8 +824,8 @@ namespace Migration.Infrastructure.Implementation.Services
             var totalCount = await GetTotalDocumentCountAsync(query, ct).ConfigureAwait(false);
 
             _fileLogger.LogInformation(
-                "DOSSIER-{Type}: Total documents from Alfresco: {TotalCount}, BatchSize: {BatchSize}, Parallelism: {Parallelism}",
-                folderType, totalCount, batchSize, maxParallelism);
+                "DOSSIER-{Type}: Total documents from Alfresco: {TotalCount}, BatchSize: {BatchSize}, Parallelism: {Parallelism}, StartSkip: {StartSkip}",
+                folderType, totalCount, batchSize, maxParallelism, startSkipCount);
 
             if (totalCount == 0)
             {
@@ -798,11 +833,23 @@ namespace Migration.Infrastructure.Implementation.Services
                 return;
             }
 
+            // If resuming and we've already fetched everything, skip
+            if (startSkipCount >= totalCount)
+            {
+                _fileLogger.LogInformation(
+                    "DOSSIER-{Type}: Already fully fetched (startSkip={StartSkip} >= totalCount={TotalCount}), skipping",
+                    folderType, startSkipCount, totalCount);
+                return;
+            }
+
+            // Calculate remaining to fetch from startSkipCount
+            var remainingInFolder = totalCount - startSkipCount;
+
             // Limit batches based on remaining maxDocs budget
             var remainingDocs = maxDocs > 0
                 ? Math.Max(0, maxDocs - Interlocked.Read(ref _totalDocumentsProcessed))
-                : totalCount;
-            var effectiveTotal = (int)Math.Min(totalCount, remainingDocs > 0 ? remainingDocs : totalCount);
+                : remainingInFolder;
+            var effectiveTotal = (int)Math.Min(remainingInFolder, remainingDocs > 0 ? remainingDocs : remainingInFolder);
 
             if (maxDocs > 0 && remainingDocs <= 0)
             {
@@ -811,15 +858,15 @@ namespace Migration.Infrastructure.Implementation.Services
                 return;
             }
 
-            // Calculate skip values for all batches
+            // Calculate skip values starting from startSkipCount
             var skipValues = Enumerable
                 .Range(0, (effectiveTotal + batchSize - 1) / batchSize)
-                .Select(i => i * batchSize)
+                .Select(i => startSkipCount + i * batchSize)
                 .ToList();
 
             _fileLogger.LogInformation(
-                "DOSSIER-{Type}: Will process {BatchCount} batches (effectiveTotal: {EffectiveTotal} of {TotalCount})",
-                folderType, skipValues.Count, effectiveTotal, totalCount);
+                "DOSSIER-{Type}: Will process {BatchCount} batches (effectiveTotal: {EffectiveTotal} of {TotalCount}, startSkip: {StartSkip})",
+                folderType, skipValues.Count, effectiveTotal, totalCount, startSkipCount);
 
             // Prepare regex and verifier for post-filtering
             var typeForRegex = folderType == "D" ? "DE" : folderType;
@@ -848,6 +895,13 @@ namespace Migration.Infrastructure.Implementation.Services
                     // Fetch batch from Alfresco
                     var searchResult = await SearchDocumentsByDescriptionAsync(folderId, docDescriptions, skipCount, batchSize, token, _selectionOverride)
                         .ConfigureAwait(false);
+
+                    // Count ALL fetched documents BEFORE filtering (for resume skipCount tracking)
+                    var fetchedInBatch = searchResult.Documents.Count;
+                    if (fetchedInBatch > 0)
+                    {
+                        _fetchedCountsPerFolder.AddOrUpdate(folderType, fetchedInBatch, (_, existing) => existing + fetchedInBatch);
+                    }
 
                     // Post-filter: regex + docDesc verifier (exact ili wildcard)
                     var filteredDocs = searchResult.Documents.Where(o =>
@@ -914,6 +968,8 @@ namespace Migration.Infrastructure.Implementation.Services
                             try
                             {
                                 await FlushPendingBatchesAsync(pendingBatches, folderType, token).ConfigureAwait(false);
+                                // Save checkpoint after each flush for resume support
+                                await SaveCheckpointProgressAsync(token).ConfigureAwait(false);
                             }
                             finally
                             {
@@ -1643,22 +1699,23 @@ namespace Migration.Infrastructure.Implementation.Services
 
                 try
                 {
-                    // Get or create checkpoint for FolderDiscovery phase (used for DocumentSearch in MigrationByDocument mode)
                     var checkpoint = await phaseCheckpointRepo.GetCheckpointAsync(MigrationPhase.FolderDiscovery, ct).ConfigureAwait(false);
 
                     if (checkpoint != null)
                     {
-                        // Update progress - TotalProcessed = documents processed
                         checkpoint.TotalProcessed = _totalDocumentsProcessed;
-                        checkpoint.LastProcessedIndex = _currentSkipCount;
+                        checkpoint.LastProcessedIndex = _currentFolderTypeIndex;
+                        checkpoint.LastProcessedId = JsonSerializer.Serialize(_fetchedCountsPerFolder);
 
                         await phaseCheckpointRepo.UpdateAsync(checkpoint, ct).ConfigureAwait(false);
                     }
 
                     await uow.CommitAsync(ct).ConfigureAwait(false);
 
-                    _fileLogger.LogInformation("Checkpoint progress saved: {TotalProcessed} documents processed, skip count: {Skip}",
-                        _totalDocumentsProcessed, _currentSkipCount);
+                    _fileLogger.LogInformation(
+                        "Checkpoint saved: {TotalProcessed} docs, folderIndex: {FolderIndex}, fetchedCounts: {Counts}",
+                        _totalDocumentsProcessed, _currentFolderTypeIndex,
+                        JsonSerializer.Serialize(_fetchedCountsPerFolder));
                 }
                 catch
                 {
@@ -1680,6 +1737,11 @@ namespace Migration.Infrastructure.Implementation.Services
         /// </summary>
         private async Task LoadCheckpointAsync(CancellationToken ct)
         {
+            // Always start with clean in-memory state
+            _fetchedCountsPerFolder = new ConcurrentDictionary<string, long>();
+            _currentFolderTypeIndex = 0;
+            _totalDocumentsProcessed = 0;
+
             try
             {
                 await using var scope = _scopeFactory.CreateAsyncScope();
@@ -1692,13 +1754,51 @@ namespace Migration.Infrastructure.Implementation.Services
                 {
                     var checkpoint = await phaseCheckpointRepo.GetCheckpointAsync(MigrationPhase.FolderDiscovery, ct).ConfigureAwait(false);
 
-                    if (checkpoint != null && checkpoint.Status == PhaseStatus.InProgress)
+                    if (checkpoint != null && (checkpoint.Status == PhaseStatus.InProgress || checkpoint.Status == PhaseStatus.Failed))
                     {
-                        _totalDocumentsProcessed = checkpoint.TotalProcessed;
-                        _currentSkipCount = (int)(checkpoint.LastProcessedIndex ?? 0);
+                        // Verify that checkpoint belongs to the current docDesc selection
+                        // If docDesc changed, we must NOT resume from old checkpoint data
+                        if (!IsCheckpointMatchingCurrentDocDesc(checkpoint))
+                        {
+                            _fileLogger.LogInformation(
+                                "Checkpoint DocTypes mismatch - stored: [{StoredDocTypes}], current: [{CurrentDocTypes}]. Starting fresh.",
+                                checkpoint.DocTypes ?? "(null)",
+                                string.Join(",", GetCurrentDocDescriptions().OrderBy(d => d)));
+                            await uow.CommitAsync(ct).ConfigureAwait(false);
+                            return;
+                        }
 
-                        _fileLogger.LogInformation("Resuming from checkpoint: {TotalProcessed} documents processed, skip count: {Skip}",
-                            _totalDocumentsProcessed, _currentSkipCount);
+                        _totalDocumentsProcessed = checkpoint.TotalProcessed;
+                        _currentFolderTypeIndex = checkpoint.LastProcessedIndex ?? 0;
+
+                        // Restore fetched counts per folder from JSON
+                        if (!string.IsNullOrEmpty(checkpoint.LastProcessedId))
+                        {
+                            try
+                            {
+                                var restored = JsonSerializer.Deserialize<Dictionary<string, long>>(checkpoint.LastProcessedId);
+                                if (restored != null)
+                                {
+                                    _fetchedCountsPerFolder = new ConcurrentDictionary<string, long>(restored);
+                                }
+                            }
+                            catch (JsonException jsonEx)
+                            {
+                                _fileLogger.LogWarning(
+                                    "Failed to deserialize fetched counts from checkpoint, starting fresh: {Error}",
+                                    jsonEx.Message);
+                                _fetchedCountsPerFolder = new ConcurrentDictionary<string, long>();
+                            }
+                        }
+
+                        _fileLogger.LogInformation(
+                            "Resuming from checkpoint: {TotalProcessed} docs, folderIndex: {FolderIndex}, fetchedCounts: {Counts}",
+                            _totalDocumentsProcessed, _currentFolderTypeIndex,
+                            checkpoint.LastProcessedId ?? "{}");
+                    }
+                    else
+                    {
+                        _fileLogger.LogInformation("No resumable checkpoint found - starting fresh");
                     }
 
                     await uow.CommitAsync(ct).ConfigureAwait(false);
@@ -1716,6 +1816,25 @@ namespace Migration.Infrastructure.Implementation.Services
                 _dbLogger.LogWarning(ex, "[{Method}] Failed to load checkpoint",
                     nameof(LoadCheckpointAsync));
             }
+        }
+
+        /// <summary>
+        /// Checks if the checkpoint's stored DocTypes matches the current docDesc selection.
+        /// Returns false if docDesc has changed since the checkpoint was saved.
+        /// </summary>
+        private bool IsCheckpointMatchingCurrentDocDesc(PhaseCheckpoint checkpoint)
+        {
+            if (string.IsNullOrEmpty(checkpoint.DocTypes))
+            {
+                // No DocTypes stored - can't verify, allow resume
+                return true;
+            }
+
+            var currentDocDescriptions = GetCurrentDocDescriptions();
+            var currentNormalized = string.Join(",", currentDocDescriptions.OrderBy(d => d));
+            var storedNormalized = string.Join(",", checkpoint.DocTypes.Split(',').Select(d => d.Trim()).OrderBy(d => d));
+
+            return string.Equals(currentNormalized, storedNormalized, StringComparison.OrdinalIgnoreCase);
         }
 
         /// <summary>

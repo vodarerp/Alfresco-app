@@ -8,8 +8,8 @@ namespace Migration.Infrastructure.Implementation.Services
 {
     /// <summary>
     /// Service for preparing the database before migration starts.
-    /// Deletes all incomplete items from DocStaging and FolderStaging tables.
-    /// This ensures a clean start and prevents stuck items from previous runs.
+    /// Resets incomplete items in DocStaging and FolderStaging tables to their safe restart state.
+    /// This enables resume from the point of interruption instead of starting from scratch.
     /// </summary>
     public class MigrationPreparationService : IMigrationPreparationService
     {
@@ -29,12 +29,15 @@ namespace Migration.Infrastructure.Implementation.Services
         }
 
         /// <summary>
-        /// Prepares database for migration by deleting all incomplete items.
+        /// Prepares database for migration by resetting incomplete items to their safe restart state.
+        /// - PREPARATION docs → READY (folder prep was interrupted)
+        /// - IN_PROGRESS docs → PREPARED (move was interrupted)
+        /// - IN_PROGRESS folders → READY (folder creation was interrupted)
         /// Should be called ONCE before starting migration workflow.
         /// </summary>
         public async Task<MigrationPreparationResult> PrepareForMigrationAsync(CancellationToken ct = default)
         {
-            _fileLogger.LogInformation("🗑️ Starting database preparation - deleting incomplete items");
+            _fileLogger.LogInformation("Starting database preparation - resetting incomplete items for resume");
             _dbLogger.LogInformation("Starting database preparation");
             _uiLogger.LogInformation("Preparing database for migration...");
 
@@ -51,75 +54,75 @@ namespace Migration.Infrastructure.Implementation.Services
 
                 try
                 {
-                    // 1️⃣ Count incomplete items BEFORE deletion (for logging)
-                    _fileLogger.LogInformation("Counting incomplete items...");
+                    // 1. Count resettable items BEFORE reset (for logging)
+                    _fileLogger.LogInformation("Counting resettable items...");
 
-                    var incompleteDocsCount = await docRepo.CountIncompleteDocumentsAsync(
+                    var resettableDocsCount = await docRepo.CountResettableDocumentsAsync(
                         uow.Connection,
                         uow.Transaction,
                         ct).ConfigureAwait(false);
 
-                    var incompleteFoldersCount = await folderRepo.CountIncompleteFoldersAsync(
+                    var resettableFoldersCount = await folderRepo.CountResettableFoldersAsync(
                         uow.Connection,
                         uow.Transaction,
                         ct).ConfigureAwait(false);
 
                     _fileLogger.LogInformation(
-                        "Found {DocCount} incomplete documents and {FolderCount} incomplete folders",
-                        incompleteDocsCount, incompleteFoldersCount);
+                        "Found {DocCount} resettable documents and {FolderCount} resettable folders",
+                        resettableDocsCount, resettableFoldersCount);
 
-                    // 2️⃣ Delete incomplete documents
-                    _fileLogger.LogInformation("Deleting incomplete documents from DocStaging...");
+                    // 2. Reset incomplete documents (PREPARATION→READY, IN_PROGRESS→PREPARED)
+                    _fileLogger.LogInformation("Resetting incomplete documents in DocStaging...");
 
-                    var deletedDocs = await docRepo.DeleteIncompleteDocumentsAsync(
+                    var resetDocs = await docRepo.ResetIncompleteDocumentsAsync(
                         uow.Connection,
                         uow.Transaction,
                         ct).ConfigureAwait(false);
 
-                    _fileLogger.LogInformation("✅ Deleted {Count} incomplete documents", deletedDocs);
+                    _fileLogger.LogInformation("Reset {Count} incomplete documents", resetDocs);
 
-                    // 3️⃣ Delete incomplete folders
-                    _fileLogger.LogInformation("Deleting incomplete folders from FolderStaging...");
+                    // 3. Reset incomplete folders (IN_PROGRESS→READY)
+                    _fileLogger.LogInformation("Resetting incomplete folders in FolderStaging...");
 
-                    var deletedFolders = await folderRepo.DeleteIncompleteFoldersAsync(
+                    var resetFolders = await folderRepo.ResetIncompleteFoldersAsync(
                         uow.Connection,
                         uow.Transaction,
                         ct).ConfigureAwait(false);
 
-                    _fileLogger.LogInformation("✅ Deleted {Count} incomplete folders", deletedFolders);
+                    _fileLogger.LogInformation("Reset {Count} incomplete folders", resetFolders);
 
-                    // 4️⃣ Commit transaction
+                    // 4. Commit transaction
                     await uow.CommitAsync(ct: ct).ConfigureAwait(false);
 
-                    // 5️⃣ Prepare result
-                    result.DeletedDocuments = deletedDocs;
-                    result.DeletedFolders = deletedFolders;
+                    // 5. Prepare result
+                    result.ResetDocuments = resetDocs;
+                    result.ResetFolders = resetFolders;
                     result.Success = true;
 
                     _fileLogger.LogInformation(
-                        "✅ Database preparation completed successfully - " +
-                        "Deleted {TotalDocs} documents and {TotalFolders} folders (Total: {Total})",
-                        deletedDocs, deletedFolders, deletedDocs + deletedFolders);
+                        "Database preparation completed successfully - " +
+                        "Reset {TotalDocs} documents and {TotalFolders} folders (Total: {Total})",
+                        resetDocs, resetFolders, resetDocs + resetFolders);
 
                     _dbLogger.LogInformation(
-                        "Database preparation completed - deleted {Total} items",
-                        deletedDocs + deletedFolders);
+                        "Database preparation completed - reset {Total} items",
+                        resetDocs + resetFolders);
 
                     _uiLogger.LogInformation(
-                        "Database prepared: {Total} incomplete items removed",
-                        deletedDocs + deletedFolders);
+                        "Database prepared: {Total} incomplete items reset for resume",
+                        resetDocs + resetFolders);
 
-                    if (deletedDocs + deletedFolders == 0)
+                    if (resetDocs + resetFolders == 0)
                     {
                         _fileLogger.LogInformation(
-                            "ℹ️ No incomplete items found - database is already clean");
+                            "No incomplete items found - database is already in clean state");
                         _uiLogger.LogInformation("Database is already clean - ready to start migration");
                     }
                     else
                     {
                         _fileLogger.LogInformation(
-                            "ℹ️ Migration will start fresh - DocumentSearchService will repopulate staging tables");
-                        _uiLogger.LogInformation("Ready to start migration from clean state");
+                            "Incomplete items reset to safe state - migration will resume from checkpoint");
+                        _uiLogger.LogInformation("Ready to resume migration from last checkpoint");
                     }
                 }
                 catch (Exception ex)
@@ -127,7 +130,7 @@ namespace Migration.Infrastructure.Implementation.Services
                     await uow.RollbackAsync(ct: ct).ConfigureAwait(false);
 
                     _fileLogger.LogError(ex,
-                        "❌ Database preparation failed - transaction rolled back. " +
+                        "Database preparation failed - transaction rolled back. " +
                         "ErrorType: {ErrorType}, Message: {Message}",
                         ex.GetType().Name, ex.Message);
 
@@ -143,7 +146,7 @@ namespace Migration.Infrastructure.Implementation.Services
             catch (Exception ex)
             {
                 _fileLogger.LogError(ex,
-                    "❌ Fatal error during database preparation: {ErrorType} - {Message}",
+                    "Fatal error during database preparation: {ErrorType} - {Message}",
                     ex.GetType().Name, ex.Message);
 
                 result.Success = false;

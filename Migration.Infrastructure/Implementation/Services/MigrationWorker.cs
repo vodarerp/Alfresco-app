@@ -92,9 +92,9 @@ namespace Migration.Infrastructure.Implementation.Services
                 _uiLogger.LogInformation("Migracija pokrenuta");
 
                 // ====================================================================
-                // PREPARE DATABASE: Delete incomplete items before migration starts
+                // PREPARE DATABASE: Reset incomplete items for resume support
                 // ====================================================================
-                _logger.LogInformation("Preparing database - deleting incomplete items...");
+                _logger.LogInformation("Preparing database - resetting incomplete items for resume...");
                 var prepResult = await _migrationPreparation.PrepareForMigrationAsync(ct);
 
                 if (!prepResult.Success)
@@ -105,8 +105,8 @@ namespace Migration.Infrastructure.Implementation.Services
                 }
 
                 _logger.LogInformation(
-                    "Database prepared successfully: Deleted {DocCount} documents, {FolderCount} folders (Total: {Total}). TotalTime: {Time}",
-                    prepResult.DeletedDocuments, prepResult.DeletedFolders, prepResult.TotalDeleted, sw.Elapsed);
+                    "Database prepared successfully: Reset {DocCount} documents, {FolderCount} folders (Total: {Total}). TotalTime: {Time}",
+                    prepResult.ResetDocuments, prepResult.ResetFolders, prepResult.TotalReset, sw.Elapsed);
 
                 await _currentUserService.InitializeAsync(ct);
                 _logger.LogInformation(
@@ -287,6 +287,13 @@ namespace Migration.Infrastructure.Implementation.Services
                     ? checkpoints.Where(c => c.Phase != MigrationPhase.DocumentDiscovery).ToList()
                     : checkpoints;
 
+                // Detect pending (interrupted) migration
+                var pendingCheckpoint = checkpoints
+                    .Where(c => c.Status == PhaseStatus.InProgress || c.Status == PhaseStatus.Failed)
+                    .Where(c => !_migrationOptions.MigrationByDocument || c.Phase != MigrationPhase.DocumentDiscovery)
+                    .OrderBy(c => c.Phase)
+                    .FirstOrDefault();
+
                 if (currentPhaseCheckpoint == null)
                 {
                     // All phases completed
@@ -322,7 +329,11 @@ namespace Migration.Infrastructure.Implementation.Services
                         : null,
                     TotalProcessed = relevantCheckpoints.Sum(c => c.TotalProcessed),
                     ErrorMessage = currentPhaseCheckpoint.ErrorMessage,
-                    StatusMessage = GetPhaseStatusMessage(currentPhaseCheckpoint.Phase, currentPhaseCheckpoint.Status)
+                    StatusMessage = GetPhaseStatusMessage(currentPhaseCheckpoint.Phase, currentPhaseCheckpoint.Status),
+                    HasPendingMigration = pendingCheckpoint != null,
+                    PendingPhase = pendingCheckpoint?.Phase,
+                    LastAttemptAt = pendingCheckpoint?.CompletedAt ?? pendingCheckpoint?.StartedAt,
+                    PendingDocTypes = pendingCheckpoint?.DocTypes
                 };
             }
             catch (Exception ex)
