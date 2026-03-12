@@ -1,7 +1,11 @@
 using Alfresco.Abstraction.Interfaces;
 using Alfresco.Contracts.Request;
+using Alfresco.Contracts.SqlServer;
+using Dapper;
+using Microsoft.Data.SqlClient;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Options;
 using Newtonsoft.Json;
 using System.Collections.ObjectModel;
 using System.IO;
@@ -13,15 +17,20 @@ namespace Alfresco.DocStatusUpdater
     {
         private readonly IAlfrescoReadApi _readApi;
         private readonly IAlfrescoWriteApi _writeApi;
+        private readonly ICurrentUserService _currentUserService;
+        private readonly SqlServerOptions _sqlServerOptions;
         private CancellationTokenSource? _cts;
 
         private readonly List<DocStatusItem> _allItems = new();
+        private readonly List<DossierUpdateItem> _dossierItems = new();
 
         public MainWindow()
         {
             InitializeComponent();
             _readApi = App.AppHost.Services.GetRequiredService<IAlfrescoReadApi>();
             _writeApi = App.AppHost.Services.GetRequiredService<IAlfrescoWriteApi>();
+            _currentUserService = App.AppHost.Services.GetRequiredService<ICurrentUserService>();
+            _sqlServerOptions = App.AppHost.Services.GetRequiredService<IOptions<SqlServerOptions>>().Value;
         }
 
         #region Search
@@ -333,6 +342,263 @@ namespace Alfresco.DocStatusUpdater
 
         #endregion
 
+        #region Dossier Deposit - Load
+
+        private async void BtnDossierLoad_Click(object sender, RoutedEventArgs e)
+        {
+            try
+            {
+                SetDossierBusy(true, "Ucitavanje dosieja iz baze...");
+                _cts = new CancellationTokenSource();
+
+                _dossierItems.Clear();
+                DgDossiers.ItemsSource = null;
+
+                AppendDossierLog("Ucitavanje distinct DestinationFolderId iz DocStaging tabele...");
+
+                var sql = @"SELECT DISTINCT DestinationFolderId, DossierDestFolderId
+                            FROM DocStaging
+                            WHERE TipDosijea = 'Dosije Depozita'
+                              AND Status = 'DONE'
+                              AND ISNULL(DossierDestFolderIsCreated, 0) = 1";
+
+                await using var connection = new SqlConnection(_sqlServerOptions.ConnectionString);
+                await connection.OpenAsync(_cts.Token);
+
+                var rows = (await connection.QueryAsync<(string DestinationFolderId, string DossierDestFolderId)>(
+                    new CommandDefinition(sql, cancellationToken: _cts.Token))).ToList();
+
+                AppendDossierLog($"Pronadjeno {rows.Count} distinct dosieja za azuriranje.");
+
+                int rowNum = 0;
+                foreach (var row in rows)
+                {
+                    if (string.IsNullOrWhiteSpace(row.DestinationFolderId)) continue;
+
+                    rowNum++;
+                    _dossierItems.Add(new DossierUpdateItem
+                    {
+                        RowNumber = rowNum,
+                        DestinationFolderId = row.DestinationFolderId,
+                        DossierDestFolderId = row.DossierDestFolderId ?? ""
+                    });
+                }
+
+                DgDossiers.ItemsSource = new ObservableCollection<DossierUpdateItem>(_dossierItems);
+                TxtDossierTotalCount.Text = _dossierItems.Count.ToString();
+                TxtDossierListCount.Text = _dossierItems.Count.ToString();
+                TxtDossierNotUpdatedCount.Text = _dossierItems.Count.ToString();
+                TxtDossierStatus.Text = "Ucitavanje zavrseno";
+                TxtDossierProgress.Text = $"Ucitano: {_dossierItems.Count}";
+
+                BtnDossierUpdate.IsEnabled = _dossierItems.Count > 0;
+
+                AppendDossierLog($"Ucitano {_dossierItems.Count} dosieja spremnih za azuriranje propertija.");
+            }
+            catch (OperationCanceledException)
+            {
+                AppendDossierLog("Ucitavanje je otkazano.");
+                TxtDossierStatus.Text = "Otkazano";
+            }
+            catch (Exception ex)
+            {
+                AppendDossierLog($"GRESKA pri ucitavanju: {ex.Message}");
+                TxtDossierStatus.Text = "Greska";
+                MessageBox.Show($"Greska pri ucitavanju dosieja:\n{ex.Message}", "Greska", MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+            finally
+            {
+                SetDossierBusy(false);
+                _cts?.Dispose();
+                _cts = null;
+            }
+        }
+
+        #endregion
+
+        #region Dossier Deposit - Update
+
+        private async void BtnDossierUpdate_Click(object sender, RoutedEventArgs e)
+        {
+            var itemsToUpdate = _dossierItems.Where(x => !x.IsUpdated).ToList();
+
+            if (itemsToUpdate.Count == 0)
+            {
+                MessageBox.Show("Nema dosieja za azuriranje.", "Info", MessageBoxButton.OK, MessageBoxImage.Information);
+                return;
+            }
+
+            try
+            {               
+                var config = App.AppHost.Services.GetRequiredService<IConfiguration>();
+                var maxDop = config.GetValue<int>("Update:MaxDegreeOfParallelism", 5);
+
+                var confirm = MessageBox.Show(
+                    $"Da li zelite da azurirate propertije na {itemsToUpdate.Count} dosiejima?",
+                    "Potvrda",
+                    MessageBoxButton.YesNo,
+                    MessageBoxImage.Question);
+
+                if (confirm != MessageBoxResult.Yes) return;
+
+                SetDossierBusy(true, "Azuriranje propertija...");
+                _cts = new CancellationTokenSource();
+
+                int success = 0;
+                int failed = 0;
+                int processed = 0;
+                int total = itemsToUpdate.Count;
+
+                DossierProgressBar.Maximum = total;
+                DossierProgressBar.Value = 0;
+
+                AppendDossierLog($"Pocetak paralelnog azuriranja {total} dosieja (MaxDOP: {maxDop})...");
+
+                var parallelOptions = new ParallelOptions
+                {
+                    MaxDegreeOfParallelism = maxDop,
+                    CancellationToken = _cts.Token
+                };
+
+                await Parallel.ForEachAsync(itemsToUpdate, parallelOptions, async (item, ct) =>
+                {
+                    try
+                    {
+                        // Citaj docCreator i docCreatorName iz child dokumenata dosieja
+                        string docCreator = "";
+                        string docCreatorName = "";
+
+                        try
+                        {
+                            var children = await _readApi.GetNodeChildrenAsync(item.DestinationFolderId, 0, 50, ct);
+                            if (children?.List?.Entries != null)
+                            {
+                                foreach (var child in children.List.Entries)
+                                {
+                                    var childNode = child.Entry;
+                                    if (childNode?.Properties == null) continue;
+
+                                    var creator = GetProperty(childNode.Properties, "ecm:docCreator");
+                                    var creatorName = GetProperty(childNode.Properties, "ecm:docCreatorName");
+
+                                    if (!string.IsNullOrWhiteSpace(creator) || !string.IsNullOrWhiteSpace(creatorName))
+                                    {
+                                        docCreator = creator;
+                                        docCreatorName = creatorName;
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+                        catch (Exception childEx)
+                        {
+                            AppendDossierLog($"WARN: greska citanja node: {item.DossierDestFolderId}: {childEx.Message}");
+                        }
+
+                        var properties = new Dictionary<string, object>
+                        {
+                            { "ecm:bnkSource", "DUTN" },
+                            { "ecm:kreiraoId", docCreator },
+                            { "ecm:createdByName", docCreatorName },
+                            { "ecm:bnkStatus", "AKTIVAN" }
+                            // TODO: ecm:bnkRealizationOPUID - vrednost jos nije poznata, mozda ce se pozivati servis
+                            // { "ecm:bnkRealizationOPUID", "<vrednost>" }
+                        };
+
+                        var updated = await _writeApi.UpdateNodePropertiesAsync(item.DestinationFolderId, properties, ct);
+
+                        if (updated)
+                        {
+                            item.IsUpdated = true;
+                            item.UpdateMessage = "OK";
+                            Interlocked.Increment(ref success);
+                        }
+                        else
+                        {
+                            item.UpdateMessage = "Neuspesno (false)";
+                            Interlocked.Increment(ref failed);
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        item.UpdateMessage = $"Greska: {ex.Message}";
+                        Interlocked.Increment(ref failed);
+                    }
+
+                    var current = Interlocked.Increment(ref processed);
+
+                    if (current % 10 == 0 || current == total)
+                    {
+                        Dispatcher.Invoke(() =>
+                        {
+                            DossierProgressBar.Value = current;
+                            TxtDossierProgress.Text = $"{current} / {total}";
+                            TxtDossierUpdatedCount.Text = success.ToString();
+                            TxtDossierFailedCount.Text = failed.ToString();
+                            TxtDossierNotUpdatedCount.Text = _dossierItems.Count(x => !x.IsUpdated).ToString();
+                            TxtDossierStatus.Text = $"Azuriranje: {current}/{total}";
+                        });
+                    }
+
+                    if (current % 100 == 0)
+                    {
+                        AppendDossierLog($"Progress: {current}/{total} (uspesno: {success}, neuspesno: {failed})");
+                    }
+                });
+
+                // Refresh DataGrid
+                DgDossiers.ItemsSource = new ObservableCollection<DossierUpdateItem>(_dossierItems);
+
+                TxtDossierStatus.Text = "Azuriranje zavrseno";
+                TxtDossierUpdatedCount.Text = success.ToString();
+                TxtDossierFailedCount.Text = failed.ToString();
+                TxtDossierNotUpdatedCount.Text = _dossierItems.Count(x => !x.IsUpdated).ToString();
+
+                AppendDossierLog($"Azuriranje zavrseno. Uspesno: {success}, Neuspesno: {failed}");
+
+                if (failed > 0)
+                {
+                    MessageBox.Show($"Azuriranje zavrseno.\nUspesno: {success}\nNeuspesno: {failed}",
+                        "Rezultat", MessageBoxButton.OK, MessageBoxImage.Warning);
+                }
+                else
+                {
+                    MessageBox.Show($"Svi dosieji su uspesno azurirani ({success}).",
+                        "Rezultat", MessageBoxButton.OK, MessageBoxImage.Information);
+                }
+            }
+            catch (OperationCanceledException)
+            {
+                AppendDossierLog("Azuriranje je otkazano.");
+                TxtDossierStatus.Text = "Otkazano";
+                DgDossiers.ItemsSource = new ObservableCollection<DossierUpdateItem>(_dossierItems);
+            }
+            catch (Exception ex)
+            {
+                AppendDossierLog($"GRESKA pri azuriranju: {ex.Message}");
+                TxtDossierStatus.Text = "Greska";
+                MessageBox.Show($"Greska pri azuriranju:\n{ex.Message}", "Greska", MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+            finally
+            {
+                SetDossierBusy(false);
+                _cts?.Dispose();
+                _cts = null;
+            }
+        }
+
+        #endregion
+
+        #region Dossier Cancel
+
+        private void BtnDossierCancel_Click(object sender, RoutedEventArgs e)
+        {
+            _cts?.Cancel();
+            AppendDossierLog("Otkazivanje operacije...");
+        }
+
+        #endregion
+
         #region Helpers
 
         private string GetProperty(Dictionary<string, object>? properties, string key)
@@ -352,6 +618,15 @@ namespace Alfresco.DocStatusUpdater
             });
         }
 
+        private void AppendDossierLog(string message)
+        {
+            Dispatcher.Invoke(() =>
+            {
+                TxtDossierLog.AppendText($"[{DateTime.Now:HH:mm:ss}] {message}\n");
+                TxtDossierLog.ScrollToEnd();
+            });
+        }
+
         private void SetBusy(bool busy, string? status = null)
         {
             Dispatcher.Invoke(() =>
@@ -367,12 +642,24 @@ namespace Alfresco.DocStatusUpdater
             });
         }
 
+        private void SetDossierBusy(bool busy, string? status = null)
+        {
+            Dispatcher.Invoke(() =>
+            {
+                BtnDossierLoad.IsEnabled = !busy;
+                BtnDossierUpdate.IsEnabled = !busy && _dossierItems.Any(x => !x.IsUpdated);
+                BtnDossierCancel.IsEnabled = busy;
+
+                if (status != null)
+                    TxtDossierStatus.Text = status;
+                else if (!busy)
+                    TxtDossierStatus.Text = "Spremno";
+            });
+        }
+
         #endregion
     }
 
-    /// <summary>
-    /// Model za prikaz u DataGrid-u
-    /// </summary>
     public class DocStatusItem
     {
         public int RowNumber { get; set; }
@@ -382,6 +669,15 @@ namespace Alfresco.DocStatusUpdater
         public string DocStatus { get; set; } = "";
         public string Path { get; set; } = "";
         public DateTime CreatedAt { get; set; }
+        public bool IsUpdated { get; set; }
+        public string UpdateMessage { get; set; } = "";
+    }
+
+    public class DossierUpdateItem
+    {
+        public int RowNumber { get; set; }
+        public string DossierDestFolderId { get; set; } = "";
+        public string DestinationFolderId { get; set; } = "";
         public bool IsUpdated { get; set; }
         public string UpdateMessage { get; set; } = "";
     }

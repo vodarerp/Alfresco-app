@@ -3,6 +3,7 @@ using Alfresco.Abstraction.Models;
 using Alfresco.Client.Handlers;
 using Alfresco.Client.Implementation;
 using Alfresco.Contracts.Options;
+using Alfresco.Contracts.SqlServer;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -94,6 +95,26 @@ namespace Alfresco.DocStatusUpdater
                         MaxConnectionsPerServer = 20
                     })
                     .AddHttpMessageHandler<BasicAuthHandler>();
+
+                    // SqlServer options
+                    services.Configure<SqlServerOptions>(context.Configuration.GetSection("SqlServer"));
+
+                    // CurrentUserService - fetches current logged-in user from Alfresco
+                    services.AddHttpClient("AlfrescoCurrentUserClient", (sp, cli) =>
+                    {
+                        cli.Timeout = TimeSpan.FromSeconds(30);
+                        var options = sp.GetRequiredService<IOptions<AlfrescoOptions>>().Value;
+                        var credentials = Convert.ToBase64String(
+                            System.Text.Encoding.ASCII.GetBytes($"{options.Username}:{options.Password}"));
+                        cli.BaseAddress = new Uri(options.BaseUrl);
+                        cli.DefaultRequestHeaders.Accept.Add(
+                            new System.Net.Http.Headers.MediaTypeWithQualityHeaderValue("application/json"));
+                        cli.DefaultRequestHeaders.Authorization =
+                            new System.Net.Http.Headers.AuthenticationHeaderValue("Basic", credentials);
+                    })
+                    .AddHttpMessageHandler<BasicAuthHandler>();
+
+                    services.AddSingleton<ICurrentUserService, CurrentUserService>();
 
                     services.AddTransient<MainWindow>();
                 })
