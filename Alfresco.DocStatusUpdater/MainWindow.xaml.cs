@@ -497,7 +497,7 @@ namespace Alfresco.DocStatusUpdater
 
                         var properties = new Dictionary<string, object>
                         {
-                            { "ecm:bnkSource", "DUTN" },
+                            { "ecm:bnkSource", "DUT" },
                             { "ecm:kreiraoId", docCreator },
                             { "ecm:createdByName", docCreatorName },
                             { "ecm:bnkStatus", "AKTIVAN" }
