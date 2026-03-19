@@ -116,6 +116,8 @@ namespace Alfresco.DocStatusUpdater
 
                     services.AddSingleton<ICurrentUserService, CurrentUserService>();
 
+                    services.AddMemoryCache();
+
                     services.AddTransient<MainWindow>();
                 })
                 .ConfigureLogging(logging =>

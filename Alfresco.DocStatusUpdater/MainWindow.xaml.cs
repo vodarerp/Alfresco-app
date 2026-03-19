@@ -3,6 +3,7 @@ using Alfresco.Contracts.Request;
 using Alfresco.Contracts.SqlServer;
 using Dapper;
 using Microsoft.Data.SqlClient;
+using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
@@ -18,7 +19,8 @@ namespace Alfresco.DocStatusUpdater
         private readonly IAlfrescoReadApi _readApi;
         private readonly IAlfrescoWriteApi _writeApi;
         private readonly ICurrentUserService _currentUserService;
-        private readonly SqlServerOptions _sqlServerOptions;
+        private readonly SqlServerOptions _sqlServerOptions; 
+        private readonly IMemoryCache _memoryCache;
         private CancellationTokenSource? _cts;
 
         private readonly List<DocStatusItem> _allItems = new();
@@ -31,6 +33,7 @@ namespace Alfresco.DocStatusUpdater
             _writeApi = App.AppHost.Services.GetRequiredService<IAlfrescoWriteApi>();
             _currentUserService = App.AppHost.Services.GetRequiredService<ICurrentUserService>();
             _sqlServerOptions = App.AppHost.Services.GetRequiredService<IOptions<SqlServerOptions>>().Value;
+            _memoryCache = App.AppHost.Services.GetRequiredService<IMemoryCache>();
         }
 
         #region Search
@@ -501,9 +504,21 @@ namespace Alfresco.DocStatusUpdater
                             { "ecm:kreiraoId", docCreator },
                             { "ecm:createdByName", docCreatorName },
                             { "ecm:bnkStatus", "AKTIVAN" }
-                            // TODO: ecm:bnkRealizationOPUID - vrednost jos nije poznata, mozda ce se pozivati servis
-                            // { "ecm:bnkRealizationOPUID", "<vrednost>" }
                         };
+
+                        // Popuni ecm:bnkRealizationOPUID iz baze sa IMemoryCache (12h)
+                        if (!string.IsNullOrWhiteSpace(docCreator))
+                        {
+                            var idExpozitura = await GetIdExpozituraAsync(docCreator, ct);
+                            if (!string.IsNullOrWhiteSpace(idExpozitura))
+                            {
+                                properties["ecm:bnkRealizationOPUID"] = idExpozitura;
+                            }
+                            else
+                            {
+                                AppendDossierLog($"WARN: IdExpozitura nije pronadjen za zaposlenog '{docCreator}' (dosije: {item.DossierDestFolderId})");
+                            }
+                        }
 
                         var updated = await _writeApi.UpdateNodePropertiesAsync(item.DestinationFolderId, properties, ct);
 
@@ -600,6 +615,38 @@ namespace Alfresco.DocStatusUpdater
         #endregion
 
         #region Helpers
+
+        private readonly SemaphoreSlim _cacheLock = new(1, 1);
+
+        private async Task<string?> GetIdExpozituraAsync(string idZaposleni, CancellationToken ct)
+        {
+            var cacheKey = $"ExpoziturZaposlenog_{idZaposleni}";
+
+            if (_memoryCache.TryGetValue(cacheKey, out string? cached))
+                return cached;
+
+            await _cacheLock.WaitAsync(ct);
+            try
+            {
+                // Double-check posle lock-a
+                if (_memoryCache.TryGetValue(cacheKey, out cached))
+                    return cached;
+
+                await using var conn = new SqlConnection(_sqlServerOptions.ConnectionString);
+                await conn.OpenAsync(ct);
+
+                var result = await conn.QueryFirstOrDefaultAsync<string?>(
+                    "SELECT IdExpozitura FROM ZaposleniExpozitura WHERE IdZaposleni = @IdZaposleni",
+                    new { IdZaposleni = idZaposleni });
+
+                _memoryCache.Set(cacheKey, result, TimeSpan.FromHours(12));
+                return result;
+            }
+            finally
+            {
+                _cacheLock.Release();
+            }
+        }
 
         private string GetProperty(Dictionary<string, object>? properties, string key)
         {
