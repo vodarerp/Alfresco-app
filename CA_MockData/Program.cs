@@ -16,6 +16,24 @@ using Microsoft.Data.SqlClient;
 
 public static class Program
 {
+    // Creator pairs: (username, fullName) - deterministically assigned per dossier
+    private static readonly (string Username, string FullName)[] Creators = new[]
+    {
+        ("jpetrovic", "Jovan Petrović"),
+        ("mnikolic", "Milica Nikolić"),
+        ("smarkovic", "Stefan Marković"),
+        ("ajovanovic", "Ana Jovanović"),
+        ("dstojkovic", "Dragan Stojković"),
+        ("nmilic", "Nevena Milić"),
+    };
+
+    /// <summary>
+    /// Returns a consistent creator pair for a given coreId.
+    /// All documents in the same dossier (same coreId) get the same creator.
+    /// </summary>
+    private static (string Username, string FullName) GetCreatorForDossier(int coreId)
+        => Creators[Math.Abs(coreId) % Creators.Length];
+
     private static readonly string[] DocumentDescriptions = new[]
     {
         "KYC Questionnaire",
@@ -64,9 +82,9 @@ public static class Program
             BaseUrl = "http://localhost:8080/",
             Username =  "admin",
             Password = "admin",
-            RootParentId = "cc0d9fcc-21e2-43b0-8d9f-cc21e253b0e8",
-            FolderCount = 500,
-            DocsPerFolder = 30,
+            RootParentId = "875d1f6a-7c93-47d4-9d1f-6a7c93d7d40d",
+            FolderCount = 150,
+            DocsPerFolder = 15,
             DegreeOfParallelism = 5,
             MaxRetries = 5,
             RetryBaseDelayMs = 100,
@@ -1031,6 +1049,11 @@ public static class Program
             // Source
             props["ecm:source"] = "Heimdall";
 
+            // Creator - same as the dossier's bnkCreator/bnkCreatorName
+            var (creatorUsername, creatorFullName) = GetCreatorForDossier(coreId);
+            props["ecm:docCreator"] = creatorUsername;
+            props["ecm:docCreatorName"] = creatorFullName;
+
             // NOTE: cm:created cannot be modified as it's a read-only system property
             // If ecm:docCreatedDate exists in your content model, uncomment the line below:
             // props["ecm:docCreatedDate"] = docCreatedDate.ToString("o");
@@ -1134,6 +1157,11 @@ public static class Program
 
             // Source - DUT for deposit documents (TC 7)
             props["ecm:source"] = "DUT";
+
+            // Creator - same as the dossier's bnkCreator/bnkCreatorName
+            var (creatorUsername, creatorFullName) = GetCreatorForDossier(coreId);
+            props["ecm:docCreator"] = creatorUsername;
+            props["ecm:docCreatorName"] = creatorFullName;
 
             // Contract number - CRITICAL for deposit documents
             props["ecm:contractNumber"] = contractNumber;
@@ -1324,6 +1352,11 @@ public static class Program
         properties["ecm:staff"] = staffValue;
         properties["ecm:docStaff"] = staffValue;
 
+        // Creator - consistent per dossier
+        var (creatorUsername, creatorFullName) = GetCreatorForDossier(coreId);
+        properties["ecm:bnkCreator"] = creatorUsername;
+        properties["ecm:bnkCreatorName"] = creatorFullName;
+
         return properties;
     }
 
@@ -1377,6 +1410,11 @@ public static class Program
         // Dates
         var creationDate = DateTime.UtcNow.AddDays(-random.Next(1, 365));
         properties["ecm:datumKreiranja"] = creationDate.ToString("o");
+
+        // Creator - same as the dossier's bnkCreator/bnkCreatorName
+        var (creatorUsername, creatorFullName) = GetCreatorForDossier(coreId);
+        properties["ecm:docCreator"] = creatorUsername;
+        properties["ecm:docCreatorName"] = creatorFullName;
 
         // TC 16: KDP 00824 edge case - account number validation
         // If includeAccountNumber is explicitly set, respect it; otherwise use default logic
@@ -1542,7 +1580,12 @@ public static class Program
         // Active flag
         properties["ecm:active"] = true;
 
+        // Creator - consistent per dossier
+        var (creatorUsername, creatorFullName) = GetCreatorForDossier(coreId);
+        properties["ecm:bnkCreator"] = creatorUsername;
+        properties["ecm:bnkCreatorName"] = creatorFullName;
+
         return properties;
     }
-    
+
 }

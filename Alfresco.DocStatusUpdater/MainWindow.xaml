@@ -70,6 +70,14 @@
                                     Background="LightSkyBlue"
                                     ToolTip="Ucitava distinct DestinationFolderId iz DocStaging za Dosije Depozita"/>
 
+                            <Button x:Name="BtnDossierExport"
+                                    Content="Export u CSV"
+                                    Click="BtnDossierExport_Click"
+                                    Height="35" Margin="3"
+                                    Background="LightGoldenrodYellow"
+                                    IsEnabled="False"
+                                    ToolTip="Exportuj podatke iz grida u CSV fajl za proveru pre azuriranja"/>
+
                             <Button x:Name="BtnDossierUpdate"
                                     Content="2. Azuriraj propertije na Alfrescu"
                                     Click="BtnDossierUpdate_Click"
@@ -84,6 +92,13 @@
                                     Height="35" Margin="3"
                                     Background="LightCoral"
                                     IsEnabled="False"/>
+
+                            <Button x:Name="BtnDossierExportLog"
+                                    Content="Export Log"
+                                    Click="BtnDossierExportLog_Click"
+                                    Height="35" Margin="3"
+                                    Background="LightGray"
+                                    ToolTip="Exportuj log u TXT fajl"/>
                         </StackPanel>
                     </GroupBox>
                 </Grid>
@@ -116,7 +131,10 @@
                             <DataGrid.Columns>
                                 <DataGridTextColumn Header="#" Binding="{Binding RowNumber}" Width="50"/>
                                 <DataGridTextColumn Header="Naziv dosieja" Binding="{Binding DossierDestFolderId}" Width="220"/>
-                                <DataGridTextColumn Header="DestinationFolderId" Binding="{Binding DestinationFolderId}" Width="320"/>
+                                <DataGridTextColumn Header="DestinationFolderId" Binding="{Binding DestinationFolderId}" Width="280"/>
+                                <DataGridTextColumn Header="Creator" Binding="{Binding DocCreator}" Width="120"/>
+                                <DataGridTextColumn Header="CreatorName" Binding="{Binding DocCreatorName}" Width="150"/>
+                                <DataGridTextColumn Header="IdEkspoziture" Binding="{Binding IdExpozitura}" Width="100"/>
                                 <DataGridCheckBoxColumn Header="Azurirano" Binding="{Binding IsUpdated}" Width="75"/>
                                 <DataGridTextColumn Header="Poruka" Binding="{Binding UpdateMessage}" Width="*"/>
                             </DataGrid.Columns>

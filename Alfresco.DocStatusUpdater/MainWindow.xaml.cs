@@ -371,7 +371,10 @@ namespace Alfresco.DocStatusUpdater
                 var rows = (await connection.QueryAsync<(string DestinationFolderId, string DossierDestFolderId)>(
                     new CommandDefinition(sql, cancellationToken: _cts.Token))).ToList();
 
-                AppendDossierLog($"Pronadjeno {rows.Count} distinct dosieja za azuriranje.");
+                AppendDossierLog($"Pronadjeno {rows.Count} distinct dosieja. Citanje docCreator/docCreatorName sa child dokumenata...");
+
+                var config = App.AppHost.Services.GetRequiredService<IConfiguration>();
+                var maxDop = config.GetValue<int>("Update:MaxDegreeOfParallelism", 5);
 
                 int rowNum = 0;
                 foreach (var row in rows)
@@ -387,6 +390,73 @@ namespace Alfresco.DocStatusUpdater
                     });
                 }
 
+                // Ucitaj docCreator i docCreatorName sa child dokumenata paralelno
+                int loadProcessed = 0;
+                int loadTotal = _dossierItems.Count;
+                DossierProgressBar.Maximum = loadTotal;
+                DossierProgressBar.Value = 0;
+
+                var parallelOptions = new ParallelOptions
+                {
+                    MaxDegreeOfParallelism = maxDop,
+                    CancellationToken = _cts.Token
+                };
+
+                await Parallel.ForEachAsync(_dossierItems, parallelOptions, async (item, ct) =>
+                {
+                    try
+                    {
+                        var children = await _readApi.GetNodeChildrenAsync(item.DestinationFolderId, 0, 50, ct);
+                        if (children?.List?.Entries != null)
+                        {
+                            foreach (var child in children.List.Entries)
+                            {
+                                var childNode = child.Entry;
+                                if (childNode?.Properties == null) continue;
+
+                                var creator = GetProperty(childNode.Properties, "ecm:docCreator");
+                                var creatorName = GetProperty(childNode.Properties, "ecm:docCreatorName");
+
+                                if (!string.IsNullOrWhiteSpace(creator) || !string.IsNullOrWhiteSpace(creatorName))
+                                {
+                                    item.DocCreator = creator;
+                                    item.DocCreatorName = creatorName;
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                    catch (Exception childEx)
+                    {
+                        AppendDossierLog($"WARN: greska citanja child node: {item.DossierDestFolderId}: {childEx.Message}");
+                    }
+
+                    // Ucitaj IdExpozitura iz baze
+                    if (!string.IsNullOrWhiteSpace(item.DocCreator))
+                    {
+                        try
+                        {
+                            var idExpozitura = await GetIdExpozituraAsync(item.DocCreator, ct);
+                            item.IdExpozitura = idExpozitura ?? "";
+                        }
+                        catch (Exception expoEx)
+                        {
+                            AppendDossierLog($"WARN: greska citanja IdExpozitura za '{item.DocCreator}': {expoEx.Message}");
+                        }
+                    }
+
+                    var current = Interlocked.Increment(ref loadProcessed);
+                    if (current % 10 == 0 || current == loadTotal)
+                    {
+                        Dispatcher.Invoke(() =>
+                        {
+                            DossierProgressBar.Value = current;
+                            TxtDossierProgress.Text = $"{current} / {loadTotal}";
+                            TxtDossierStatus.Text = $"Citanje child dokumenata: {current}/{loadTotal}";
+                        });
+                    }
+                });
+
                 DgDossiers.ItemsSource = new ObservableCollection<DossierUpdateItem>(_dossierItems);
                 TxtDossierTotalCount.Text = _dossierItems.Count.ToString();
                 TxtDossierListCount.Text = _dossierItems.Count.ToString();
@@ -395,6 +465,7 @@ namespace Alfresco.DocStatusUpdater
                 TxtDossierProgress.Text = $"Ucitano: {_dossierItems.Count}";
 
                 BtnDossierUpdate.IsEnabled = _dossierItems.Count > 0;
+                BtnDossierExport.IsEnabled = _dossierItems.Count > 0;
 
                 AppendDossierLog($"Ucitano {_dossierItems.Count} dosieja spremnih za azuriranje propertija.");
             }
@@ -467,57 +538,22 @@ namespace Alfresco.DocStatusUpdater
                 {
                     try
                     {
-                        // Citaj docCreator i docCreatorName iz child dokumenata dosieja
-                        string docCreator = "";
-                        string docCreatorName = "";
-
-                        try
-                        {
-                            var children = await _readApi.GetNodeChildrenAsync(item.DestinationFolderId, 0, 50, ct);
-                            if (children?.List?.Entries != null)
-                            {
-                                foreach (var child in children.List.Entries)
-                                {
-                                    var childNode = child.Entry;
-                                    if (childNode?.Properties == null) continue;
-
-                                    var creator = GetProperty(childNode.Properties, "ecm:docCreator");
-                                    var creatorName = GetProperty(childNode.Properties, "ecm:docCreatorName");
-
-                                    if (!string.IsNullOrWhiteSpace(creator) || !string.IsNullOrWhiteSpace(creatorName))
-                                    {
-                                        docCreator = creator;
-                                        docCreatorName = creatorName;
-                                        break;
-                                    }
-                                }
-                            }
-                        }
-                        catch (Exception childEx)
-                        {
-                            AppendDossierLog($"WARN: greska citanja node: {item.DossierDestFolderId}: {childEx.Message}");
-                        }
-
+                        // Koristi vec ucitane docCreator/docCreatorName/IdExpozitura iz Load faze
                         var properties = new Dictionary<string, object>
                         {
                             { "ecm:bnkSource", "DUT" },
-                            { "ecm:bnkCreator", docCreator },
-                            { "ecm:bnkCreatorName", docCreatorName },
+                            { "ecm:bnkCreator", item.DocCreator },
+                            { "ecm:bnkCreatorName", item.DocCreatorName },
                             { "ecm:bnkStatus", "AKTIVAN" }
                         };
 
-                        // Popuni ecm:bnkRealizationOPUID iz baze sa IMemoryCache (12h)
-                        if (!string.IsNullOrWhiteSpace(docCreator))
+                        if (!string.IsNullOrWhiteSpace(item.IdExpozitura))
                         {
-                            var idExpozitura = await GetIdExpozituraAsync(docCreator, ct);
-                            if (!string.IsNullOrWhiteSpace(idExpozitura))
-                            {
-                                properties["ecm:bnkRealizationOPUID"] = idExpozitura;
-                            }
-                            else
-                            {
-                                AppendDossierLog($"WARN: IdExpozitura nije pronadjen za zaposlenog '{docCreator}' (dosije: {item.DossierDestFolderId})");
-                            }
+                            properties["ecm:bnkRealizationOPUID"] = item.IdExpozitura;
+                        }
+                        else if (!string.IsNullOrWhiteSpace(item.DocCreator))
+                        {
+                            AppendDossierLog($"WARN: IdExpozitura nije pronadjen za zaposlenog '{item.DocCreator}' (dosije: {item.DossierDestFolderId})");
                         }
 
                         var updated = await _writeApi.UpdateNodePropertiesAsync(item.DestinationFolderId, properties, ct);
@@ -614,6 +650,82 @@ namespace Alfresco.DocStatusUpdater
 
         #endregion
 
+        #region Dossier Export
+
+        private void BtnDossierExport_Click(object sender, RoutedEventArgs e)
+        {
+            if (_dossierItems.Count == 0)
+            {
+                MessageBox.Show("Nema podataka za export.", "Info", MessageBoxButton.OK, MessageBoxImage.Information);
+                return;
+            }
+
+            var dialog = new Microsoft.Win32.SaveFileDialog
+            {
+                Filter = "CSV fajl (*.csv)|*.csv|Tekst fajl (*.txt)|*.txt",
+                DefaultExt = ".csv",
+                FileName = $"DossierExport_{DateTime.Now:yyyyMMdd_HHmmss}"
+            };
+
+            if (dialog.ShowDialog() != true) return;
+
+            try
+            {
+                var sb = new System.Text.StringBuilder();
+                sb.AppendLine("#;NazivDosieja;DestinationFolderId;Creator;CreatorName;IdEkspoziture;Azurirano;Poruka");
+
+                foreach (var item in _dossierItems)
+                {
+                    sb.AppendLine($"{item.RowNumber};{item.DossierDestFolderId};{item.DestinationFolderId};{item.DocCreator};{item.DocCreatorName};{item.IdExpozitura};{item.IsUpdated};{item.UpdateMessage}");
+                }
+
+                File.WriteAllText(dialog.FileName, sb.ToString(), System.Text.Encoding.UTF8);
+                AppendDossierLog($"Export sacuvan: {dialog.FileName}");
+                MessageBox.Show($"Export sacuvan:\n{dialog.FileName}", "Export", MessageBoxButton.OK, MessageBoxImage.Information);
+            }
+            catch (Exception ex)
+            {
+                AppendDossierLog($"GRESKA pri exportu: {ex.Message}");
+                MessageBox.Show($"Greska pri exportu:\n{ex.Message}", "Greska", MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+        }
+
+        #endregion
+
+        #region Dossier Export Log
+
+        private void BtnDossierExportLog_Click(object sender, RoutedEventArgs e)
+        {
+            var logText = TxtDossierLog.Text;
+            if (string.IsNullOrWhiteSpace(logText))
+            {
+                MessageBox.Show("Log je prazan.", "Info", MessageBoxButton.OK, MessageBoxImage.Information);
+                return;
+            }
+
+            var dialog = new Microsoft.Win32.SaveFileDialog
+            {
+                Filter = "Tekst fajl (*.txt)|*.txt",
+                DefaultExt = ".txt",
+                FileName = $"DossierLog_{DateTime.Now:yyyyMMdd_HHmmss}"
+            };
+
+            if (dialog.ShowDialog() != true) return;
+
+            try
+            {
+                File.WriteAllText(dialog.FileName, logText, System.Text.Encoding.UTF8);
+                AppendDossierLog($"Log exportovan: {dialog.FileName}");
+                MessageBox.Show($"Log sacuvan:\n{dialog.FileName}", "Export", MessageBoxButton.OK, MessageBoxImage.Information);
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Greska pri exportu loga:\n{ex.Message}", "Greska", MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+        }
+
+        #endregion
+
         #region Helpers
 
         private readonly SemaphoreSlim _cacheLock = new(1, 1);
@@ -636,7 +748,7 @@ namespace Alfresco.DocStatusUpdater
                 await conn.OpenAsync(ct);
 
                 var result = await conn.QueryFirstOrDefaultAsync<string?>(
-                    "SELECT IdExpozitura FROM ZaposleniExpozitura WHERE IdZaposleni = @IdZaposleni",
+                    "SELECT IdEkspozitura FROM ZaposleniEkspozitura WHERE IdZaposleni = @IdZaposleni",
                     new { IdZaposleni = idZaposleni });
 
                 _memoryCache.Set(cacheKey, result, TimeSpan.FromHours(12));
@@ -695,6 +807,7 @@ namespace Alfresco.DocStatusUpdater
             {
                 BtnDossierLoad.IsEnabled = !busy;
                 BtnDossierUpdate.IsEnabled = !busy && _dossierItems.Any(x => !x.IsUpdated);
+                BtnDossierExport.IsEnabled = !busy && _dossierItems.Count > 0;
                 BtnDossierCancel.IsEnabled = busy;
 
                 if (status != null)
@@ -725,6 +838,9 @@ namespace Alfresco.DocStatusUpdater
         public int RowNumber { get; set; }
         public string DossierDestFolderId { get; set; } = "";
         public string DestinationFolderId { get; set; } = "";
+        public string DocCreator { get; set; } = "";
+        public string DocCreatorName { get; set; } = "";
+        public string IdExpozitura { get; set; } = "";
         public bool IsUpdated { get; set; }
         public string UpdateMessage { get; set; } = "";
     }
