@@ -34,6 +34,7 @@
                         <ColumnDefinition Width="*"/>
                         <ColumnDefinition Width="*"/>
                         <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="*"/>
                     </Grid.ColumnDefinitions>
 
                     <StackPanel Grid.Column="0" Margin="5">
@@ -52,11 +53,16 @@
                     </StackPanel>
 
                     <StackPanel Grid.Column="3" Margin="5">
-                        <TextBlock Text="Status PENDING:" FontWeight="SemiBold"/>
+                        <TextBlock Text="PENDING:" FontWeight="SemiBold"/>
                         <TextBlock x:Name="TxtPendingCount" Text="0" FontSize="22" Foreground="SlateGray"/>
                     </StackPanel>
 
                     <StackPanel Grid.Column="4" Margin="5">
+                        <TextBlock Text="Folder spreman:" FontWeight="SemiBold"/>
+                        <TextBlock x:Name="TxtFolderReadyCount" Text="0" FontSize="22" Foreground="MediumSeaGreen"/>
+                    </StackPanel>
+
+                    <StackPanel Grid.Column="5" Margin="5">
                         <TextBlock Text="Status:" FontWeight="SemiBold"/>
                         <TextBlock x:Name="TxtStatus" Text="Spremno" FontSize="14" Foreground="Black" TextWrapping="Wrap"/>
                     </StackPanel>
@@ -97,6 +103,22 @@
                             IsEnabled="False"/>
 
                     <Separator Margin="3"/>
+                    <TextBlock Text="— Faza 3: Kreiranje foldera —" FontSize="10" Foreground="Gray" Margin="3,0"/>
+                    <Button x:Name="BtnStartFaza3"
+                            Content="▶ Pokr. Kreiranje (Faza 3)"
+                            Click="BtnStartFaza3_Click"
+                            Height="34" Margin="3"
+                            Background="#8E44AD" Foreground="White" FontWeight="SemiBold"
+                            ToolTip="Kreira Alfresco foldere za sve FOLDER_PENDING_CREATION zapise"/>
+
+                    <Button x:Name="BtnStopFaza3"
+                            Content="⏹ Zaustavi Fazu 3"
+                            Click="BtnStopFaza3_Click"
+                            Height="28" Margin="3"
+                            Background="#E74C3C" Foreground="White"
+                            IsEnabled="False"/>
+
+                    <Separator Margin="3"/>
 
                     <Button x:Name="BtnRefreshStats"
                             Content="↻  Osvezi Statistiku"
@@ -123,6 +145,43 @@
                             Height="28" Margin="3"
                             Background="#C0392B" Foreground="White"
                             ToolTip="PAZI: Brise sve zapise iz PreviewDocStaging tabele"/>
+
+                    <Separator Margin="3"/>
+                    <TextBlock Text="— Faza 6: Transfer u DocStaging —" FontSize="10" Foreground="Gray" Margin="3,0"/>
+
+                    <Grid Margin="3">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto"/>
+                            <ColumnDefinition Width="*"/>
+                        </Grid.ColumnDefinitions>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                        </Grid.RowDefinitions>
+                        <TextBlock Grid.Row="0" Grid.Column="0" Text="Dosije:" VerticalAlignment="Center" Margin="0,0,5,2"/>
+                        <ComboBox x:Name="CmbTransferDossierType" Grid.Row="0" Grid.Column="1" Height="24" Margin="0,0,0,2">
+                            <ComboBoxItem Content="(sve)" IsSelected="True"/>
+                            <ComboBoxItem Content="PI"/>
+                            <ComboBoxItem Content="LE"/>
+                        </ComboBox>
+                        <TextBlock Grid.Row="1" Grid.Column="0" Text="Tip dok.:" VerticalAlignment="Center" Margin="0,0,5,0"/>
+                        <TextBox x:Name="TxtTransferDocumentType" Grid.Row="1" Grid.Column="1" Height="24"
+                                 ToolTip="Prazno = svi tipovi dokumenata"/>
+                    </Grid>
+
+                    <Button x:Name="BtnStartTransfer"
+                            Content="▶ Pokreni Transfer (Faza 6)"
+                            Click="BtnStartTransfer_Click"
+                            Height="34" Margin="3"
+                            Background="#16A085" Foreground="White" FontWeight="SemiBold"
+                            ToolTip="Prenosi zapise iz PreviewDocStaging u DocStaging"/>
+
+                    <Button x:Name="BtnStopTransfer"
+                            Content="⏹ Zaustavi Transfer"
+                            Click="BtnStopTransfer_Click"
+                            Height="28" Margin="3"
+                            Background="#E74C3C" Foreground="White"
+                            IsEnabled="False"/>
                 </StackPanel>
             </GroupBox>
         </Grid>

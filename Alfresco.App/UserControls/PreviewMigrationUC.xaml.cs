@@ -19,8 +19,12 @@ namespace Alfresco.App.UserControls
     {
         private readonly IPreviewLoadService _previewLoadService;
         private readonly IPreviewFolderPreparationService _folderPreparationService;
+        private readonly IPreviewFolderCreationService _folderCreationService;
+        private readonly IPreviewToStagingTransferService _transferService;
         private CancellationTokenSource? _cts;
         private CancellationTokenSource? _ctsFaza2;
+        private CancellationTokenSource? _ctsFaza3;
+        private CancellationTokenSource? _ctsTransfer;
 
         // Pagination state
         private int _currentPage = 1;
@@ -46,6 +50,8 @@ namespace Alfresco.App.UserControls
 
             _previewLoadService = App.AppHost.Services.GetRequiredService<IPreviewLoadService>();
             _folderPreparationService = App.AppHost.Services.GetRequiredService<IPreviewFolderPreparationService>();
+            _folderCreationService = App.AppHost.Services.GetRequiredService<IPreviewFolderCreationService>();
+            _transferService = App.AppHost.Services.GetRequiredService<IPreviewToStagingTransferService>();
 
             Loaded += PreviewMigrationUC_Loaded;
         }
@@ -179,6 +185,136 @@ namespace Alfresco.App.UserControls
             AppendLog("Zahtev za zaustavljanje Faze 2 primljen...");
         }
 
+        private async void BtnStartFaza3_Click(object sender, RoutedEventArgs e)
+        {
+            try
+            {
+                SetButtonsRunning(true);
+                ProgressBar.Value = 0;
+                UpdateStatus("Pokrenuta Faza 3: kreiranje foldera...");
+                AppendLog("=== Pokretanje Faze 3: Kreiranje Alfresco foldera ===");
+
+                _ctsFaza3 = new CancellationTokenSource();
+
+                void OnProgress(WorkerProgress p)
+                {
+                    Dispatcher.Invoke(() =>
+                    {
+                        UpdateStatus(p.Message ?? "U toku...");
+                        AppendLog(p.Message ?? "");
+                    });
+                }
+
+                var result = await Task.Run(
+                    () => _folderCreationService.RunAsync(_ctsFaza3.Token, OnProgress),
+                    _ctsFaza3.Token);
+
+                ProgressBar.Value = 100;
+                var msg = result ? "Faza 3 zavrsena uspesno." : "Faza 3 zavrsena sa upozorenjem.";
+                UpdateStatus(msg);
+                AppendLog($"=== {msg} ===");
+
+                await RefreshStatisticsAsync();
+                await LoadDataAsync();
+            }
+            catch (OperationCanceledException)
+            {
+                UpdateStatus("Faza 3 zaustavljena.");
+                AppendLog("=== Faza 3 zaustavljena od strane korisnika. ===");
+            }
+            catch (Exception ex)
+            {
+                UpdateStatus($"GRESKA Faza 3: {ex.Message}");
+                AppendLog($"GRESKA: {ex.Message}");
+                MessageBox.Show($"Greska u Fazi 3:\n{ex.Message}", "Greska", MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+            finally
+            {
+                SetButtonsRunning(false);
+                _ctsFaza3?.Dispose();
+                _ctsFaza3 = null;
+            }
+        }
+
+        private void BtnStopFaza3_Click(object sender, RoutedEventArgs e)
+        {
+            _ctsFaza3?.Cancel();
+            BtnStopFaza3.IsEnabled = false;
+            UpdateStatus("Zaustavljanje Faze 3...");
+            AppendLog("Zahtev za zaustavljanje Faze 3 primljen...");
+        }
+
+        private async void BtnStartTransfer_Click(object sender, RoutedEventArgs e)
+        {
+            try
+            {
+                SetButtonsRunning(true);
+                ProgressBar.Value = 0;
+                UpdateStatus("Pokrenuto: Transfer u DocStaging...");
+                AppendLog("=== Pokretanje Faze 6: Transfer PreviewDocStaging → DocStaging ===");
+
+                _ctsTransfer = new CancellationTokenSource();
+
+                var dossierType = CmbTransferDossierType.SelectedItem is ComboBoxItem ci &&
+                                  ci.Content?.ToString() != "(sve)"
+                    ? ci.Content?.ToString()
+                    : null;
+
+                var documentType = string.IsNullOrWhiteSpace(TxtTransferDocumentType.Text)
+                    ? null
+                    : TxtTransferDocumentType.Text.Trim();
+
+                void OnProgress(WorkerProgress p)
+                {
+                    Dispatcher.Invoke(() =>
+                    {
+                        UpdateStatus(p.Message ?? "U toku...");
+                        AppendLog($"Transfer: {p.ProcessedItems}  |  Greske: {p.FailedCount}  |  {p.Message}");
+
+                        if (p.TotalItems > 0)
+                            ProgressBar.Value = Math.Min(100, p.ProgressPercentage);
+                    });
+                }
+
+                var result = await Task.Run(
+                    () => _transferService.RunAsync(dossierType, documentType, _ctsTransfer.Token, OnProgress),
+                    _ctsTransfer.Token);
+
+                ProgressBar.Value = 100;
+                var msg = result ? "Transfer zavrsen uspesno." : "Transfer zavrsen sa upozorenjem.";
+                UpdateStatus(msg);
+                AppendLog($"=== {msg} ===");
+
+                await RefreshStatisticsAsync();
+                await LoadDataAsync();
+            }
+            catch (OperationCanceledException)
+            {
+                UpdateStatus("Transfer zaustavljen.");
+                AppendLog("=== Transfer zaustavljen od strane korisnika. ===");
+            }
+            catch (Exception ex)
+            {
+                UpdateStatus($"GRESKA Transfer: {ex.Message}");
+                AppendLog($"GRESKA: {ex.Message}");
+                MessageBox.Show($"Greska pri transferu:\n{ex.Message}", "Greska", MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+            finally
+            {
+                SetButtonsRunning(false);
+                _ctsTransfer?.Dispose();
+                _ctsTransfer = null;
+            }
+        }
+
+        private void BtnStopTransfer_Click(object sender, RoutedEventArgs e)
+        {
+            _ctsTransfer?.Cancel();
+            BtnStopTransfer.IsEnabled = false;
+            UpdateStatus("Zaustavljanje transfera...");
+            AppendLog("Zahtev za zaustavljanje transfera primljen...");
+        }
+
         private async void BtnRefreshStats_Click(object sender, RoutedEventArgs e)
         {
             await RefreshStatisticsAsync();
@@ -294,12 +430,15 @@ namespace Alfresco.App.UserControls
                 var piCount = await repo.GetCountByDossierTypeAsync("PI");
                 var leCount = await repo.GetCountByDossierTypeAsync("LE");
                 var pendingCount = await repo.GetCountByStatusAsync("PENDING");
+                var folderExistsCount = await repo.GetCountByStatusAsync("FOLDER_EXISTS");
+                var folderCreatedCount = await repo.GetCountByStatusAsync("FOLDER_CREATED");
                 var total = piCount + leCount;
 
                 TxtTotalCount.Text = total.ToString("N0");
                 TxtPiCount.Text = piCount.ToString("N0");
                 TxtLeCount.Text = leCount.ToString("N0");
                 TxtPendingCount.Text = pendingCount.ToString("N0");
+                TxtFolderReadyCount.Text = (folderExistsCount + folderCreatedCount).ToString("N0");
                 await unitOfWork.CommitAsync();
             }
             catch (Exception ex)
@@ -355,6 +494,10 @@ namespace Alfresco.App.UserControls
             BtnStopFaza1.IsEnabled = isRunning;
             BtnStartFaza2.IsEnabled = !isRunning;
             BtnStopFaza2.IsEnabled = isRunning;
+            BtnStartFaza3.IsEnabled = !isRunning;
+            BtnStopFaza3.IsEnabled = isRunning;
+            BtnStartTransfer.IsEnabled = !isRunning;
+            BtnStopTransfer.IsEnabled = isRunning;
             BtnResetCheckpoint.IsEnabled = !isRunning;
             BtnClearStaging.IsEnabled = !isRunning;
             BtnRefreshStats.IsEnabled = !isRunning;

@@ -237,6 +237,86 @@ namespace SqlServer.Infrastructure.Implementation
             await Conn.ExecuteAsync(cmd).ConfigureAwait(false);
         }
 
+        public async Task<IEnumerable<string>> GetDistinctFoldersForCreationAsync(int batchSize, CancellationToken ct = default)
+        {
+            const string sql = @"
+                WITH SelectedFolders AS (
+                    SELECT DISTINCT TOP (@BatchSize) DossierDestinationFolderName
+                    FROM PreviewDocStaging WITH (UPDLOCK, READPAST)
+                    WHERE Status = 'FOLDER_PENDING_CREATION'
+                      AND ISNULL(DossierDestinationFolderName, '') <> ''
+                )
+                UPDATE d
+                SET d.Status = 'IN_PROGRESS'
+                OUTPUT INSERTED.DossierDestinationFolderName
+                FROM PreviewDocStaging d
+                JOIN SelectedFolders s ON d.DossierDestinationFolderName = s.DossierDestinationFolderName;";
+
+            var dp = new DynamicParameters();
+            dp.Add("@BatchSize", batchSize);
+            var cmd = new CommandDefinition(sql, dp, Tx, commandTimeout: _commandTimeoutSeconds, cancellationToken: ct);
+            var result = await Conn.QueryAsync<string>(cmd).ConfigureAwait(false);
+            return result.Distinct();
+        }
+
+        public async Task<PreviewDocStaging?> GetFirstRecordByFolderNameAsync(string folderName, CancellationToken ct = default)
+        {
+            const string sql = @"
+                SELECT TOP 1 * FROM PreviewDocStaging
+                WHERE DossierDestinationFolderName = @FolderName";
+
+            var dp = new DynamicParameters();
+            dp.Add("@FolderName", folderName);
+            var cmd = new CommandDefinition(sql, dp, Tx, commandTimeout: _commandTimeoutSeconds, cancellationToken: ct);
+            return await Conn.QueryFirstOrDefaultAsync<PreviewDocStaging>(cmd).ConfigureAwait(false);
+        }
+
+        public async Task<IEnumerable<PreviewDocStaging>> GetForTransferAsync(
+            string? dossierType = null,
+            string? documentType = null,
+            CancellationToken ct = default)
+        {
+            var sql = @"
+                SELECT * FROM PreviewDocStaging
+                WHERE Status IN ('FOLDER_EXISTS', 'FOLDER_CREATED')";
+
+            var dp = new DynamicParameters();
+
+            if (!string.IsNullOrWhiteSpace(dossierType))
+            {
+                sql += " AND DossierType = @DossierType";
+                dp.Add("@DossierType", dossierType);
+            }
+
+            if (!string.IsNullOrWhiteSpace(documentType))
+            {
+                sql += " AND DocumentType = @DocumentType";
+                dp.Add("@DocumentType", documentType);
+            }
+
+            sql += " ORDER BY Id";
+
+            var cmd = new CommandDefinition(sql, dp, Tx, commandTimeout: _commandTimeoutSeconds, cancellationToken: ct);
+            return await Conn.QueryAsync<PreviewDocStaging>(cmd).ConfigureAwait(false);
+        }
+
+        public async Task UpdateTransferredBatchAsync(IEnumerable<long> ids, CancellationToken ct = default)
+        {
+            var idList = ids.ToList();
+            if (idList.Count == 0) return;
+
+            const string sql = @"
+                UPDATE PreviewDocStaging
+                SET Status = 'TRANSFERRED'
+                WHERE Id IN @Ids";
+
+            var dp = new DynamicParameters();
+            dp.Add("@Ids", idList);
+
+            var cmd = new CommandDefinition(sql, dp, Tx, commandTimeout: _commandTimeoutSeconds, cancellationToken: ct);
+            await Conn.ExecuteAsync(cmd).ConfigureAwait(false);
+        }
+
         public async Task DeleteAllAsync(CancellationToken ct = default)
         {
             const string sql = "DELETE FROM PreviewDocStaging";

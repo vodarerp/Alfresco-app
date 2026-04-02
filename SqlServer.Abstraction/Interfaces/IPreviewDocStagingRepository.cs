@@ -35,5 +35,21 @@ namespace SqlServer.Abstraction.Interfaces
 
         // Upisuje ClientApi* podatke za FOLDER_PENDING_CREATION zapise (po DossierDestinationFolderName)
         Task UpdateClientApiDataAsync(string dossierDestinationFolderName, Migration.Abstraction.Models.ClientData clientData, CancellationToken ct = default);
+
+        // Atomično uzima batch FOLDER_PENDING_CREATION foldera i postavlja ih na IN_PROGRESS
+        Task<IEnumerable<string>> GetDistinctFoldersForCreationAsync(int batchSize, CancellationToken ct = default);
+
+        // Vraca jedan reprezentativni zapis za dati folder name (sa ClientApi* podacima)
+        Task<PreviewDocStaging?> GetFirstRecordByFolderNameAsync(string folderName, CancellationToken ct = default);
+
+        // Dohvata zapise spremne za transfer u DocStaging (FOLDER_EXISTS ili FOLDER_CREATED),
+        // opcionalno filtrirane po DossierType i DocumentType
+        Task<IEnumerable<PreviewDocStaging>> GetForTransferAsync(
+            string? dossierType = null,
+            string? documentType = null,
+            CancellationToken ct = default);
+
+        // Postavlja Status = 'TRANSFERRED' za dati skup ID-eva
+        Task UpdateTransferredBatchAsync(IEnumerable<long> ids, CancellationToken ct = default);
     }
 }
