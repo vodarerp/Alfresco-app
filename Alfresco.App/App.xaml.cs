@@ -288,6 +288,7 @@ namespace Alfresco.App
                     services.AddSingleton<Migration.Abstraction.Interfaces.Wrappers.IPreviewFolderPreparationService, Migration.Infrastructure.Implementation.Services.PreviewFolderPreparationService>();
                     services.AddSingleton<Migration.Abstraction.Interfaces.Wrappers.IPreviewFolderCreationService, Migration.Infrastructure.Implementation.Services.PreviewFolderCreationService>();
                     services.AddSingleton<Migration.Abstraction.Interfaces.Wrappers.IPreviewToStagingTransferService, Migration.Infrastructure.Implementation.Services.PreviewToStagingTransferService>();
+                    services.AddSingleton<Migration.Abstraction.Interfaces.Wrappers.IPreviewExportService, Migration.Infrastructure.Implementation.Services.PreviewExportService>();
                     services.AddSingleton<IDocumentResolver, DocumentResolver>();
                     services.AddSingleton<IFolderDiscoveryService, FolderDiscoveryService>();                              
                     services.AddSingleton<IDocumentDiscoveryService, DocumentDiscoveryService>();                   

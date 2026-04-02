@@ -271,6 +271,32 @@ namespace SqlServer.Infrastructure.Implementation
             return await Conn.QueryFirstOrDefaultAsync<PreviewDocStaging>(cmd).ConfigureAwait(false);
         }
 
+        public async Task<IEnumerable<PreviewDocStaging>> GetForExportAsync(
+            string? dossierType = null,
+            string? documentType = null,
+            CancellationToken ct = default)
+        {
+            var sql = "SELECT * FROM PreviewDocStaging WHERE 1=1";
+            var dp = new DynamicParameters();
+
+            if (!string.IsNullOrWhiteSpace(dossierType))
+            {
+                sql += " AND DossierType = @DossierType";
+                dp.Add("@DossierType", dossierType);
+            }
+
+            if (!string.IsNullOrWhiteSpace(documentType))
+            {
+                sql += " AND DocumentType = @DocumentType";
+                dp.Add("@DocumentType", documentType);
+            }
+
+            sql += " ORDER BY DossierType, DossierDestinationFolderName, Id";
+
+            var cmd = new CommandDefinition(sql, dp, Tx, commandTimeout: _commandTimeoutSeconds, cancellationToken: ct);
+            return await Conn.QueryAsync<PreviewDocStaging>(cmd).ConfigureAwait(false);
+        }
+
         public async Task<IEnumerable<PreviewDocStaging>> GetForTransferAsync(
             string? dossierType = null,
             string? documentType = null,

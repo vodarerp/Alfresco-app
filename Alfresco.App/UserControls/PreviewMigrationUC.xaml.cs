@@ -10,8 +10,10 @@ using System.ComponentModel;
 using System.Runtime.CompilerServices;
 using System.Threading;
 using System.Threading.Tasks;
+using System.IO;
 using System.Windows;
 using System.Windows.Controls;
+using Microsoft.Win32;
 
 namespace Alfresco.App.UserControls
 {
@@ -21,6 +23,7 @@ namespace Alfresco.App.UserControls
         private readonly IPreviewFolderPreparationService _folderPreparationService;
         private readonly IPreviewFolderCreationService _folderCreationService;
         private readonly IPreviewToStagingTransferService _transferService;
+        private readonly IPreviewExportService _exportService;
         private CancellationTokenSource? _cts;
         private CancellationTokenSource? _ctsFaza2;
         private CancellationTokenSource? _ctsFaza3;
@@ -52,6 +55,7 @@ namespace Alfresco.App.UserControls
             _folderPreparationService = App.AppHost.Services.GetRequiredService<IPreviewFolderPreparationService>();
             _folderCreationService = App.AppHost.Services.GetRequiredService<IPreviewFolderCreationService>();
             _transferService = App.AppHost.Services.GetRequiredService<IPreviewToStagingTransferService>();
+            _exportService = App.AppHost.Services.GetRequiredService<IPreviewExportService>();
 
             Loaded += PreviewMigrationUC_Loaded;
         }
@@ -313,6 +317,53 @@ namespace Alfresco.App.UserControls
             BtnStopTransfer.IsEnabled = false;
             UpdateStatus("Zaustavljanje transfera...");
             AppendLog("Zahtev za zaustavljanje transfera primljen...");
+        }
+
+        private async void BtnExport_Click(object sender, RoutedEventArgs e)
+        {
+            var dlg = new SaveFileDialog
+            {
+                Title = "Sacuvaj eksport",
+                Filter = "Excel fajl (*.xlsx)|*.xlsx",
+                FileName = $"PreviewExport_{DateTime.Now:yyyyMMdd_HHmmss}.xlsx",
+                InitialDirectory = Environment.GetFolderPath(Environment.SpecialFolder.Desktop)
+            };
+
+            if (dlg.ShowDialog() != true) return;
+
+            var outputPath = dlg.FileName;
+
+            try
+            {
+                BtnExport.IsEnabled = false;
+                UpdateStatus("Eksport u toku...");
+                AppendLog($"=== Pokretanje eksporta u: {Path.GetFileName(outputPath)} ===");
+
+                var dossierType = CmbTransferDossierType.SelectedItem is ComboBoxItem ci &&
+                                  ci.Content?.ToString() != "(sve)"
+                    ? ci.Content?.ToString()
+                    : null;
+
+                var documentType = string.IsNullOrWhiteSpace(TxtTransferDocumentType.Text)
+                    ? null
+                    : TxtTransferDocumentType.Text.Trim();
+
+                await Task.Run(() => _exportService.ExportAsync(dossierType, documentType, outputPath));
+
+                UpdateStatus("Eksport zavrsen.");
+                AppendLog($"=== Eksport zavrsen: {outputPath} ===");
+                MessageBox.Show($"Eksport uspesno sacuvan:\n{outputPath}", "Eksport", MessageBoxButton.OK, MessageBoxImage.Information);
+            }
+            catch (Exception ex)
+            {
+                UpdateStatus($"GRESKA Eksport: {ex.Message}");
+                AppendLog($"GRESKA: {ex.Message}");
+                MessageBox.Show($"Greska pri eksportu:\n{ex.Message}", "Greska", MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+            finally
+            {
+                BtnExport.IsEnabled = true;
+            }
         }
 
         private async void BtnRefreshStats_Click(object sender, RoutedEventArgs e)

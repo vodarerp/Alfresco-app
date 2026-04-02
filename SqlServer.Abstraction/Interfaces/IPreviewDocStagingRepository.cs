@@ -51,5 +51,11 @@ namespace SqlServer.Abstraction.Interfaces
 
         // Postavlja Status = 'TRANSFERRED' za dati skup ID-eva
         Task UpdateTransferredBatchAsync(IEnumerable<long> ids, CancellationToken ct = default);
+
+        // Dohvata sve zapise za eksport (bez ograničenja statusa), opcionalno filtrirane
+        Task<IEnumerable<PreviewDocStaging>> GetForExportAsync(
+            string? dossierType = null,
+            string? documentType = null,
+            CancellationToken ct = default);
     }
 }

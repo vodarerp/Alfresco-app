@@ -182,6 +182,15 @@
                             Height="28" Margin="3"
                             Background="#E74C3C" Foreground="White"
                             IsEnabled="False"/>
+
+                    <Separator Margin="3"/>
+                    <TextBlock Text="— Faza 7: Eksport u Excel —" FontSize="10" Foreground="Gray" Margin="3,0"/>
+                    <Button x:Name="BtnExport"
+                            Content="📊 Eksportuj u .xlsx"
+                            Click="BtnExport_Click"
+                            Height="34" Margin="3"
+                            Background="#7D3C98" Foreground="White" FontWeight="SemiBold"
+                            ToolTip="Eksportuje PreviewDocStaging u .xlsx (2 sheet-a: PI i LE)"/>
                 </StackPanel>
             </GroupBox>
         </Grid>
