@@ -22,7 +22,9 @@ namespace SqlServer.Abstraction.Interfaces
         Task UpdateFolderDataAsync(string folderName, string? folderId, int isCreated, string status, CancellationToken ct = default);
 
         // Za UI DataGrid sa server-side paginacijom
-        Task<(IEnumerable<PreviewDocStaging> Items, int TotalCount)> GetPagedAsync(int pageNumber, int pageSize, CancellationToken ct = default);
+        Task<(IEnumerable<PreviewDocStaging> Items, int TotalCount)> GetPagedAsync(
+            int pageNumber, int pageSize,
+            CancellationToken ct = default);
 
         // Ukupan broj zapisa (za statistiku u UI)
         Task<long> GetTotalCountAsync(CancellationToken ct = default);
@@ -52,7 +54,7 @@ namespace SqlServer.Abstraction.Interfaces
         // Postavlja Status = 'TRANSFERRED' za dati skup ID-eva
         Task UpdateTransferredBatchAsync(IEnumerable<long> ids, CancellationToken ct = default);
 
-        // Dohvata sve zapise za eksport (bez ograničenja statusa), opcionalno filtrirane
+        // Dohvata zapise za eksport, opcionalno filtrirane po DossierType i DocumentType
         Task<IEnumerable<PreviewDocStaging>> GetForExportAsync(
             string? dossierType = null,
             string? documentType = null,

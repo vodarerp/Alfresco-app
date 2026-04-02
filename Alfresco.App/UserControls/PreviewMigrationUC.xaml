@@ -213,17 +213,18 @@
         </GroupBox>
 
         <!-- Data + Log tabs -->
-        <TabControl Grid.Row="3" Margin="0,5,0,0">
+        <TabControl Grid.Row="3" Margin="0,0,0,0">
 
             <!-- Preview Data Tab -->
             <TabItem Header="Preview Data">
                 <Grid>
                     <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
                         <RowDefinition Height="*"/>
                         <RowDefinition Height="Auto"/>
                     </Grid.RowDefinitions>
 
-                    <DataGrid x:Name="DgPreviewDocs" Grid.Row="0"
+                    <DataGrid x:Name="DgPreviewDocs" Grid.Row="1"
                               ItemsSource="{Binding PreviewDocs}"
                               AutoGenerateColumns="False"
                               IsReadOnly="True"
@@ -256,7 +257,7 @@
                     </DataGrid>
 
                     <!-- Pagination -->
-                    <Grid Grid.Row="1" Margin="0,5">
+                    <Grid Grid.Row="2" Margin="0,5">
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="Auto"/>
                             <ColumnDefinition Width="*"/>

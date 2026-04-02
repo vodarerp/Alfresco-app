@@ -350,23 +350,25 @@ namespace SqlServer.Infrastructure.Implementation
             await Conn.ExecuteAsync(cmd).ConfigureAwait(false);
         }
 
-        public async Task<(IEnumerable<PreviewDocStaging> Items, int TotalCount)> GetPagedAsync(int pageNumber, int pageSize, CancellationToken ct = default)
+        public async Task<(IEnumerable<PreviewDocStaging> Items, int TotalCount)> GetPagedAsync(
+            int pageNumber, int pageSize,
+            CancellationToken ct = default)
         {
             const string countSql = "SELECT COUNT(*) FROM PreviewDocStaging";
             var countCmd = new CommandDefinition(countSql, transaction: Tx, commandTimeout: _commandTimeoutSeconds, cancellationToken: ct);
             var totalCount = await Conn.ExecuteScalarAsync<int>(countCmd).ConfigureAwait(false);
 
-            const string sql = @"
+            var dp = new DynamicParameters();
+            dp.Add("@Offset", (pageNumber - 1) * pageSize);
+            dp.Add("@PageSize", pageSize);
+
+            const string dataSql = @"
                 SELECT * FROM PreviewDocStaging
                 ORDER BY Id
                 OFFSET @Offset ROWS
                 FETCH NEXT @PageSize ROWS ONLY";
 
-            var dp = new DynamicParameters();
-            dp.Add("@Offset", (pageNumber - 1) * pageSize);
-            dp.Add("@PageSize", pageSize);
-
-            var cmd = new CommandDefinition(sql, dp, Tx, commandTimeout: _commandTimeoutSeconds, cancellationToken: ct);
+            var cmd = new CommandDefinition(dataSql, dp, Tx, commandTimeout: _commandTimeoutSeconds, cancellationToken: ct);
             var items = await Conn.QueryAsync<PreviewDocStaging>(cmd).ConfigureAwait(false);
 
             return (items, totalCount);
