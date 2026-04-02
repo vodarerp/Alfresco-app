@@ -64,8 +64,9 @@
             </GroupBox>
 
             <!-- Actions -->
-            <GroupBox Grid.Column="1" Header="Akcije - Faza 1" Padding="10" MinWidth="200">
+            <GroupBox Grid.Column="1" Header="Akcije" Padding="10" MinWidth="220">
                 <StackPanel>
+                    <TextBlock Text="— Faza 1: Ucitavanje —" FontSize="10" Foreground="Gray" Margin="3,0"/>
                     <Button x:Name="BtnStartFaza1"
                             Content="▶ Pokr. Ucitavanje (Faza 1)"
                             Click="BtnStartFaza1_Click"
@@ -77,6 +78,22 @@
                             Click="BtnStopFaza1_Click"
                             Height="34" Margin="3"
                             Background="#E74C3C" Foreground="White" FontWeight="SemiBold"
+                            IsEnabled="False"/>
+
+                    <Separator Margin="3"/>
+                    <TextBlock Text="— Faza 2: Priprema foldera —" FontSize="10" Foreground="Gray" Margin="3,0"/>
+                    <Button x:Name="BtnStartFaza2"
+                            Content="▶ Pokr. Pripremu (Faza 2)"
+                            Click="BtnStartFaza2_Click"
+                            Height="34" Margin="3"
+                            Background="#2980B9" Foreground="White" FontWeight="SemiBold"
+                            ToolTip="Proverava da li destination folderi postoje u Alfresci, zove ClientAPI za nepostojece"/>
+
+                    <Button x:Name="BtnStopFaza2"
+                            Content="⏹ Zaustavi Fazu 2"
+                            Click="BtnStopFaza2_Click"
+                            Height="28" Margin="3"
+                            Background="#E74C3C" Foreground="White"
                             IsEnabled="False"/>
 
                     <Separator Margin="3"/>

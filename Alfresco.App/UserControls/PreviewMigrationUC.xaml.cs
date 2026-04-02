@@ -18,7 +18,9 @@ namespace Alfresco.App.UserControls
     public partial class PreviewMigrationUC : UserControl, INotifyPropertyChanged
     {
         private readonly IPreviewLoadService _previewLoadService;
+        private readonly IPreviewFolderPreparationService _folderPreparationService;
         private CancellationTokenSource? _cts;
+        private CancellationTokenSource? _ctsFaza2;
 
         // Pagination state
         private int _currentPage = 1;
@@ -43,6 +45,7 @@ namespace Alfresco.App.UserControls
             DataContext = this;
 
             _previewLoadService = App.AppHost.Services.GetRequiredService<IPreviewLoadService>();
+            _folderPreparationService = App.AppHost.Services.GetRequiredService<IPreviewFolderPreparationService>();
 
             Loaded += PreviewMigrationUC_Loaded;
         }
@@ -115,6 +118,65 @@ namespace Alfresco.App.UserControls
             BtnStopFaza1.IsEnabled = false;
             UpdateStatus("Zaustavljanje...");
             AppendLog("Zahtev za zaustavljanje primljen...");
+        }
+
+        private async void BtnStartFaza2_Click(object sender, RoutedEventArgs e)
+        {
+            try
+            {
+                SetButtonsRunning(true);
+                ProgressBar.Value = 0;
+                UpdateStatus("Pokrenuta Faza 2: provera foldera...");
+                AppendLog("=== Pokretanje Faze 2: Priprema destination foldera ===");
+
+                _ctsFaza2 = new CancellationTokenSource();
+
+                void OnProgress(WorkerProgress p)
+                {
+                    Dispatcher.Invoke(() =>
+                    {
+                        UpdateStatus(p.Message ?? "U toku...");
+                        AppendLog(p.Message ?? "");
+                    });
+                }
+
+                var result = await Task.Run(
+                    () => _folderPreparationService.RunAsync(_ctsFaza2.Token, OnProgress),
+                    _ctsFaza2.Token);
+
+                ProgressBar.Value = 100;
+                var msg = result ? "Faza 2 zavrsena uspesno." : "Faza 2 zavrsena sa upozorenjem.";
+                UpdateStatus(msg);
+                AppendLog($"=== {msg} ===");
+
+                await RefreshStatisticsAsync();
+                await LoadDataAsync();
+            }
+            catch (OperationCanceledException)
+            {
+                UpdateStatus("Faza 2 zaustavljena.");
+                AppendLog("=== Faza 2 zaustavljena od strane korisnika. ===");
+            }
+            catch (Exception ex)
+            {
+                UpdateStatus($"GRESKA Faza 2: {ex.Message}");
+                AppendLog($"GRESKA: {ex.Message}");
+                MessageBox.Show($"Greska u Fazi 2:\n{ex.Message}", "Greska", MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+            finally
+            {
+                SetButtonsRunning(false);
+                _ctsFaza2?.Dispose();
+                _ctsFaza2 = null;
+            }
+        }
+
+        private void BtnStopFaza2_Click(object sender, RoutedEventArgs e)
+        {
+            _ctsFaza2?.Cancel();
+            BtnStopFaza2.IsEnabled = false;
+            UpdateStatus("Zaustavljanje Faze 2...");
+            AppendLog("Zahtev za zaustavljanje Faze 2 primljen...");
         }
 
         private async void BtnRefreshStats_Click(object sender, RoutedEventArgs e)
@@ -291,6 +353,8 @@ namespace Alfresco.App.UserControls
         {
             BtnStartFaza1.IsEnabled = !isRunning;
             BtnStopFaza1.IsEnabled = isRunning;
+            BtnStartFaza2.IsEnabled = !isRunning;
+            BtnStopFaza2.IsEnabled = isRunning;
             BtnResetCheckpoint.IsEnabled = !isRunning;
             BtnClearStaging.IsEnabled = !isRunning;
             BtnRefreshStats.IsEnabled = !isRunning;

@@ -32,5 +32,8 @@ namespace SqlServer.Abstraction.Interfaces
 
         // Brisanje svih zapisa (za testiranje)
         Task DeleteAllAsync(CancellationToken ct = default);
+
+        // Upisuje ClientApi* podatke za FOLDER_PENDING_CREATION zapise (po DossierDestinationFolderName)
+        Task UpdateClientApiDataAsync(string dossierDestinationFolderName, Migration.Abstraction.Models.ClientData clientData, CancellationToken ct = default);
     }
 }

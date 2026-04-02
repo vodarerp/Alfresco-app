@@ -192,6 +192,51 @@ namespace SqlServer.Infrastructure.Implementation
             return await Conn.ExecuteScalarAsync<long>(cmd).ConfigureAwait(false);
         }
 
+        public async Task UpdateClientApiDataAsync(string dossierDestinationFolderName, Migration.Abstraction.Models.ClientData clientData, CancellationToken ct = default)
+        {
+            const string sql = @"
+                UPDATE PreviewDocStaging
+                SET ClientApiMbrJmbg        = @MbrJmbg,
+                    ClientApiClientName     = @ClientName,
+                    ClientApiClientType     = @ClientType,
+                    ClientApiClientSubtype  = @ClientSubtype,
+                    ClientApiResidency      = @Residency,
+                    ClientApiSegment        = @Segment,
+                    ClientApiStaff          = @Staff,
+                    ClientApiOpuUser        = @OpuUser,
+                    ClientApiOpuRealization = @OpuRealization,
+                    ClientApiBarclex        = @Barclex,
+                    ClientApiCollaborator   = @Collaborator,
+                    ClientApiBarCLEXName    = @BarCLEXName,
+                    ClientApiBarCLEXOpu     = @BarCLEXOpu,
+                    ClientApiBarCLEXGroupName = @BarCLEXGroupName,
+                    ClientApiBarCLEXGroupCode = @BarCLEXGroupCode,
+                    ClientApiBarCLEXCode    = @BarCLEXCode
+                WHERE DossierDestinationFolderName = @FolderName";
+
+            var dp = new DynamicParameters();
+            dp.Add("@FolderName", dossierDestinationFolderName);
+            dp.Add("@MbrJmbg", clientData.MbrJmbg);
+            dp.Add("@ClientName", clientData.ClientName);
+            dp.Add("@ClientType", clientData.ClientType);
+            dp.Add("@ClientSubtype", clientData.ClientSubtype);
+            dp.Add("@Residency", clientData.Residency);
+            dp.Add("@Segment", clientData.Segment);
+            dp.Add("@Staff", clientData.Staff);
+            dp.Add("@OpuUser", clientData.OpuUser);
+            dp.Add("@OpuRealization", clientData.OpuRealization);
+            dp.Add("@Barclex", clientData.Barclex);
+            dp.Add("@Collaborator", clientData.Collaborator);
+            dp.Add("@BarCLEXName", clientData.BarCLEXName);
+            dp.Add("@BarCLEXOpu", clientData.BarCLEXOpu);
+            dp.Add("@BarCLEXGroupName", clientData.BarCLEXGroupName);
+            dp.Add("@BarCLEXGroupCode", clientData.BarCLEXGroupCode);
+            dp.Add("@BarCLEXCode", clientData.BarCLEXCode);
+
+            var cmd = new CommandDefinition(sql, dp, Tx, commandTimeout: _commandTimeoutSeconds, cancellationToken: ct);
+            await Conn.ExecuteAsync(cmd).ConfigureAwait(false);
+        }
+
         public async Task DeleteAllAsync(CancellationToken ct = default)
         {
             const string sql = "DELETE FROM PreviewDocStaging";
