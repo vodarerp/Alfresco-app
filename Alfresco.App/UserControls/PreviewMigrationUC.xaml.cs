@@ -1,0 +1,320 @@
+using Alfresco.Contracts.Oracle.Models;
+using Alfresco.Contracts.SqlServer;
+using Microsoft.Extensions.DependencyInjection;
+using Migration.Abstraction.Interfaces.Wrappers;
+using Migration.Abstraction.Models;
+using SqlServer.Abstraction.Interfaces;
+using System;
+using System.Collections.ObjectModel;
+using System.ComponentModel;
+using System.Runtime.CompilerServices;
+using System.Threading;
+using System.Threading.Tasks;
+using System.Windows;
+using System.Windows.Controls;
+
+namespace Alfresco.App.UserControls
+{
+    public partial class PreviewMigrationUC : UserControl, INotifyPropertyChanged
+    {
+        private readonly IPreviewLoadService _previewLoadService;
+        private CancellationTokenSource? _cts;
+
+        // Pagination state
+        private int _currentPage = 1;
+        private int _pageSize = 25;
+        private int _totalPages = 1;
+        private int _totalRecords = 0;
+
+        private ObservableCollection<PreviewDocStaging> _previewDocs = new();
+        public ObservableCollection<PreviewDocStaging> PreviewDocs
+        {
+            get => _previewDocs;
+            set { _previewDocs = value; OnPropertyChanged(); }
+        }
+
+        public event PropertyChangedEventHandler? PropertyChanged;
+        protected void OnPropertyChanged([CallerMemberName] string? name = null)
+            => PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(name));
+
+        public PreviewMigrationUC()
+        {
+            InitializeComponent();
+            DataContext = this;
+
+            _previewLoadService = App.AppHost.Services.GetRequiredService<IPreviewLoadService>();
+
+            Loaded += PreviewMigrationUC_Loaded;
+        }
+
+        private async void PreviewMigrationUC_Loaded(object sender, RoutedEventArgs e)
+        {
+            await RefreshStatisticsAsync();
+            await LoadDataAsync();
+        }
+
+        #region Button Handlers
+
+        private async void BtnStartFaza1_Click(object sender, RoutedEventArgs e)
+        {
+            try
+            {
+                SetButtonsRunning(true);
+                ProgressBar.Value = 0;
+                UpdateStatus("Pokrenuto ucitavanje...");
+                AppendLog("=== Pokretanje Faze 1: Ucitavanje dokumenata iz Alfresca ===");
+
+                _cts = new CancellationTokenSource();
+
+                void OnProgress(WorkerProgress p)
+                {
+                    Dispatcher.Invoke(() =>
+                    {
+                        UpdateStatus(p.Message ?? "U toku...");
+                        AppendLog($"Ucitano: {p.ProcessedItems}  |  Greske: {p.FailedCount}  |  {p.Message}");
+
+                        if (p.TotalItems > 0)
+                            ProgressBar.Value = Math.Min(100, p.ProgressPercentage);
+                    });
+                }
+
+                var result = await Task.Run(
+                    () => _previewLoadService.RunLoopAsync(_cts.Token, OnProgress),
+                    _cts.Token);
+
+                ProgressBar.Value = 100;
+                var msg = result ? "Faza 1 zavrsena uspesno." : "Faza 1 zavrsena sa upozorenjem (nema konfiguriranih foldera?).";
+                UpdateStatus(msg);
+                AppendLog($"=== {msg} ===");
+
+                await RefreshStatisticsAsync();
+                await LoadDataAsync();
+            }
+            catch (OperationCanceledException)
+            {
+                UpdateStatus("Zaustavljeno.");
+                AppendLog("=== Ucitavanje zaustavljeno od strane korisnika. ===");
+            }
+            catch (Exception ex)
+            {
+                UpdateStatus($"GRESKA: {ex.Message}");
+                AppendLog($"GRESKA: {ex.Message}");
+                MessageBox.Show($"Greska pri ucitavanju:\n{ex.Message}", "Greska", MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+            finally
+            {
+                SetButtonsRunning(false);
+                _cts?.Dispose();
+                _cts = null;
+            }
+        }
+
+        private void BtnStopFaza1_Click(object sender, RoutedEventArgs e)
+        {
+            _cts?.Cancel();
+            BtnStopFaza1.IsEnabled = false;
+            UpdateStatus("Zaustavljanje...");
+            AppendLog("Zahtev za zaustavljanje primljen...");
+        }
+
+        private async void BtnRefreshStats_Click(object sender, RoutedEventArgs e)
+        {
+            await RefreshStatisticsAsync();
+        }
+
+        private async void BtnRefreshData_Click(object sender, RoutedEventArgs e)
+        {
+            _currentPage = 1;
+            await LoadDataAsync();
+        }
+
+        private async void BtnResetCheckpoint_Click(object sender, RoutedEventArgs e)
+        {
+            var confirm = MessageBox.Show(
+                "Ovo ce obrisati checkpoint - sledece pokretanje ce krenuti od pocetka.\nNastaviti?",
+                "Reset Checkpoint", MessageBoxButton.YesNo, MessageBoxImage.Warning);
+
+            if (confirm != MessageBoxResult.Yes) return;
+
+            try
+            {
+                await using var scope = App.AppHost.Services.CreateAsyncScope();
+                var repo = scope.ServiceProvider.GetRequiredService<IPreviewLoadCheckpointRepository>();
+                await repo.ResetAllAsync();
+                AppendLog("Checkpoint resetovan.");
+                MessageBox.Show("Checkpoint obrisan.", "OK", MessageBoxButton.OK, MessageBoxImage.Information);
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Greska pri resetovanju checkpointa:\n{ex.Message}", "Greska", MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+        }
+
+        private async void BtnClearStaging_Click(object sender, RoutedEventArgs e)
+        {
+            var confirm = MessageBox.Show(
+                "PAZI: Ovo ce obrisati SVE zapise iz PreviewDocStaging tabele!\nNastaviti?",
+                "Brisanje tabele", MessageBoxButton.YesNo, MessageBoxImage.Warning);
+
+            if (confirm != MessageBoxResult.Yes) return;
+
+            try
+            {
+                await using var scope = App.AppHost.Services.CreateAsyncScope();
+                var uow = scope.ServiceProvider.GetRequiredService<IUnitOfWork>();
+                var repo = scope.ServiceProvider.GetRequiredService<IPreviewDocStagingRepository>();
+
+                await uow.BeginAsync();
+                await repo.DeleteAllAsync();
+                await uow.CommitAsync();
+
+                AppendLog("PreviewDocStaging tabela ociscena.");
+                await RefreshStatisticsAsync();
+                await LoadDataAsync();
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Greska pri brisanju:\n{ex.Message}", "Greska", MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+        }
+
+        #endregion
+
+        #region Pagination
+
+        private async void CmbPageSize_SelectionChanged(object sender, SelectionChangedEventArgs e)
+        {
+            if (CmbPageSize.SelectedItem is ComboBoxItem item && int.TryParse(item.Content?.ToString(), out var size))
+            {
+                _pageSize = size;
+                _currentPage = 1;
+                await LoadDataAsync();
+            }
+        }
+
+        private async void BtnFirstPage_Click(object sender, RoutedEventArgs e)
+        {
+            _currentPage = 1;
+            await LoadDataAsync();
+        }
+
+        private async void BtnPrevPage_Click(object sender, RoutedEventArgs e)
+        {
+            if (_currentPage > 1) { _currentPage--; await LoadDataAsync(); }
+        }
+
+        private async void BtnNextPage_Click(object sender, RoutedEventArgs e)
+        {
+            if (_currentPage < _totalPages) { _currentPage++; await LoadDataAsync(); }
+        }
+
+        private async void BtnLastPage_Click(object sender, RoutedEventArgs e)
+        {
+            _currentPage = _totalPages;
+            await LoadDataAsync();
+        }
+
+        #endregion
+
+        #region Data Loading
+
+        private async Task RefreshStatisticsAsync()
+        {
+            await using var scope = App.AppHost.Services.CreateAsyncScope();
+            var repo = scope.ServiceProvider.GetRequiredService<IPreviewDocStagingRepository>();
+            var unitOfWork = scope.ServiceProvider.GetRequiredService<IUnitOfWork>();
+            try
+            {
+               
+
+               await  unitOfWork.BeginAsync();
+
+                var piCount = await repo.GetCountByDossierTypeAsync("PI");
+                var leCount = await repo.GetCountByDossierTypeAsync("LE");
+                var pendingCount = await repo.GetCountByStatusAsync("PENDING");
+                var total = piCount + leCount;
+
+                TxtTotalCount.Text = total.ToString("N0");
+                TxtPiCount.Text = piCount.ToString("N0");
+                TxtLeCount.Text = leCount.ToString("N0");
+                TxtPendingCount.Text = pendingCount.ToString("N0");
+                await unitOfWork.CommitAsync();
+            }
+            catch (Exception ex)
+            {
+                await unitOfWork.RollbackAsync();
+                AppendLog($"Greska pri ucitavanju statistike: {ex.Message}");
+            }
+        }
+
+        private async Task LoadDataAsync()
+        {
+            await using var scope = App.AppHost.Services.CreateAsyncScope();
+            var repo = scope.ServiceProvider.GetRequiredService<IPreviewDocStagingRepository>();
+            var unitOfWork = scope.ServiceProvider.GetRequiredService<IUnitOfWork>();
+            try
+            {
+
+                await unitOfWork.BeginAsync();
+
+                var (items, totalCount) = await repo.GetPagedAsync(_currentPage, _pageSize);
+
+                _totalRecords = totalCount;
+                _totalPages = Math.Max(1, (totalCount + _pageSize - 1) / _pageSize);
+                if (_currentPage > _totalPages) _currentPage = _totalPages;
+
+                PreviewDocs = new ObservableCollection<PreviewDocStaging>(items);
+
+                TxtTotalRecords.Text = totalCount.ToString("N0");
+                TxtDisplayedRecords.Text = PreviewDocs.Count.ToString("N0");
+                TxtCurrentPage.Text = _currentPage.ToString();
+                TxtTotalPages.Text = _totalPages.ToString();
+
+                BtnFirstPage.IsEnabled = _currentPage > 1;
+                BtnPrevPage.IsEnabled = _currentPage > 1;
+                BtnNextPage.IsEnabled = _currentPage < _totalPages;
+                BtnLastPage.IsEnabled = _currentPage < _totalPages;
+            }
+            catch (Exception ex)
+            {
+                await unitOfWork.RollbackAsync();
+
+                AppendLog($"Greska pri ucitavanju podataka: {ex.Message}");
+            }
+        }
+
+        #endregion
+
+        #region Helpers
+
+        private void SetButtonsRunning(bool isRunning)
+        {
+            BtnStartFaza1.IsEnabled = !isRunning;
+            BtnStopFaza1.IsEnabled = isRunning;
+            BtnResetCheckpoint.IsEnabled = !isRunning;
+            BtnClearStaging.IsEnabled = !isRunning;
+            BtnRefreshStats.IsEnabled = !isRunning;
+            BtnRefreshData.IsEnabled = !isRunning;
+        }
+
+        private void UpdateStatus(string status)
+        {
+            Dispatcher.Invoke(() =>
+            {
+                TxtStatus.Text = status;
+                TxtProgressDetail.Text = $"[{DateTime.Now:HH:mm:ss}] {status}";
+            });
+        }
+
+        private void AppendLog(string message)
+        {
+            Dispatcher.Invoke(() =>
+            {
+                TxtLog.AppendText($"[{DateTime.Now:HH:mm:ss}] {message}\n");
+                TxtLog.ScrollToEnd();
+            });
+        }
+
+        #endregion
+    }
+}

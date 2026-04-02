@@ -87,6 +87,11 @@
                 <local:KdpProcessingUC/>
             </TabItem>
 
+            <!-- Preview Migration Tab -->
+            <TabItem Header="Preview Migration" Visibility="{Binding IsPreviewMigrationTabVisible, Converter={StaticResource BooleanToVisibilityConverter}}">
+                <local:PreviewMigrationUC/>
+            </TabItem>
+
             <TabItem x:Name="LiveLoggerTab">
                 <TabItem.Header>
                     <Grid>

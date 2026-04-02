@@ -255,6 +255,8 @@ namespace Alfresco.App
                         });                    
 
                     services.AddScoped<SqlServer.Abstraction.Interfaces.IDocStagingRepository, SqlServer.Infrastructure.Implementation.DocStagingRepository>();
+                    services.AddScoped<SqlServer.Abstraction.Interfaces.IPreviewDocStagingRepository, SqlServer.Infrastructure.Implementation.PreviewDocStagingRepository>();
+                    services.AddScoped<SqlServer.Abstraction.Interfaces.IPreviewLoadCheckpointRepository, SqlServer.Infrastructure.Implementation.PreviewLoadCheckpointRepository>();
                     services.AddScoped<SqlServer.Abstraction.Interfaces.IFolderStagingRepository, SqlServer.Infrastructure.Implementation.FolderStagingRepository>();
                     services.AddScoped<SqlServer.Abstraction.Interfaces.IMigrationCheckpointRepository, SqlServer.Infrastructure.Implementation.MigrationCheckpointRepository>();
                     services.AddScoped<SqlServer.Abstraction.Interfaces.IPhaseCheckpointRepository, SqlServer.Infrastructure.Implementation.PhaseCheckpointRepository>();
@@ -281,6 +283,8 @@ namespace Alfresco.App
                     services.AddTransient<IMoveReader, MoveReader>();
                     services.AddTransient<IMoveExecutor, MoveExecutor>();
 
+                    services.AddSingleton<Migration.Abstraction.Interfaces.IClientApiEnricher, Migration.Infrastructure.Implementation.ClientApiEnricher>();
+                    services.AddSingleton<Migration.Abstraction.Interfaces.Wrappers.IPreviewLoadService, Migration.Infrastructure.Implementation.Services.PreviewLoadService>();
                     services.AddSingleton<IDocumentResolver, DocumentResolver>();
                     services.AddSingleton<IFolderDiscoveryService, FolderDiscoveryService>();                              
                     services.AddSingleton<IDocumentDiscoveryService, DocumentDiscoveryService>();                   

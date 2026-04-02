@@ -62,15 +62,19 @@ namespace SqlServer.Infrastructure.Implementation
 
             return (TKey)Convert.ChangeType(outVal, typeof(TKey));
         }
+              
 
         public async Task<int> InsertManyAsync(IEnumerable<T> entities, CancellationToken ct = default)
         {
             var listEntities = entities.ToList();
             if (listEntities.Count == 0) return 0;
 
+            // Uzimamo kolone, ali preskaèemo Identity (npr. Id)
             var columns = SqlServerHelpers<T>.TableProps.Where(o => !o.IsIdentity).ToArray();
             var colNames = string.Join(", ", columns.Select(c => c.Col));
-            var paramNames = string.Join(", ", columns.Select(c => $"@{c.Col}"));
+
+            // VAŽNO: Imena parametara moraju odgovarati imenima property-ja u C# klasi!
+            var paramNames = string.Join(", ", columns.Select(c => $"@{c.Prop.Name}"));
 
             string sql = $"INSERT INTO {TableName} ({colNames}) VALUES ({paramNames})";
 
@@ -81,31 +85,65 @@ namespace SqlServer.Infrastructure.Implementation
             {
                 ct.ThrowIfCancellationRequested();
 
+                
                 var batch = listEntities.Skip(offset).Take(batchSize).ToList();
 
-                // Use parameterized batch insert for SQL Server
-                var batchParameters = new List<DynamicParameters>();
-                foreach (var entity in batch)
-                {
-                    var dp = new DynamicParameters();
-                    foreach (var col in columns)
-                    {
-                        var val = col.Prop.GetValue(entity);
-                        dp.Add($"@{col.Col}", val);
-                    }
-                    batchParameters.Add(dp);
-                }
+                
+                var cmd = new CommandDefinition(sql, batch, Tx, commandTimeout: _commandTimeoutSeconds, cancellationToken: ct);
 
-                // Execute batch
-                foreach (var param in batchParameters)
-                {
-                    var cmd = new CommandDefinition(sql, param, Tx, commandTimeout: _commandTimeoutSeconds, cancellationToken: ct);
-                    totalInserted += await Conn.ExecuteAsync(cmd).ConfigureAwait(false);
-                }
+                // Vraæa broj pogoðenih redova. Nema potrebe za petljom!
+                var ins = await Conn.ExecuteAsync(cmd).ConfigureAwait(false);
+                totalInserted += ins;
             }
 
             return totalInserted;
         }
+
+        #region Old InsertManyAsync (commented)
+        //public async Task<int> InsertManyAsync(IEnumerable<T> entities, CancellationToken ct = default)
+        //{
+        //    var listEntities = entities.ToList();
+        //    if (listEntities.Count == 0) return 0;
+
+        //    var columns = SqlServerHelpers<T>.TableProps.Where(o => !o.IsIdentity).ToArray();
+        //    var colNames = string.Join(", ", columns.Select(c => c.Col));
+        //    var paramNames = string.Join(", ", columns.Select(c => $"@{c.Col}"));
+
+        //    string sql = $"INSERT INTO {TableName} ({colNames}) VALUES ({paramNames})";
+
+        //    var batchSize = 1000;
+        //    int totalInserted = 0;
+
+        //    for (int offset = 0; offset < listEntities.Count; offset += batchSize)
+        //    {
+        //        ct.ThrowIfCancellationRequested();
+
+        //        var batch = listEntities.Skip(offset).Take(batchSize).ToList();
+
+        //        // Use parameterized batch insert for SQL Server
+        //        var batchParameters = new List<DynamicParameters>();
+        //        foreach (var entity in batch)
+        //        {
+        //            var dp = new DynamicParameters();
+        //            foreach (var col in columns)
+        //            {
+        //                var val = col.Prop.GetValue(entity);
+        //                dp.Add($"@{col.Col}", val);
+        //            }
+        //            batchParameters.Add(dp);
+        //        }
+
+        //        // Execute batch
+        //        foreach (var param in batchParameters)
+        //        {
+        //            var cmd = new CommandDefinition(sql, param, Tx, commandTimeout: _commandTimeoutSeconds, cancellationToken: ct);
+        //            totalInserted += await Conn.ExecuteAsync(cmd).ConfigureAwait(false);
+        //        }
+        //    }
+
+        //    return totalInserted;
+        //} 
+        #endregion
 
         public async Task DeleteAsync(long id, CancellationToken cancellationToken = default)
         {

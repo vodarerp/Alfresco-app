@@ -55,6 +55,22 @@ namespace Alfresco.App.UserControls
         }
         #endregion
 
+        #region -IsPreviewMigrationTabVisible- property
+        private bool _IsPreviewMigrationTabVisible = false;
+        public bool IsPreviewMigrationTabVisible
+        {
+            get { return _IsPreviewMigrationTabVisible; }
+            set
+            {
+                if (_IsPreviewMigrationTabVisible != value)
+                {
+                    _IsPreviewMigrationTabVisible = value;
+                    NotifyPropertyChanged();
+                }
+            }
+        }
+        #endregion
+
         private readonly IAlfrescoApi _alfrescoService;
         private readonly IAlfrescoWriteApi _alfrescoWriteService;
         private readonly IAlfrescoReadApi _alfrescoReadService;
@@ -135,6 +151,10 @@ namespace Alfresco.App.UserControls
             // Load KDP Processing tab visibility setting
             var configuration = App.AppHost.Services.GetRequiredService<IConfiguration>();
             IsKdpProcessingTabVisible = configuration.GetValue<bool>("EnableKdpProcessingTab", false);
+
+            // Load Preview Migration tab visibility from MigrationOptions
+            var migrationOptions = App.AppHost.Services.GetRequiredService<Microsoft.Extensions.Options.IOptions<Alfresco.Contracts.Options.MigrationOptions>>().Value;
+            IsPreviewMigrationTabVisible = migrationOptions.PreviewTypeMigration;
 
             // Add LogViewer programmatically to avoid XAML binding thread issues
             // This ensures LogViewer is created and bound on the same UI thread

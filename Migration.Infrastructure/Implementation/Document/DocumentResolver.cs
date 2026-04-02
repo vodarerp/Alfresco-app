@@ -25,16 +25,16 @@ namespace Migration.Infrastructure.Implementation.Document
     {
         private readonly IAlfrescoReadApi _read;
         private readonly IAlfrescoWriteApi _write;
-        private readonly IClientApi _clientApi;
         private readonly ICurrentUserService _currentUserService;
         private readonly ILogger _fileLogger;
         private readonly ILogger _dbLogger;
         private readonly FolderNodeTypeMappingConfig _nodeTypeMapping;
+        private readonly IClientApiEnricher _clientApiEnricher;
 
 
         private readonly ConcurrentDictionary<string, (string FolderId, bool IsCreated)> _folderCache = new();
         private readonly ConcurrentDictionary<string, (Entry Folder, bool IsCreated)> _folderCache_New = new();
-       
+
         private readonly ConcurrentDictionary<string, string> _clientApiErrorCache = new();
 
 
@@ -43,14 +43,14 @@ namespace Migration.Infrastructure.Implementation.Document
         public DocumentResolver(
             IAlfrescoReadApi read,
             IAlfrescoWriteApi write,
-            IClientApi clientApi,
+            IClientApiEnricher clientApiEnricher,
             ICurrentUserService currentUserService,
             IServiceProvider serviceProvider,
             IOptions<FolderNodeTypeMappingConfig> nodeTypeMapping)
         {
             _read = read;
             _write = write;
-            _clientApi = clientApi ?? throw new ArgumentNullException(nameof(clientApi));
+            _clientApiEnricher = clientApiEnricher ?? throw new ArgumentNullException(nameof(clientApiEnricher));
             _currentUserService = currentUserService ?? throw new ArgumentNullException(nameof(currentUserService));
             var loggerFactory = serviceProvider.GetRequiredService<ILoggerFactory>();
             _fileLogger = loggerFactory.CreateLogger("FileLogger");
@@ -130,8 +130,8 @@ namespace Migration.Infrastructure.Implementation.Document
                 _fileLogger.LogInformation("ResolveAsync_v1: Folder '{FolderName}' doesn't exist. Calling ClientAPI to enrich properties before creation...",
                     newFolderName);
 
-                var clientData = await CallClientApiForFolderAsync(newFolderName, ct).ConfigureAwait(false);
-                var clientProps = BuildPropertiesClientData(clientData, newFolderName);
+                var clientData = await _clientApiEnricher.EnrichFromFolderNameAsync(newFolderName, ct).ConfigureAwait(false);
+                var clientProps = _clientApiEnricher.BuildFolderProperties(clientData, newFolderName);
                 
                 if (properties == null)
                 {
@@ -289,11 +289,11 @@ namespace Migration.Infrastructure.Implementation.Document
                 _fileLogger.LogInformation("ResolveAsync: STEP 5 - Folder '{FolderName}' doesn't exist in Alfresco, calling ClientAPI to enrich properties...",
                     newFolderName);
 
-                var clientDataProps = await CallClientApiForFolderAsync(newFolderName, ct).ConfigureAwait(false);
+                var clientDataProps = await _clientApiEnricher.EnrichFromFolderNameAsync(newFolderName, ct).ConfigureAwait(false);
 
                 _fileLogger.LogInformation("ResolveAsync: ClientAPI call completed, building properties from ClientData");
 
-                var cliProps = BuildPropertiesClientData(clientDataProps, newFolderName);
+                var cliProps = _clientApiEnricher.BuildFolderProperties(clientDataProps, newFolderName);
 
                 _fileLogger.LogInformation("ResolveAsync: Built {Count} properties from ClientData, merging with existing properties...", cliProps.Count);
 
@@ -407,120 +407,6 @@ namespace Migration.Infrastructure.Implementation.Document
                 folderLock.Release();
                 _fileLogger.LogInformation("ResolveAsync: Lock released for '{CacheKey}'", cacheKey);
             }
-        }
-
-        
-        private async Task<ClientData> CallClientApiForFolderAsync(string folderName, CancellationToken ct)
-        {
-            _fileLogger.LogInformation("CallClientApiForFolderAsync: Starting - FolderName: '{FolderName}'", folderName);
-
-             string DetermineResidency(string? res)
-             {
-                return res?.ToUpperInvariant() switch
-                {
-                        string s when s.StartsWith("R") => "REZIDENT",
-                        string s when s.StartsWith("N") => "NEREZIDENT",
-                        _ => string.Empty
-                };
-             }
-
-        ClientData toRet = new();
-            try
-            {
-                // Extract CoreID from folder name (e.g., "PI-102206" → "102206")
-                _fileLogger.LogInformation("CallClientApiForFolderAsync: Extracting CoreID from folder name '{FolderName}'...", folderName);
-                var coreId = DossierIdFormatter.ExtractCoreId(folderName);
-
-                if (string.IsNullOrWhiteSpace(coreId))
-                {
-                    _fileLogger.LogWarning(
-                        "CallClientApiForFolderAsync: Could not extract CoreID from folder name '{FolderName}', skipping ClientAPI call",
-                        folderName);
-                    return toRet;
-                }
-
-                _fileLogger.LogInformation("CallClientApiForFolderAsync: Extracted CoreID '{CoreId}' from folder '{FolderName}', calling ClientAPI GetClientDataAsync...",
-                    coreId, folderName);
-
-                // Call ClientAPI to retrieve client data
-                toRet = await _clientApi.GetClientDataAsync(coreId, ct).ConfigureAwait(false);
-
-                _fileLogger.LogInformation("CallClientApiForFolderAsync: GetClientDataAsync completed for CoreID '{CoreId}', calling GetClientDetailAsync...", coreId);
-
-                var resCliDeteail = await _clientApi.GetClientDetailAsync(coreId, ct).ConfigureAwait(false);
-
-                _fileLogger.LogInformation("CallClientApiForFolderAsync: GetClientDetailAsync completed for CoreID '{CoreId}'", coreId);
-
-                if (resCliDeteail != null)
-                {
-                    if (toRet == null) toRet = new();
-
-                    toRet.Residency = DetermineResidency(resCliDeteail.ClientGeneral.ResidentIndicator ?? "");
-                    toRet.ClientName = resCliDeteail.Name ?? "";
-                    toRet.MbrJmbg = resCliDeteail.ClientGeneral.ClientID ?? "";
-
-                    // Propagate error from GetClientDetail if present
-                    if (resCliDeteail.HasError && !toRet.HasError)
-                    {
-                        toRet.HasError = true;
-                        toRet.ErrorMessage = resCliDeteail.ErrorMessage;
-                    }
-
-                    _fileLogger.LogInformation(
-                        "CallClientApiForFolderAsync: Enriched ClientData from ClientDetail for CoreID '{CoreId}' - Residency: '{Residency}', ClientName: '{ClientName}', MbrJmbg: '{MbrJmbg}'",
-                        coreId, toRet.Residency, toRet.ClientName, toRet.MbrJmbg);
-                }
-
-                // Cache ClientAPI error if present (for later use in DocStaging.ErrorMsg update)
-                if (toRet != null && toRet.HasError && !string.IsNullOrEmpty(toRet.ErrorMessage))
-                {
-                    var errorMsg = $"ClientAPI nije vratio podatke za CoreId: {coreId}. {toRet.ErrorMessage}";
-                    var added = _clientApiErrorCache.TryAdd(folderName, errorMsg);
-
-                    _fileLogger.LogWarning(
-                        "CallClientApiForFolderAsync: ClientAPI error cached for folder '{FolderName}', CoreId: {CoreId}. CacheKey: '{CacheKey}', Added: {Added}, Error: {Error}",
-                        folderName, coreId, folderName, added, errorMsg);
-                    _dbLogger.LogWarning(
-                        "ClientAPI nije vratio podatke za CoreId: {CoreId}, folder: {FolderName}. Error: {Error}",
-                        coreId, folderName, toRet.ErrorMessage);
-                }
-                else
-                {
-                    _fileLogger.LogDebug(
-                        "CallClientApiForFolderAsync: No ClientAPI error to cache for folder '{FolderName}'. HasError: {HasError}, ErrorMessage: '{ErrorMessage}'",
-                        folderName, toRet?.HasError ?? false, toRet?.ErrorMessage ?? "null");
-                }
-               
-            }
-            catch (ClientApiTimeoutException timeoutEx)
-            {
-                _fileLogger.LogError("DocumentResolver stopped - Client API Timeout: {Message}", timeoutEx.Message);
-                _dbLogger.LogError(timeoutEx, "DocumentResolver stopped - Client API Timeout for folder '{FolderName}'", folderName);
-                throw; // Re-throw to stop migration
-            }
-            catch (ClientApiRetryExhaustedException retryEx)
-            {
-                _fileLogger.LogError("DocumentResolver stopped - Client API Retry Exhausted: {Message}", retryEx.Message);
-                _dbLogger.LogError(retryEx, "DocumentResolver stopped - Client API Retry Exhausted for folder '{FolderName}'", folderName);
-                throw; // Re-throw to stop migration
-            }
-            catch (ClientApiException clientEx)
-            {
-                _fileLogger.LogError("DocumentResolver stopped - Client API Error: {Message}", clientEx.Message);
-                _dbLogger.LogError(clientEx, "DocumentResolver stopped - Client API Error for folder '{FolderName}'", folderName);
-                throw; // Re-throw to stop migration
-            }
-            catch (Exception ex)
-            {
-                // Log error but don't throw - Other unexpected errors should not block folder creation
-                _fileLogger.LogWarning("Unexpected error calling ClientAPI for folder '{FolderName}'. Continuing with folder creation. Error: {Error}",
-                    folderName, ex.Message);
-                _dbLogger.LogError(ex,
-                    "Unexpected error calling ClientAPI for folder '{FolderName}'",
-                    folderName);
-            }
-
-            return toRet;
         }
 
         public async Task<(Entry Folder, bool IsCreated)> ResolveWithStatusAsync(string destinationRootId, string newFolderName, Dictionary<string, object>? properties, UniqueFolderInfo? folderInfo, CancellationToken ct)
@@ -685,53 +571,6 @@ namespace Migration.Infrastructure.Implementation.Document
             return "";
         }
 
-        private Dictionary<string, object> BuildPropertiesClientData(ClientData clientData, string folderName)
-        {
-            _fileLogger.LogInformation("BuildPropertiesClientData: Starting for folder '{FolderName}'", folderName);
-
-            Dictionary<string,object> properties = new Dictionary<string,object>();
-
-            // Standard ECM properties for all dossiers
-            properties.Add("ecm:bnkStatus", "ACTIVE");
-            properties.Add("ecm:typeId", "dosije");
-            if (folderName.StartsWith("DE"))
-                properties.Add("ecm:bnkSource", "DUT");
-            else 
-                properties.Add("ecm:bnkSource", "Heimdall");
-
-            _fileLogger.LogInformation("BuildPropertiesClientData: Added standard ECM properties (bnkStatus, typeId, bnkSource)");
-
-            // ClientAPI enriched properties
-            properties.Add("ecm:bnkMTBR", clientData.MbrJmbg ?? string.Empty);
-            properties.Add("ecm:bnkClientName", clientData.ClientName ?? string.Empty);
-            properties.Add("ecm:bnkResidence", clientData.Residency ?? string.Empty);
-            properties.Add("ecm:bnkClientType", clientData.Segment ?? string.Empty);
-            properties.Add("ecm:bnkClientSubtype", clientData.ClientSubtype ?? string.Empty);
-            properties.Add("ecm:bnkOfficeId", clientData.BarCLEXOpu ?? string.Empty);
-
-            bool staf = clientData.Staff?.ToLowerInvariant() switch
-            {
-                "n" => false,
-                null => false,
-                "false" => false,
-                "0" => false,
-                _ => true
-            };
-
-            var barClex = $"{clientData.BarCLEXGroupCode ?? string.Empty} {clientData.BarCLEXGroupName ?? string.Empty}";
-            var contri = $"{clientData.BarCLEXCode ?? string.Empty} {clientData.BarCLEXName ?? string.Empty}";
-            properties.Add("ecm:bnkStaff", staf);
-            properties.Add("ecm:bnkBarclex", barClex.Trim());
-            properties.Add("ecm:bnkContributor",contri.Trim());
-
-            _fileLogger.LogInformation("BuildPropertiesClientData: Built {Count} properties from ClientData", properties.Count);
-            _fileLogger.LogInformation("BuildPropertiesClientData: Properties built:");
-            
-
-            return properties;
-        }
-
-       
         private string MapDossierTypeToString(int? targetDossierType)
         {
             return targetDossierType switch

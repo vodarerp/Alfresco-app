@@ -1083,9 +1083,7 @@ namespace Migration.Infrastructure.Implementation.Services
             }
         }
 
-        /// <summary>
-        /// Finds DOSSIER-{type} subfolders in the root discovery folder
-        /// </summary>
+       
         private async Task<Dictionary<string, string>> FindDossierSubfoldersAsync(CancellationToken ct)
         {
             var rootId = _options.Value.RootDiscoveryFolderId;
@@ -1156,9 +1154,7 @@ namespace Migration.Infrastructure.Implementation.Services
             return result;
         }
 
-        /// <summary>
-        /// Searches documents by ecm:docDesc within a DOSSIER folder
-        /// </summary>
+       
         private async Task<(List<ListEntry> Documents, bool HasMore)> SearchDocumentsByDescriptionAsync(
             string ancestorId,
             List<string> docDescriptions,
@@ -1200,9 +1196,7 @@ namespace Migration.Infrastructure.Implementation.Services
             return (documents, hasMore);
         }
 
-        /// <summary>
-        /// Builds AFTS query for searching documents by ecm:docDesc
-        /// </summary>
+        
         private string BuildDocumentSearchQuery(string ancestorId, List<string> docDescriptions)
         {
             // Build: (=ecm\:docDesc:"Personal Notice" OR =ecm\:docDesc:"KYC Questionnaire")
@@ -1241,11 +1235,7 @@ namespace Migration.Infrastructure.Implementation.Services
             return query;
         }
 
-        /// <summary>
-        /// Overload za grupisanu selekciju — generiše mešani exact + wildcard AFTS query.
-        /// Exact: =ecm\:docDesc:"NAZIV" (term equality, bez analize)
-        /// Wildcard: ecm\:docDesc:"BASE *" (phrase search, podržava wildcard)
-        /// </summary>
+        
         private string BuildDocumentSearchQuery(string ancestorId, DocumentSelectionResult selection)
         {
             var conditions = new List<string>();
@@ -1302,9 +1292,7 @@ namespace Migration.Infrastructure.Implementation.Services
                 groupPrefixes.Any(prefix => desc.StartsWith(prefix, StringComparison.OrdinalIgnoreCase));
         }
 
-        /// <summary>
-        /// Extracts unique parent folders from a batch of documents
-        /// </summary>
+      
         private Dictionary<string, FolderStaging> ExtractUniqueFolders(List<ListEntry> documents, string dossierType)
         {
             var uniqueFolders = new Dictionary<string, FolderStaging>();
@@ -1358,9 +1346,7 @@ namespace Migration.Infrastructure.Implementation.Services
             return uniqueFolders;
         }
 
-        /// <summary>
-        /// Gets the parent folder ID from document path (last element before document)
-        /// </summary>
+        
         private string? GetParentFolderIdFromPath(Entry entry)
         {
             if (entry.Path?.Elements == null || entry.Path.Elements.Count == 0)
@@ -1371,9 +1357,7 @@ namespace Migration.Infrastructure.Implementation.Services
             return parentElement?.Id;
         }
 
-        /// <summary>
-        /// Gets the parent folder name from document path
-        /// </summary>
+        
         private string? GetParentFolderNameFromPath(Entry entry)
         {
             if (entry.Path?.Elements == null || entry.Path.Elements.Count == 0)
@@ -1383,9 +1367,6 @@ namespace Migration.Infrastructure.Implementation.Services
             return parentElement?.Name;
         }
 
-        /// <summary>
-        /// Determines client type from dossier type
-        /// </summary>
         private string? DetermineClientTypeFromDossierType(string dossierType)
         {
             return dossierType?.ToUpperInvariant() switch
@@ -1399,9 +1380,6 @@ namespace Migration.Infrastructure.Implementation.Services
             };
         }
 
-        /// <summary>
-        /// Inserts folders into FolderStaging, ignoring duplicates
-        /// </summary>
         private async Task<int> InsertFoldersAsync(List<FolderStaging> folders, CancellationToken ct)
         {
             if (folders.Count == 0)
@@ -1463,9 +1441,7 @@ namespace Migration.Infrastructure.Implementation.Services
             }
         }
 
-        /// <summary>
-        /// Applies document mapping (same logic as DocumentDiscoveryService)
-        /// </summary>
+       
         private async Task ApplyDocumentMappingAsync(DocStaging doc, FolderStaging folder, Entry alfrescoEntry, CancellationToken ct)
         {
             try
@@ -1655,9 +1631,7 @@ namespace Migration.Infrastructure.Implementation.Services
             }
         }
 
-        /// <summary>
-        /// Sanitizes input for AFTS queries
-        /// </summary>
+        
         private string SanitizeAFTS(string value)
         {
             if (string.IsNullOrEmpty(value))
@@ -1684,9 +1658,7 @@ namespace Migration.Infrastructure.Implementation.Services
                 .Replace(":", "\\:");
         }
 
-        /// <summary>
-        /// Saves current progress to PhaseCheckpoint for UI display
-        /// </summary>
+      
         private async Task SaveCheckpointProgressAsync(CancellationToken ct)
         {
             try
@@ -1732,9 +1704,7 @@ namespace Migration.Infrastructure.Implementation.Services
             }
         }
 
-        /// <summary>
-        /// Loads checkpoint to resume from last position
-        /// </summary>
+       
         private async Task LoadCheckpointAsync(CancellationToken ct)
         {
             // Always start with clean in-memory state
@@ -1818,10 +1788,7 @@ namespace Migration.Infrastructure.Implementation.Services
             }
         }
 
-        /// <summary>
-        /// Checks if the checkpoint's stored DocTypes matches the current docDesc selection.
-        /// Returns false if docDesc has changed since the checkpoint was saved.
-        /// </summary>
+       
         private bool IsCheckpointMatchingCurrentDocDesc(PhaseCheckpoint checkpoint)
         {
             if (string.IsNullOrEmpty(checkpoint.DocTypes))
@@ -1837,10 +1804,7 @@ namespace Migration.Infrastructure.Implementation.Services
             return string.Equals(currentNormalized, storedNormalized, StringComparison.OrdinalIgnoreCase);
         }
 
-        /// <summary>
-        /// Updates TotalItems estimate based on Alfresco search results
-        /// This provides UI with a rough progress indicator
-        /// </summary>
+        
         private async Task UpdateTotalItemsEstimateAsync(CancellationToken ct)
         {
             try
