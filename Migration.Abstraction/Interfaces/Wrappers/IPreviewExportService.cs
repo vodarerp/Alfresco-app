@@ -6,13 +6,13 @@ namespace Migration.Abstraction.Interfaces.Wrappers
     public interface IPreviewExportService
     {
         /// <summary>
-        /// Eksportuje PreviewDocStaging u .xlsx fajl sa dva sheet-a: PI i LE.
-        /// Filtrira po DossierType i DocumentType (null = sve).
+        /// Eksportuje PreviewDocStaging u .xlsx fajl, sheet po sheet za svaki TargetDossierType.
+        /// Filtrira po DossierType i TargetDossierType (null = sve).
         /// Vraća putanju do generisanog fajla.
         /// </summary>
         Task<string> ExportAsync(
             string? dossierType,
-            string? documentType,
+            string? targetDossierType,
             string outputPath,
             CancellationToken ct = default);
     }

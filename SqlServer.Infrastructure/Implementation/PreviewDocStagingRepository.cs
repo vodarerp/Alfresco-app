@@ -273,7 +273,7 @@ namespace SqlServer.Infrastructure.Implementation
 
         public async Task<IEnumerable<PreviewDocStaging>> GetForExportAsync(
             string? dossierType = null,
-            string? documentType = null,
+            string? targetDossierType = null,
             CancellationToken ct = default)
         {
             var sql = "SELECT * FROM PreviewDocStaging WHERE 1=1";
@@ -285,10 +285,10 @@ namespace SqlServer.Infrastructure.Implementation
                 dp.Add("@DossierType", dossierType);
             }
 
-            if (!string.IsNullOrWhiteSpace(documentType))
+            if (!string.IsNullOrWhiteSpace(targetDossierType))
             {
-                sql += " AND DocumentType = @DocumentType";
-                dp.Add("@DocumentType", documentType);
+                sql += " AND TargetDossierType = @TargetDossierType";
+                dp.Add("@TargetDossierType", targetDossierType);
             }
 
             sql += " ORDER BY DossierType, DossierDestinationFolderName, Id";
@@ -299,7 +299,7 @@ namespace SqlServer.Infrastructure.Implementation
 
         public async Task<IEnumerable<PreviewDocStaging>> GetForTransferAsync(
             string? dossierType = null,
-            string? documentType = null,
+            string? targetDossierType = null,
             CancellationToken ct = default)
         {
             var sql = @"
@@ -314,10 +314,10 @@ namespace SqlServer.Infrastructure.Implementation
                 dp.Add("@DossierType", dossierType);
             }
 
-            if (!string.IsNullOrWhiteSpace(documentType))
+            if (!string.IsNullOrWhiteSpace(targetDossierType))
             {
-                sql += " AND DocumentType = @DocumentType";
-                dp.Add("@DocumentType", documentType);
+                sql += " AND TargetDossierType = @TargetDossierType";
+                dp.Add("@TargetDossierType", targetDossierType);
             }
 
             sql += " ORDER BY Id";

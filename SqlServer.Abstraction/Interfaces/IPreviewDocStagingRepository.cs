@@ -45,10 +45,10 @@ namespace SqlServer.Abstraction.Interfaces
         Task<PreviewDocStaging?> GetFirstRecordByFolderNameAsync(string folderName, CancellationToken ct = default);
 
         // Dohvata zapise spremne za transfer u DocStaging (FOLDER_EXISTS ili FOLDER_CREATED),
-        // opcionalno filtrirane po DossierType i DocumentType
+        // opcionalno filtrirane po DossierType i TargetDossierType
         Task<IEnumerable<PreviewDocStaging>> GetForTransferAsync(
             string? dossierType = null,
-            string? documentType = null,
+            string? targetDossierType = null,
             CancellationToken ct = default);
 
         // Postavlja Status = 'TRANSFERRED' za dati skup ID-eva
@@ -57,10 +57,10 @@ namespace SqlServer.Abstraction.Interfaces
         // Rollback Faze 3: dohvata distinct (FolderName, FolderId) za sve FOLDER_CREATED zapise
         Task<IEnumerable<(string FolderName, string FolderId)>> GetCreatedFolderIdsAsync(CancellationToken ct = default);
 
-        // Dohvata zapise za eksport, opcionalno filtrirane po DossierType i DocumentType
+        // Dohvata zapise za eksport, opcionalno filtrirane po DossierType i TargetDossierType
         Task<IEnumerable<PreviewDocStaging>> GetForExportAsync(
             string? dossierType = null,
-            string? documentType = null,
+            string? targetDossierType = null,
             CancellationToken ct = default);
     }
 }

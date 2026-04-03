@@ -32,14 +32,14 @@ namespace Migration.Infrastructure.Implementation.Services
 
         public async Task<bool> RunAsync(
             string? dossierType,
-            string? documentType,
+            string? targetDossierType,
             CancellationToken ct,
             Action<WorkerProgress>? progressCallback = null)
         {
             var sw = Stopwatch.StartNew();
             _fileLogger.LogInformation(
-                "PreviewToStagingTransferService: Start. DossierType={DossierType}, DocumentType={DocumentType}",
-                dossierType ?? "*", documentType ?? "*");
+                "PreviewToStagingTransferService: Start. DossierType={DossierType}, TargetDossierType={TargetDossierType}",
+                dossierType ?? "*", targetDossierType ?? "*");
             _uiLogger.LogInformation("PreviewToStagingTransferService: Pokretanje transfera...");
 
             long totalTransferred = 0;
@@ -55,7 +55,7 @@ namespace Migration.Infrastructure.Implementation.Services
                 await uow.BeginAsync(ct: ct).ConfigureAwait(false);
                 try
                 {
-                    var result = await repo.GetForTransferAsync(dossierType, documentType, ct).ConfigureAwait(false);
+                    var result = await repo.GetForTransferAsync(dossierType, targetDossierType, ct).ConfigureAwait(false);
                     candidates = result.ToList();
                     await uow.CommitAsync(ct: ct).ConfigureAwait(false);
                 }

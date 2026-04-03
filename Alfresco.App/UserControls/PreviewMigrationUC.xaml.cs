@@ -332,9 +332,10 @@ namespace Alfresco.App.UserControls
                     ? ci.Content?.ToString()
                     : null;
 
-                var documentType = string.IsNullOrWhiteSpace(TxtTransferDocumentType.Text)
-                    ? null
-                    : TxtTransferDocumentType.Text.Trim();
+                var targetDossierType = CmbTargetDossierType.SelectedItem is ComboBoxItem cit &&
+                                        !string.IsNullOrEmpty(cit.Tag?.ToString())
+                    ? cit.Tag?.ToString()
+                    : null;
 
                 void OnProgress(WorkerProgress p)
                 {
@@ -349,7 +350,7 @@ namespace Alfresco.App.UserControls
                 }
 
                 var result = await Task.Run(
-                    () => _transferService.RunAsync(dossierType, documentType, _ctsTransfer.Token, OnProgress),
+                    () => _transferService.RunAsync(dossierType, targetDossierType, _ctsTransfer.Token, OnProgress),
                     _ctsTransfer.Token);
 
                 ProgressBar.Value = 100;
@@ -412,11 +413,12 @@ namespace Alfresco.App.UserControls
                     ? ci.Content?.ToString()
                     : null;
 
-                var documentType = string.IsNullOrWhiteSpace(TxtTransferDocumentType.Text)
-                    ? null
-                    : TxtTransferDocumentType.Text.Trim();
+                var targetDossierType = CmbTargetDossierType.SelectedItem is ComboBoxItem cit &&
+                                        !string.IsNullOrEmpty(cit.Tag?.ToString())
+                    ? cit.Tag?.ToString()
+                    : null;
 
-                await Task.Run(() => _exportService.ExportAsync(dossierType, documentType, outputPath));
+                await Task.Run(() => _exportService.ExportAsync(dossierType, targetDossierType, outputPath));
 
                 UpdateStatus("Eksport zavrsen.");
                 AppendLog($"=== Eksport zavrsen: {outputPath} ===");

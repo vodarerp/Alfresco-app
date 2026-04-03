@@ -27,7 +27,7 @@ namespace Migration.Infrastructure.Implementation.Services
 
         public async Task<string> ExportAsync(
             string? dossierType,
-            string? documentType,
+            string? targetDossierType,
             string outputPath,
             CancellationToken ct = default)
         {
@@ -42,7 +42,7 @@ namespace Migration.Infrastructure.Implementation.Services
                 await uow.BeginAsync(ct: ct).ConfigureAwait(false);
                 try
                 {
-                    var result = await repo.GetForExportAsync(dossierType, documentType, ct).ConfigureAwait(false);
+                    var result = await repo.GetForExportAsync(dossierType, targetDossierType, ct).ConfigureAwait(false);
                     all = result.ToList();
                     await uow.CommitAsync(ct: ct).ConfigureAwait(false);
                 }
@@ -56,19 +56,29 @@ namespace Migration.Infrastructure.Implementation.Services
             _fileLogger.LogInformation(
                 "PreviewExportService: Dohvaceno {Count} zapisa za eksport.", all.Count);
 
-            var piRows = all.Where(r => r.DossierType == "PI").ToList();
-            var leRows = all.Where(r => r.DossierType == "LE").ToList();
+            var grouped = all
+                .GroupBy(r => r.TargetDossierType ?? "")
+                .OrderBy(g => g.Key)
+                .ToList();
 
             using var wb = new XLWorkbook();
 
-            WriteSheet(wb, "PI", piRows);
-            WriteSheet(wb, "LE", leRows);
+            foreach (var grp in grouped)
+            {
+                var sheetName = string.IsNullOrWhiteSpace(grp.Key) ? "Other" : grp.Key;
+                WriteSheet(wb, sheetName, grp.ToList());
+            }
+
+            if (wb.Worksheets.Count == 0)
+                wb.Worksheets.Add("Empty");
 
             wb.SaveAs(outputPath);
 
+            var sheetSummary = string.Join(", ", grouped.Select(g =>
+                $"{(string.IsNullOrWhiteSpace(g.Key) ? "Other" : g.Key)}={g.Count()}"));
             _uiLogger.LogInformation(
-                "PreviewExportService: Eksport zavrsen. PI={PI}, LE={LE}. Putanja: {Path}",
-                piRows.Count, leRows.Count, outputPath);
+                "PreviewExportService: Eksport zavrsen. Sheets: {Summary}. Putanja: {Path}",
+                sheetSummary, outputPath);
 
             return outputPath;
         }

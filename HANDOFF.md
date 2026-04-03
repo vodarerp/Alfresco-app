@@ -158,16 +158,28 @@ Napomena: metoda ima komentar `//TO DELETE` u interfejsu — to je originalni ko
 
 ## Export servis — detalji
 
-`PreviewExportService.ExportAsync(dossierType?, documentType?, outputPath)`:
+`PreviewExportService.ExportAsync(dossierType?, targetDossierType?, outputPath)`:
 - Dohvata iz `GetForExportAsync` (bez filter po statusu — vraća sve)
-- Deli na PI i LE sheet-ove u ClosedXML workbook-u
+- Sheet-ovi se kreiraju po `TargetDossierType` vrednosti (npr. "300", "400", "500", "700"); null vrednosti idu u sheet "Other"
 - Headers: 50 kolona (sve iz `PreviewDocStaging` + `ParentFolderName`)
 - Auto-fit kolone, freeze header red, auto-filter
 
+### TargetDossierType mapping (UI → DB vrednost)
+| UI prikaz | DB vrednost |
+|-----------|-------------|
+| PI        | 500         |
+| LE        | 400         |
+| ACC       | 300         |
+| DE        | 700         |
+
 Filteri za transfer/export (u UI):
-- `CmbTransferDossierType`: (sve) / PI / LE
-- `TxtTransferDocumentType`: slobodan unos, prazno = sve
-- Isti kontroli koriste se i za Transfer (Faza 6) i za Export (Faza 7)
+- `CmbTransferDossierType`: (sve) / PI / LE — filtrira po izvoru (`DossierType`)
+- `CmbTargetDossierType`: (sve) / PI / LE / ACC / DE — filtrira po destinaciji (`TargetDossierType`, numerički Tag)
+- `TxtTransferDocumentType`: postoji u XAML-u ali je `Visibility="Collapsed"` — privremeno sklonjen
+- Isti filteri koriste se i za Transfer (Faza 6) i za Export (Faza 7)
+
+### Lanac filtera targetDossierType
+`CmbTargetDossierType.Tag` (string) → `BtnExport_Click` / `BtnStartTransfer_Click` → `IPreviewExportService.ExportAsync` / `IPreviewToStagingTransferService.RunAsync` → `IPreviewDocStagingRepository.GetForExportAsync` / `GetForTransferAsync` → SQL `AND TargetDossierType = @TargetDossierType`
 
 ---
 
@@ -187,6 +199,9 @@ Filteri za transfer/export (u UI):
 "Migration:RootDestinationFolderId": "e8e6fdcf-33ec-43c5-a6fd-cf33eca3c53e"
 "Migration:RootPIFolderId": "workspace://SpacesStore/328e163f-..."
 "Migration:RootLEFolderId": "workspace://SpacesStore/6dc01063-..."
+"Migration:RootACCFolderId": "workspace://SpacesStore/875d1f6a-..."
+"Migration:RootDepoFolderId": "workspace://SpacesStore/875d1f6a-..."   ← dodat u MigrationOptions
+"Migration:RootOtherFolderId": "workspace://SpacesStore/875d1f6a-..."  ← dodat u MigrationOptions
 "Migration:DocumentTypeDiscovery:FolderTypes": ["PI", "LE"]
 "Migration:FolderNodeTypeMapping": { "ClientFL": "ecm:ecmDossierPi", ... }
 "EnablePreviewFolderRollback": true   ← staviti false posle testiranja

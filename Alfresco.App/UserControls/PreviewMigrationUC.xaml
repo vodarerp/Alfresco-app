@@ -159,8 +159,16 @@
                                     <ComboBoxItem Content="PI"/>
                                     <ComboBoxItem Content="LE"/>
                                 </ComboBox>
-                                <TextBlock Grid.Row="1" Grid.Column="0" Text="Tip dok.:" VerticalAlignment="Center" FontSize="11" Margin="0,0,4,0"/>
-                                <TextBox x:Name="TxtTransferDocumentType" Grid.Row="1" Grid.Column="1" Height="22"
+                                <TextBlock Grid.Row="1" Grid.Column="0" Text="Target:" VerticalAlignment="Center" FontSize="11" Margin="0,0,4,0"/>
+                                <ComboBox x:Name="CmbTargetDossierType" Grid.Row="1" Grid.Column="1" Height="22">
+                                    <ComboBoxItem Content="(sve)" IsSelected="True" Tag=""/>
+                                    <ComboBoxItem Content="PI"  Tag="500"/>
+                                    <ComboBoxItem Content="LE"  Tag="400"/>
+                                    <ComboBoxItem Content="ACC" Tag="300"/>
+                                    <ComboBoxItem Content="DE"  Tag="700"/>
+                                </ComboBox>
+                                <!-- TipDokumenta filter — privremeno sklonjen sa UI-a -->
+                                <TextBox x:Name="TxtTransferDocumentType" Visibility="Collapsed"
                                          ToolTip="Prazno = svi tipovi dokumenata"/>
                             </Grid>
                         </StackPanel>
