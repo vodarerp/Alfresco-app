@@ -1,8 +1,9 @@
-using SqlServer.Abstraction.Interfaces;
 using Microsoft.Data.SqlClient;
+using SqlServer.Abstraction.Interfaces;
 using System;
 using System.Collections.Generic;
 using System.Data;
+using System.Data.Common;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
@@ -16,6 +17,7 @@ namespace SqlServer.Infrastructure.Implementation
 
         private SqlConnection? _conn;
         private SqlTransaction? _tx;
+        private bool _disposed;
 
         public SqlServerUnitOfWork(string inConnString)
         {
@@ -67,20 +69,33 @@ namespace SqlServer.Infrastructure.Implementation
             }
         }
 
-        public async ValueTask DisposeAsync()
+        public void Dispose()
         {
-            try
-            {
-                if (_tx is not null) _tx.Rollback();
-            }
-            catch { /* ignore */ }
-            _tx?.Dispose(); _tx = null;
+            Dispose(true);
+            // Kažemo GC-u da ne mora da zove finalizer jer smo ruèno oèistili resurse
+            GC.SuppressFinalize(this);
+        }
+        protected virtual void Dispose(bool disposing)
+        {
+            if (_disposed) return;
 
-            if (_conn is not null)
+            if (disposing)
             {
-                await _conn.DisposeAsync().ConfigureAwait(false);
+                try { _tx?.Rollback(); } catch { }
+                _tx?.Dispose();
+                _tx = null;
+
+                _conn?.Dispose();
                 _conn = null;
             }
+
+            _disposed = true;
+        }
+        public async ValueTask DisposeAsync()
+        {
+            await PerformCleanupAsync().ConfigureAwait(false);
+            Dispose(false);
+            GC.SuppressFinalize(this);
         }
 
         public async Task RollbackAsync(CancellationToken ct = default)
@@ -92,6 +107,19 @@ namespace SqlServer.Infrastructure.Implementation
             _tx = null;
 
             // Close connection after rollback to return it to the pool immediately
+            if (_conn is not null)
+            {
+                await _conn.DisposeAsync().ConfigureAwait(false);
+                _conn = null;
+            }
+        }
+
+        private async Task PerformCleanupAsync()
+        {
+            try { if (_tx is not null) _tx.Rollback(); } catch { }
+            _tx?.Dispose();
+            _tx = null;
+
             if (_conn is not null)
             {
                 await _conn.DisposeAsync().ConfigureAwait(false);

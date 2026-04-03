@@ -62,5 +62,15 @@ namespace SqlServer.Abstraction.Interfaces
             string? dossierType = null,
             string? targetDossierType = null,
             CancellationToken ct = default);
+
+        // Streaming verzija za eksport (Dapper buffered:false) — konekcija mora biti otvorena tokom iteracije
+        IEnumerable<PreviewDocStaging> GetForExportUnbuffered(
+            string? dossierType = null,
+            string? targetDossierType = null);
+
+        // Dohvata distinct TargetDossierType vrednosti za eksport (lightweight query za određivanje sheet-ova)
+        Task<IList<string?>> GetDistinctExportTargetTypesAsync(
+            string? dossierType = null,
+            CancellationToken ct = default);
     }
 }

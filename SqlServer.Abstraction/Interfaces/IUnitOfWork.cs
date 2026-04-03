@@ -7,7 +7,7 @@ using System.Threading.Tasks;
 
 namespace SqlServer.Abstraction.Interfaces
 {
-    public interface IUnitOfWork : IAsyncDisposable
+    public interface IUnitOfWork : IAsyncDisposable, IDisposable
     {
         IDbConnection Connection { get; }
 

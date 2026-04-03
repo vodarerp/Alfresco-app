@@ -297,6 +297,50 @@ namespace SqlServer.Infrastructure.Implementation
             return await Conn.QueryAsync<PreviewDocStaging>(cmd).ConfigureAwait(false);
         }
 
+        public IEnumerable<PreviewDocStaging> GetForExportUnbuffered(
+            string? dossierType = null,
+            string? targetDossierType = null)
+        {
+            var sql = "SELECT * FROM PreviewDocStaging WHERE 1=1";
+            var dp = new DynamicParameters();
+
+            if (!string.IsNullOrWhiteSpace(dossierType))
+            {
+                sql += " AND DossierType = @DossierType";
+                dp.Add("@DossierType", dossierType);
+            }
+
+            if (!string.IsNullOrWhiteSpace(targetDossierType))
+            {
+                sql += " AND TargetDossierType = @TargetDossierType";
+                dp.Add("@TargetDossierType", targetDossierType);
+            }
+
+            sql += " ORDER BY Id";
+
+            return Conn.Query<PreviewDocStaging>(sql, dp, Tx, buffered: false, commandTimeout: _commandTimeoutSeconds);
+        }
+
+        public async Task<IList<string?>> GetDistinctExportTargetTypesAsync(
+            string? dossierType = null,
+            CancellationToken ct = default)
+        {
+            var sql = "SELECT DISTINCT TargetDossierType FROM PreviewDocStaging WHERE 1=1";
+            var dp = new DynamicParameters();
+
+            if (!string.IsNullOrWhiteSpace(dossierType))
+            {
+                sql += " AND DossierType = @DossierType";
+                dp.Add("@DossierType", dossierType);
+            }
+
+            sql += " ORDER BY TargetDossierType";
+
+            var cmd = new CommandDefinition(sql, dp, Tx, commandTimeout: _commandTimeoutSeconds, cancellationToken: ct);
+            var result = await Conn.QueryAsync<string?>(cmd).ConfigureAwait(false);
+            return result.ToList();
+        }
+
         public async Task<IEnumerable<PreviewDocStaging>> GetForTransferAsync(
             string? dossierType = null,
             string? targetDossierType = null,
