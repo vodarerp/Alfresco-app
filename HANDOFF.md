@@ -123,9 +123,17 @@ Alfresco.App/appsettings.json                              — konfiguracija
 ## Ključni detalji implementacije
 
 ### `PreviewFolderCreationService` — kako kreira foldere
-- `RootDestinationFolderId` iz `appsettings.json` → `Migration:RootDestinationFolderId`
-- Map prefiks → DOSSIERS-* folder: `FL→DOSSIERS-FL`, `PL→DOSSIERS-PL`, `ACC→DOSSIERS-ACC`, `D→DOSSIERS-D`
 - `DossierIdFormatter.ExtractPrefix(folderName)` za određivanje prefiksa
+- Prefiks se direktno mapira na GUID parent foldera iz konfiguracije (`ResolveDossierParentId`):
+  - `PI` → `Migration:RootPIFolderId`
+  - `LE` → `Migration:RootLEFolderId`
+  - `ACC` → `Migration:RootACCFolderId`
+  - `D` → `Migration:RootDepoFolderId`
+  - ostalo → `Migration:RootOtherFolderId`
+- ID-evi su u formatu `workspace://SpacesStore/GUID` — `ExtractGuid()` uzima deo iza poslednjeg `/`
+- `GetOrCreateDossierParentAsync` uklonjen — ID-evi su direktno u konfiguraciji
+- `Parallel.ForEachAsync` sa MDP=5 za paralelno kreiranje foldera unutar batcha
+- `Interlocked.Increment/Read` za thread-safe brojače
 - Node type iz `Migration:FolderNodeTypeMapping` (npr. `ClientFL → ecm:ecmDossierPi`)
 - Race condition handling: ako `CreateFolderAsync_v1` baci exception, proverava `GetFolderByNameAsync`
 

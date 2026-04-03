@@ -18,9 +18,11 @@ namespace Alfresco.Contracts.Options
         public int MaxDocumentsToProcess { get; set; } = 0;
         public string? RootDestinationFolderId { get; set; }      
         public string? RootDiscoveryFolderId { get; set; }       
-        public string? RootACCFolderId { get; set; }       
-        public string? RootLEFolderId { get; set; }       
-        public string? RootPIFolderId { get; set; }       
+        public string? RootACCFolderId { get; set; }
+        public string? RootLEFolderId { get; set; }
+        public string? RootPIFolderId { get; set; }
+        public string? RootDepoFolderId { get; set; }
+        public string? RootOtherFolderId { get; set; }
         public string? RootDocumentPath { get; set; }        
         public bool PreviewTypeMigration { get; set; } = false;
         public bool MigrationByDocument { get; set; } = false;
