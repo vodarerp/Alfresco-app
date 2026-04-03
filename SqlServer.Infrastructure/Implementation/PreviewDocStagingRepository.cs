@@ -343,6 +343,26 @@ namespace SqlServer.Infrastructure.Implementation
             await Conn.ExecuteAsync(cmd).ConfigureAwait(false);
         }
 
+        public async Task<IEnumerable<(string FolderName, string FolderId)>> GetCreatedFolderIdsAsync(CancellationToken ct = default)
+        {
+            const string sql = @"
+                SELECT DISTINCT DossierDestinationFolderName, DossierDestinationFolderId
+                FROM PreviewDocStaging
+                WHERE Status = 'FOLDER_CREATED'
+                  AND ISNULL(DossierDestinationFolderId, '') <> ''
+                  AND ISNULL(DossierDestinationFolderName, '') <> ''";
+
+            var cmd = new CommandDefinition(sql, transaction: Tx, commandTimeout: _commandTimeoutSeconds, cancellationToken: ct);
+            var rows = await Conn.QueryAsync<FolderRow>(cmd).ConfigureAwait(false);
+            return rows.Select(r => (r.DossierDestinationFolderName, r.DossierDestinationFolderId));
+        }
+
+        private sealed class FolderRow
+        {
+            public string DossierDestinationFolderName { get; set; } = "";
+            public string DossierDestinationFolderId { get; set; } = "";
+        }
+
         public async Task DeleteAllAsync(CancellationToken ct = default)
         {
             const string sql = "DELETE FROM PreviewDocStaging";

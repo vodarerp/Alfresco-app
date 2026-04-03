@@ -513,9 +513,15 @@ namespace Alfresco.Client.Implementation
             return result?.Entry.Id ?? throw new InvalidOperationException("Alfresco returned null folder ID");
         }
 
-        public Task<bool> DeleteNodeAsync(string nodeId, CancellationToken ct = default)
+        public async Task<bool> DeleteNodeAsync(string nodeId, CancellationToken ct = default)
         {
-            throw new NotImplementedException();
+            using var response = await _client.DeleteAsync(
+                 $"/alfresco/api/-default-/public/alfresco/versions/1/nodes/{nodeId}",                 
+                 ct).ConfigureAwait(false);
+
+            
+
+            return response.IsSuccessStatusCode;
         }
 
         public async Task<Entry?> MoveDocumentAsync(string nodeId, string targetFolderId, string? newName, CancellationToken ct = default)

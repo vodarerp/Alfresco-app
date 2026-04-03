@@ -54,6 +54,9 @@ namespace SqlServer.Abstraction.Interfaces
         // Postavlja Status = 'TRANSFERRED' za dati skup ID-eva
         Task UpdateTransferredBatchAsync(IEnumerable<long> ids, CancellationToken ct = default);
 
+        // Rollback Faze 3: dohvata distinct (FolderName, FolderId) za sve FOLDER_CREATED zapise
+        Task<IEnumerable<(string FolderName, string FolderId)>> GetCreatedFolderIdsAsync(CancellationToken ct = default);
+
         // Dohvata zapise za eksport, opcionalno filtrirane po DossierType i DocumentType
         Task<IEnumerable<PreviewDocStaging>> GetForExportAsync(
             string? dossierType = null,

@@ -118,6 +118,14 @@
                             Background="#E74C3C" Foreground="White"
                             IsEnabled="False"/>
 
+                    <Button x:Name="BtnRollbackFaza3"
+                            Content="↩ Rollback Faze 3 (TEST)"
+                            Click="BtnRollbackFaza3_Click"
+                            Height="28" Margin="3"
+                            Background="#922B21" Foreground="White"
+                            Visibility="Collapsed"
+                            ToolTip="SAMO ZA TESTIRANJE: Brise kreirane Alfresco foldere i resetuje status na FOLDER_PENDING_CREATION"/>
+
                     <Separator Margin="3"/>
 
                     <Button x:Name="BtnRefreshStats"

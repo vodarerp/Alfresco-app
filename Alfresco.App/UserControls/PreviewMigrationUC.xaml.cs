@@ -1,5 +1,6 @@
 using Alfresco.Contracts.Oracle.Models;
 using Alfresco.Contracts.SqlServer;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Migration.Abstraction.Interfaces.Wrappers;
 using Migration.Abstraction.Models;
@@ -24,10 +25,12 @@ namespace Alfresco.App.UserControls
         private readonly IPreviewFolderCreationService _folderCreationService;
         private readonly IPreviewToStagingTransferService _transferService;
         private readonly IPreviewExportService _exportService;
+        private readonly IPreviewFolderRollbackService _rollbackService;
         private CancellationTokenSource? _cts;
         private CancellationTokenSource? _ctsFaza2;
         private CancellationTokenSource? _ctsFaza3;
         private CancellationTokenSource? _ctsTransfer;
+        private CancellationTokenSource? _ctsRollback;
 
         // Pagination state
         private int _currentPage = 1;
@@ -56,6 +59,11 @@ namespace Alfresco.App.UserControls
             _folderCreationService = App.AppHost.Services.GetRequiredService<IPreviewFolderCreationService>();
             _transferService = App.AppHost.Services.GetRequiredService<IPreviewToStagingTransferService>();
             _exportService = App.AppHost.Services.GetRequiredService<IPreviewExportService>();
+            _rollbackService = App.AppHost.Services.GetRequiredService<IPreviewFolderRollbackService>();
+
+            var config = App.AppHost.Services.GetRequiredService<IConfiguration>();
+            if (config.GetValue<bool>("EnablePreviewFolderRollback"))
+                BtnRollbackFaza3.Visibility = Visibility.Visible;
 
             Loaded += PreviewMigrationUC_Loaded;
         }
@@ -246,6 +254,66 @@ namespace Alfresco.App.UserControls
             BtnStopFaza3.IsEnabled = false;
             UpdateStatus("Zaustavljanje Faze 3...");
             AppendLog("Zahtev za zaustavljanje Faze 3 primljen...");
+        }
+
+        private async void BtnRollbackFaza3_Click(object sender, RoutedEventArgs e)
+        {
+            var confirm = MessageBox.Show(
+                "PAZI: Ovo ce obrisati SVE Alfresco foldere kreirane u Fazi 3\ni resetovati njihov status na FOLDER_PENDING_CREATION.\n\nNastaviti?",
+                "Rollback Faze 3", MessageBoxButton.YesNo, MessageBoxImage.Warning);
+
+            if (confirm != MessageBoxResult.Yes) return;
+
+            try
+            {
+                SetButtonsRunning(true);
+                ProgressBar.Value = 0;
+                UpdateStatus("Rollback Faze 3 u toku...");
+                AppendLog("=== Pokretanje Rollbacka Faze 3: brisanje kreiranih foldera ===");
+
+                _ctsRollback = new CancellationTokenSource();
+
+                void OnProgress(WorkerProgress p)
+                {
+                    Dispatcher.Invoke(() =>
+                    {
+                        UpdateStatus(p.Message ?? "U toku...");
+                        AppendLog(p.Message ?? "");
+
+                        if (p.TotalItems > 0)
+                            ProgressBar.Value = Math.Min(100, p.ProgressPercentage);
+                    });
+                }
+
+                var result = await Task.Run(
+                    () => _rollbackService.RunAsync(_ctsRollback.Token, OnProgress),
+                    _ctsRollback.Token);
+
+                ProgressBar.Value = 100;
+                var msg = result ? "Rollback zavrsen uspesno." : "Rollback zavrsen sa greskama (videti log).";
+                UpdateStatus(msg);
+                AppendLog($"=== {msg} ===");
+
+                await RefreshStatisticsAsync();
+                await LoadDataAsync();
+            }
+            catch (OperationCanceledException)
+            {
+                UpdateStatus("Rollback zaustavljen.");
+                AppendLog("=== Rollback zaustavljen od strane korisnika. ===");
+            }
+            catch (Exception ex)
+            {
+                UpdateStatus($"GRESKA Rollback: {ex.Message}");
+                AppendLog($"GRESKA: {ex.Message}");
+                MessageBox.Show($"Greska pri rollbacku:\n{ex.Message}", "Greska", MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+            finally
+            {
+                SetButtonsRunning(false);
+                _ctsRollback?.Dispose();
+                _ctsRollback = null;
+            }
         }
 
         private async void BtnStartTransfer_Click(object sender, RoutedEventArgs e)
@@ -553,6 +621,8 @@ namespace Alfresco.App.UserControls
             BtnClearStaging.IsEnabled = !isRunning;
             BtnRefreshStats.IsEnabled = !isRunning;
             BtnRefreshData.IsEnabled = !isRunning;
+            if (BtnRollbackFaza3.Visibility == Visibility.Visible)
+                BtnRollbackFaza3.IsEnabled = !isRunning;
         }
 
         private void UpdateStatus(string status)
