@@ -28,6 +28,71 @@ namespace Migration.Infrastructure.Implementation.Services
             _uiLogger     = loggerFactory.CreateLogger("UiLogger");
         }
 
+        // DTO sa tačnim nazivima kolona za Excel eksport
+        private sealed class ExportRow
+        {
+            public long    Id                      { get; set; }
+            public string? ClientId                { get; set; }
+            public string? DocumentName            { get; set; }
+            public string? OldDocumenttype         { get; set; }
+            public string? MigrationDocumentType   { get; set; }
+            public string? MigrationDocumentName   { get; set; }
+            public string? OldStatus               { get; set; }
+            public string? MigrationStatus         { get; set; }
+            public string? ProductType             { get; set; }
+            public string? OldDossierName          { get; set; }
+            public string? MigrationFolderName     { get; set; }
+            public string? CategoryCode            { get; set; }
+            public string? CategoryName            { get; set; }
+            public string? Source                  { get; set; }
+            public string? AccountNumbers          { get; set; }
+            public DateTime? DocumentCreation      { get; set; }
+            public string? ClientApiMbrJmbg        { get; set; }
+            public string? ClientApiClientName     { get; set; }
+            public string? ClientApiClientType     { get; set; }
+            public string? ClientApiClientSubtype  { get; set; }
+            public string? ClientApiResidency      { get; set; }
+            public string? ClientApiStaff          { get; set; }
+            public string? OfficeId                { get; set; }
+            public string? BarClex                 { get; set; }
+            public string? Contributor             { get; set; }
+        }
+
+        private static ExportRow ToExportRow(PreviewDocStaging r) => new()
+        {
+            Id                    = r.Id,
+            ClientId              = r.CoreId,
+            DocumentName          = r.Name,
+            OldDocumenttype       = r.OriginalDocumentCode,
+            MigrationDocumentType = r.NewDocumentCode,
+            MigrationDocumentName = r.NewDocumentName,
+            OldStatus             = r.OldAlfrescoStatus,
+            MigrationStatus       = r.NewAlfrescoStatus,
+            ProductType           = r.DossierType,
+            OldDossierName        = r.ParentFolderName,
+            MigrationFolderName   = r.DossierDestinationFolderName,
+            CategoryCode          = r.CategoryCode,
+            CategoryName          = r.CategoryName,
+            Source                = r.Source,
+            AccountNumbers        = r.AccountNumbers,
+            DocumentCreation      = r.OriginalCreatedAt,
+            ClientApiMbrJmbg      = r.ClientApiMbrJmbg,
+            ClientApiClientName   = r.ClientApiClientName,
+            ClientApiClientType   = r.ClientApiClientType,
+            ClientApiClientSubtype= r.ClientApiClientSubtype,
+            ClientApiResidency    = r.ClientApiResidency,
+            ClientApiStaff        = r.ClientApiStaff,
+            OfficeId              = r.ClientApiBarCLEXOpu,
+            BarClex               = JoinParts(r.ClientApiBarCLEXGroupCode, r.ClientApiBarCLEXGroupName),
+            Contributor           = JoinParts(r.ClientApiBarCLEXCode, r.ClientApiBarCLEXName),
+        };
+
+        private static string? JoinParts(string? a, string? b)
+        {
+            if (string.IsNullOrWhiteSpace(a) && string.IsNullOrWhiteSpace(b)) return null;
+            return $"{a} {b}".Trim();
+        }
+
         public async Task<IList<string>> ExportAsync(
             string? dossierType,
             string? targetDossierType,
@@ -143,7 +208,7 @@ namespace Migration.Infrastructure.Implementation.Services
                 try
                 {
                     MiniExcel.SaveAs(tempPath,
-                        new Dictionary<string, object> { ["Empty"] = Array.Empty<PreviewDocStaging>() },
+                        new Dictionary<string, object> { ["Empty"] = Array.Empty<ExportRow>() },
                         overwriteFile: true, excelType: ExcelType.XLSX);
                     File.Move(tempPath, emptyFile);
                     createdFiles.Add(emptyFile);
@@ -162,7 +227,7 @@ namespace Migration.Infrastructure.Implementation.Services
             return createdFiles;
         }
 
-        private IEnumerable<PreviewDocStaging> CreateSheetStream(string? dossierType, string? targetDossierType)
+        private IEnumerable<ExportRow> CreateSheetStream(string? dossierType, string? targetDossierType)
         {
             using var scope = _scopeFactory.CreateScope();
             var uow  = scope.ServiceProvider.GetRequiredService<IUnitOfWork>();
@@ -171,12 +236,12 @@ namespace Migration.Infrastructure.Implementation.Services
             uow.BeginAsync().GetAwaiter().GetResult();
 
             foreach (var row in repo.GetForExportUnbuffered(dossierType, targetDossierType))
-                yield return row;
+                yield return ToExportRow(row);
 
             uow.CommitAsync().GetAwaiter().GetResult();
         }
 
-        private IEnumerable<PreviewDocStaging> CreateSheetStreamPaged(
+        private IEnumerable<ExportRow> CreateSheetStreamPaged(
             string? dossierType, string? targetDossierType, long offset, int pageSize)
         {
             using var scope = _scopeFactory.CreateScope();
@@ -186,12 +251,12 @@ namespace Migration.Infrastructure.Implementation.Services
             uow.BeginAsync().GetAwaiter().GetResult();
 
             foreach (var row in repo.GetForExportUnbufferedPaged(dossierType, targetDossierType, offset, pageSize))
-                yield return row;
+                yield return ToExportRow(row);
 
             uow.CommitAsync().GetAwaiter().GetResult();
         }
 
-        private static string MakeSafeFileName(string name)
+        private static string? MakeSafeFileName(string name)
         {
             var invalid = Path.GetInvalidFileNameChars();
             var sb = new StringBuilder(name.Length);
