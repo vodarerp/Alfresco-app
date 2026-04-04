@@ -6,6 +6,8 @@ using Migration.Abstraction.Interfaces.Wrappers;
 using SqlServer.Abstraction.Interfaces;
 using System;
 using System.Collections.Generic;
+using System.IO;
+using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -17,6 +19,8 @@ namespace Migration.Infrastructure.Implementation.Services
         private readonly ILogger _fileLogger;
         private readonly ILogger _uiLogger;
 
+        private const int MaxRowsPerSheet = 500_000;
+
         public PreviewExportService(IServiceScopeFactory scopeFactory, ILoggerFactory loggerFactory)
         {
             _scopeFactory = scopeFactory ?? throw new ArgumentNullException(nameof(scopeFactory));
@@ -24,30 +28,41 @@ namespace Migration.Infrastructure.Implementation.Services
             _uiLogger     = loggerFactory.CreateLogger("UiLogger");
         }
 
-        public async Task<string> ExportAsync(
+        public async Task<IList<string>> ExportAsync(
             string? dossierType,
             string? targetDossierType,
-            string outputPath,
+            string outputDirectory,
             CancellationToken ct = default)
         {
-            _uiLogger.LogInformation("PreviewExportService: Pokretanje eksporta (streaming)...");
+            _uiLogger.LogInformation("PreviewExportService: Pokretanje eksporta...");
 
-            // Korak 1: lightweight query za distinct TargetDossierType vrednosti (= sheet nazivi)
-            IList<string?> types;
-            if (!string.IsNullOrWhiteSpace(targetDossierType))
+            // Korak 1: count po TargetDossierType
+            IList<(string? Type, long Count)> typeCounts;
+            await using (var typeScope = _scopeFactory.CreateAsyncScope())
             {
-                types = new List<string?> { targetDossierType };
-            }
-            else
-            {
-                await using var typeScope = _scopeFactory.CreateAsyncScope();
                 var typeUow  = typeScope.ServiceProvider.GetRequiredService<IUnitOfWork>();
                 var typeRepo = typeScope.ServiceProvider.GetRequiredService<IPreviewDocStagingRepository>();
 
                 await typeUow.BeginAsync(ct: ct).ConfigureAwait(false);
                 try
                 {
-                    types = await typeRepo.GetDistinctExportTargetTypesAsync(dossierType, ct).ConfigureAwait(false);
+                    var all = await typeRepo.GetExportTargetTypeCountsAsync(dossierType, ct).ConfigureAwait(false);
+
+                    if (!string.IsNullOrWhiteSpace(targetDossierType))
+                    {
+                        var filtered = new List<(string?, long)>();
+                        foreach (var (t, c) in all)
+                            if (string.Equals(t, targetDossierType, StringComparison.OrdinalIgnoreCase))
+                                filtered.Add((t, c));
+                        if (filtered.Count == 0)
+                            filtered.Add((targetDossierType, 0));
+                        typeCounts = filtered;
+                    }
+                    else
+                    {
+                        typeCounts = all;
+                    }
+
                     await typeUow.CommitAsync(ct: ct).ConfigureAwait(false);
                 }
                 catch
@@ -58,47 +73,145 @@ namespace Migration.Infrastructure.Implementation.Services
             }
 
             _fileLogger.LogInformation(
-                "PreviewExportService: Pronadjeno {Count} sheet-ova: {Types}",
-                types.Count, string.Join(", ", types));
+                "PreviewExportService: Tipovi za eksport: {Summary}",
+                FormatTypeSummary(typeCounts));
 
-            // Korak 2 + 3: jedan scope, BeginAsync PRE GetForExportUnbuffered.
-            // GetForExportUnbuffered pristupa Conn u trenutku poziva — mora biti otvoren.
-            // Dapper vraca lazy IEnumerable<T>, SQL se izvrsava tek kada MiniExcel pocne iteraciju.
-            // MiniExcel procesira sheet-ove sekvencijalno, pa je samo jedan Dapper reader aktivan u isto vreme.
-            await using var exportScope = _scopeFactory.CreateAsyncScope();
-            var exportUow  = exportScope.ServiceProvider.GetRequiredService<IUnitOfWork>();
-            var exportRepo = exportScope.ServiceProvider.GetRequiredService<IPreviewDocStagingRepository>();
+            Directory.CreateDirectory(outputDirectory);
 
-            await exportUow.BeginAsync(ct: ct).ConfigureAwait(false);
-            try
+            var timestamp    = DateTime.Now.ToString("yyyyMMdd_HHmmss");
+            var createdFiles = new List<string>();
+
+            // Korak 2: jedan fajl po TargetDossierType
+            foreach (var (type, count) in typeCounts)
             {
+                var baseSheetName = string.IsNullOrWhiteSpace(type) ? "Other" : type;
+                var safeTypeName  = string.IsNullOrWhiteSpace(type) ? "Other" : MakeSafeFileName(type);
+                var fileName      = $"PreviewExport_{safeTypeName}_{timestamp}.xlsx";
+                var outputPath    = Path.Combine(outputDirectory, fileName);
+
                 var sheets = new Dictionary<string, object>();
-                foreach (var type in types)
+
+                if (count <= MaxRowsPerSheet)
                 {
-                    var sheetName    = string.IsNullOrWhiteSpace(type) ? "Other" : type;
                     var capturedType = type;
-                    sheets[sheetName] = exportRepo.GetForExportUnbuffered(dossierType, capturedType);
+                    sheets[baseSheetName] = CreateSheetStream(dossierType, capturedType);
+                }
+                else
+                {
+                    int totalParts = (int)Math.Ceiling((double)count / MaxRowsPerSheet);
+                    _fileLogger.LogInformation(
+                        "PreviewExportService: Tip {Type} ima {Count} redova — deli se u {Parts} sheet-ova.",
+                        baseSheetName, count, totalParts);
+
+                    for (int part = 1; part <= totalParts; part++)
+                    {
+                        long partOffset  = (long)(part - 1) * MaxRowsPerSheet;
+                        var partName     = $"{baseSheetName} ({part}/{totalParts})";
+                        var capturedType = type;
+                        var capturedOff  = partOffset;
+                        sheets[partName] = CreateSheetStreamPaged(dossierType, capturedType, capturedOff, MaxRowsPerSheet);
+                    }
                 }
 
-                if (sheets.Count == 0)
-                    sheets["Empty"] = Array.Empty<PreviewDocStaging>();
+                var tempPath = outputPath + ".tmp";
+                try
+                {
+                    if (File.Exists(tempPath))
+                        File.Delete(tempPath);
 
-                // SaveAs (sync) — sheets sadrze sync IEnumerable<PreviewDocStaging> (POCO).
-                // MiniExcel streama POCO tip red po red bez internog bufferinga u List<T>.
-                MiniExcel.SaveAs(outputPath, sheets, overwriteFile: true);
+                    MiniExcel.SaveAs(tempPath, sheets, overwriteFile: true, excelType: ExcelType.XLSX);
 
-                await exportUow.CommitAsync(ct: ct).ConfigureAwait(false);
+                    if (File.Exists(outputPath))
+                        File.Delete(outputPath);
+                    File.Move(tempPath, outputPath);
+
+                    createdFiles.Add(outputPath);
+                    _uiLogger.LogInformation("PreviewExportService: Kreiran fajl: {FileName}", fileName);
+                }
+                catch
+                {
+                    try { if (File.Exists(tempPath)) File.Delete(tempPath); } catch { }
+                    throw;
+                }
             }
-            catch
+
+            // Edge case: nema podataka
+            if (createdFiles.Count == 0)
             {
-                await exportUow.RollbackAsync(ct: ct).ConfigureAwait(false);
-                throw;
+                var emptyFile = Path.Combine(outputDirectory, $"PreviewExport_Empty_{timestamp}.xlsx");
+                var tempPath  = emptyFile + ".tmp";
+                try
+                {
+                    MiniExcel.SaveAs(tempPath,
+                        new Dictionary<string, object> { ["Empty"] = Array.Empty<PreviewDocStaging>() },
+                        overwriteFile: true, excelType: ExcelType.XLSX);
+                    File.Move(tempPath, emptyFile);
+                    createdFiles.Add(emptyFile);
+                }
+                catch
+                {
+                    try { if (File.Exists(tempPath)) File.Delete(tempPath); } catch { }
+                    throw;
+                }
             }
 
             _uiLogger.LogInformation(
-                "PreviewExportService: Eksport zavrsen. Putanja: {Path}", outputPath);
+                "PreviewExportService: Eksport zavrsen. Kreirano {Count} fajl(ova) u {Dir}.",
+                createdFiles.Count, outputDirectory);
 
-            return outputPath;
+            return createdFiles;
+        }
+
+        private IEnumerable<PreviewDocStaging> CreateSheetStream(string? dossierType, string? targetDossierType)
+        {
+            using var scope = _scopeFactory.CreateScope();
+            var uow  = scope.ServiceProvider.GetRequiredService<IUnitOfWork>();
+            var repo = scope.ServiceProvider.GetRequiredService<IPreviewDocStagingRepository>();
+
+            uow.BeginAsync().GetAwaiter().GetResult();
+
+            foreach (var row in repo.GetForExportUnbuffered(dossierType, targetDossierType))
+                yield return row;
+
+            uow.CommitAsync().GetAwaiter().GetResult();
+        }
+
+        private IEnumerable<PreviewDocStaging> CreateSheetStreamPaged(
+            string? dossierType, string? targetDossierType, long offset, int pageSize)
+        {
+            using var scope = _scopeFactory.CreateScope();
+            var uow  = scope.ServiceProvider.GetRequiredService<IUnitOfWork>();
+            var repo = scope.ServiceProvider.GetRequiredService<IPreviewDocStagingRepository>();
+
+            uow.BeginAsync().GetAwaiter().GetResult();
+
+            foreach (var row in repo.GetForExportUnbufferedPaged(dossierType, targetDossierType, offset, pageSize))
+                yield return row;
+
+            uow.CommitAsync().GetAwaiter().GetResult();
+        }
+
+        private static string MakeSafeFileName(string name)
+        {
+            var invalid = Path.GetInvalidFileNameChars();
+            var sb = new StringBuilder(name.Length);
+            foreach (var c in name)
+                sb.Append(Array.IndexOf(invalid, c) >= 0 ? '_' : c);
+            return sb.ToString();
+        }
+
+        private static string FormatTypeSummary(IList<(string? Type, long Count)> typeCounts)
+        {
+            var parts = new List<string>();
+            foreach (var (type, count) in typeCounts)
+            {
+                var name    = string.IsNullOrWhiteSpace(type) ? "Other" : type;
+                var nSheets = count > MaxRowsPerSheet
+                    ? (int)Math.Ceiling((double)count / MaxRowsPerSheet)
+                    : 1;
+                parts.Add(nSheets > 1 ? $"{name}={count}→{nSheets}sh" : $"{name}={count}");
+            }
+            return string.Join(", ", parts);
         }
     }
 }

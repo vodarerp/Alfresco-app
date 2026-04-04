@@ -390,23 +390,21 @@ namespace Alfresco.App.UserControls
 
         private async void BtnExport_Click(object sender, RoutedEventArgs e)
         {
-            var dlg = new SaveFileDialog
+            var dlg = new Microsoft.Win32.OpenFolderDialog
             {
-                Title = "Sacuvaj eksport",
-                Filter = "Excel fajl (*.xlsx)|*.xlsx",
-                FileName = $"PreviewExport_{DateTime.Now:yyyyMMdd_HHmmss}.xlsx",
+                Title = "Izaberi folder za eksport",
                 InitialDirectory = Environment.GetFolderPath(Environment.SpecialFolder.Desktop)
             };
 
             if (dlg.ShowDialog() != true) return;
 
-            var outputPath = dlg.FileName;
+            var outputDirectory = dlg.FolderName;
 
             try
             {
                 BtnExport.IsEnabled = false;
                 UpdateStatus("Eksport u toku...");
-                AppendLog($"=== Pokretanje eksporta u: {Path.GetFileName(outputPath)} ===");
+                AppendLog($"=== Pokretanje eksporta u folder: {outputDirectory} ===");
 
                 var dossierType = CmbTransferDossierType.SelectedItem is ComboBoxItem ci &&
                                   ci.Content?.ToString() != "(sve)"
@@ -418,11 +416,15 @@ namespace Alfresco.App.UserControls
                     ? cit.Tag?.ToString()
                     : null;
 
-                await Task.Run(() => _exportService.ExportAsync(dossierType, targetDossierType, outputPath));
+                var createdFiles = await Task.Run(() => _exportService.ExportAsync(dossierType, targetDossierType, outputDirectory));
 
                 UpdateStatus("Eksport zavrsen.");
-                AppendLog($"=== Eksport zavrsen: {outputPath} ===");
-                MessageBox.Show($"Eksport uspesno sacuvan:\n{outputPath}", "Eksport", MessageBoxButton.OK, MessageBoxImage.Information);
+                AppendLog($"=== Eksport zavrsen: {createdFiles.Count} fajl(ova) u {outputDirectory} ===");
+
+                var fileList = string.Join("\n", System.Linq.Enumerable.Select(createdFiles, Path.GetFileName));
+                MessageBox.Show(
+                    $"Eksport uspesno zavrsen.\nFolder: {outputDirectory}\n\nKreirani fajlovi ({createdFiles.Count}):\n{fileList}",
+                    "Eksport", MessageBoxButton.OK, MessageBoxImage.Information);
             }
             catch (Exception ex)
             {

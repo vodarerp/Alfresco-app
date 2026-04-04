@@ -72,5 +72,17 @@ namespace SqlServer.Abstraction.Interfaces
         Task<IList<string?>> GetDistinctExportTargetTypesAsync(
             string? dossierType = null,
             CancellationToken ct = default);
+
+        // Vraca count redova po TargetDossierType — za odluku o sheet splitting-u
+        Task<IList<(string? TargetDossierType, long Count)>> GetExportTargetTypeCountsAsync(
+            string? dossierType = null,
+            CancellationToken ct = default);
+
+        // Paged unbuffered za sheet splitting kada ima > 900k redova
+        IEnumerable<PreviewDocStaging> GetForExportUnbufferedPaged(
+            string? dossierType,
+            string? targetDossierType,
+            long offset,
+            int pageSize);
     }
 }

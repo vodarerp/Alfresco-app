@@ -341,6 +341,62 @@ namespace SqlServer.Infrastructure.Implementation
             return result.ToList();
         }
 
+        public async Task<IList<(string? TargetDossierType, long Count)>> GetExportTargetTypeCountsAsync(
+            string? dossierType = null,
+            CancellationToken ct = default)
+        {
+            var sql = @"
+                SELECT TargetDossierType, COUNT(*) AS Count
+                FROM PreviewDocStaging
+                WHERE 1=1";
+            var dp = new DynamicParameters();
+
+            if (!string.IsNullOrWhiteSpace(dossierType))
+            {
+                sql += " AND DossierType = @DossierType";
+                dp.Add("@DossierType", dossierType);
+            }
+
+            sql += " GROUP BY TargetDossierType ORDER BY TargetDossierType";
+
+            var cmd = new CommandDefinition(sql, dp, Tx, commandTimeout: _commandTimeoutSeconds, cancellationToken: ct);
+            var rows = await Conn.QueryAsync<ExportCountRow>(cmd).ConfigureAwait(false);
+            return rows.Select(r => (r.TargetDossierType, r.Count)).ToList();
+        }
+
+        public IEnumerable<PreviewDocStaging> GetForExportUnbufferedPaged(
+            string? dossierType,
+            string? targetDossierType,
+            long offset,
+            int pageSize)
+        {
+            var sql = "SELECT * FROM PreviewDocStaging WHERE 1=1";
+            var dp = new DynamicParameters();
+
+            if (!string.IsNullOrWhiteSpace(dossierType))
+            {
+                sql += " AND DossierType = @DossierType";
+                dp.Add("@DossierType", dossierType);
+            }
+            if (!string.IsNullOrWhiteSpace(targetDossierType))
+            {
+                sql += " AND TargetDossierType = @TargetDossierType";
+                dp.Add("@TargetDossierType", targetDossierType);
+            }
+
+            sql += " ORDER BY Id OFFSET @Offset ROWS FETCH NEXT @PageSize ROWS ONLY";
+            dp.Add("@Offset", offset);
+            dp.Add("@PageSize", pageSize);
+
+            return Conn.Query<PreviewDocStaging>(sql, dp, Tx, buffered: false, commandTimeout: _commandTimeoutSeconds);
+        }
+
+        private sealed class ExportCountRow
+        {
+            public string? TargetDossierType { get; set; }
+            public long Count { get; set; }
+        }
+
         public async Task<IEnumerable<PreviewDocStaging>> GetForTransferAsync(
             string? dossierType = null,
             string? targetDossierType = null,

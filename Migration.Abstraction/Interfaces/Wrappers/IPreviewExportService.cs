@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -6,14 +7,15 @@ namespace Migration.Abstraction.Interfaces.Wrappers
     public interface IPreviewExportService
     {
         /// <summary>
-        /// Eksportuje PreviewDocStaging u .xlsx fajl, sheet po sheet za svaki TargetDossierType.
+        /// Eksportuje PreviewDocStaging u zasebne .xlsx fajlove — jedan fajl po TargetDossierType.
+        /// Sheet-ovi se dele na 500 000 redova. Fajlovi se kreiraju u outputDirectory.
         /// Filtrira po DossierType i TargetDossierType (null = sve).
-        /// Vraća putanju do generisanog fajla.
+        /// Vraća listu putanja kreiranih fajlova.
         /// </summary>
-        Task<string> ExportAsync(
+        Task<IList<string>> ExportAsync(
             string? dossierType,
             string? targetDossierType,
-            string outputPath,
+            string outputDirectory,
             CancellationToken ct = default);
     }
 }
