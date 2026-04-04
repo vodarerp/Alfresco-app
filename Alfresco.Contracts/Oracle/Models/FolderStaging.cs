@@ -197,5 +197,10 @@ namespace Alfresco.Contracts.Oracle.Models
         public string? TargetDossierType { get; set; }       // 300, 400, 500, 700, 999 (DossierType enum vrednost)
 
         public string? ClientSegment { get; set; }        // "PI", "LE", "RETAIL", "SME"
+
+        /// <summary>
+        /// 1 = folder je postojao pre migracije (FOLDER_EXISTS), 0 = folder kreiran migracijom (FOLDER_CREATED)
+        /// </summary>
+        public int IsNewlyCreated { get; set; }
     }
 }

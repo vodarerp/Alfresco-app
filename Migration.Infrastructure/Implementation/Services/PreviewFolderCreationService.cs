@@ -11,6 +11,7 @@ using Migration.Abstraction.Interfaces.Wrappers;
 using Migration.Abstraction.Models;
 using SqlServer.Abstraction.Interfaces;
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Linq;
@@ -54,18 +55,18 @@ namespace Migration.Infrastructure.Implementation.Services
             const int batchSize = 50;
 
             _fileLogger.LogInformation("PreviewFolderCreationService: Start.");
-            _uiLogger.LogInformation("PreviewFolderCreationService: Pokretanje Faze 3 — kreiranje foldera...");
+            _uiLogger.LogInformation("PreviewFolderCreationService: Pokretanje Faze 3 — kreiranje foldera i upis u FolderStaging...");
 
-            long totalCreated = 0;
-            long totalFailed  = 0;
-            int  batchNum     = 0;
+            long totalProcessed = 0;
+            long totalFailed    = 0;
+            int  batchNum       = 0;
 
             while (true)
             {
                 ct.ThrowIfCancellationRequested();
 
-                // Atomično uzimamo batch foldera (FOLDER_PENDING_CREATION → IN_PROGRESS)
-                IList<string> folderNames;
+                // Atomično uzimamo batch foldera (FOLDER_PENDING_CREATION | FOLDER_EXISTS → IN_PROGRESS)
+                IList<(string FolderName, bool NeedsCreation)> folderItems;
                 await using (var scope = _scopeFactory.CreateAsyncScope())
                 {
                     var uow  = scope.ServiceProvider.GetRequiredService<IUnitOfWork>();
@@ -74,8 +75,8 @@ namespace Migration.Infrastructure.Implementation.Services
                     await uow.BeginAsync(ct: ct).ConfigureAwait(false);
                     try
                     {
-                        var names = await repo.GetDistinctFoldersForCreationAsync(batchSize, ct).ConfigureAwait(false);
-                        folderNames = names.ToList();
+                        var items = await repo.GetDistinctFoldersForFolderStagingAsync(batchSize, ct).ConfigureAwait(false);
+                        folderItems = items.ToList();
                         await uow.CommitAsync(ct: ct).ConfigureAwait(false);
                     }
                     catch
@@ -85,31 +86,64 @@ namespace Migration.Infrastructure.Implementation.Services
                     }
                 }
 
-                if (folderNames.Count == 0)
+                if (folderItems.Count == 0)
                 {
-                    _fileLogger.LogInformation("PreviewFolderCreationService: Nema vise foldera za kreiranje, zavrseno.");
+                    _fileLogger.LogInformation("PreviewFolderCreationService: Nema vise foldera za obradu, zavrseno.");
                     break;
                 }
 
                 batchNum++;
                 _fileLogger.LogInformation(
-                    "PreviewFolderCreationService: Batch {Batch} — {Count} foldera za kreiranje",
-                    batchNum, folderNames.Count);
+                    "PreviewFolderCreationService: Batch {Batch} — {Count} foldera",
+                    batchNum, folderItems.Count);
+
+                var folderStagingBag = new ConcurrentBag<FolderStaging>();
 
                 await Parallel.ForEachAsync(
-                    folderNames,
+                    folderItems,
                     new ParallelOptions { MaxDegreeOfParallelism = 5, CancellationToken = ct },
-                    async (folderName, token) =>
+                    async (folderItem, token) =>
                     {
+                        var (folderName, needsCreation) = folderItem;
                         try
                         {
-                            var nodeId = await CreateOneFolderAsync(folderName, token).ConfigureAwait(false);
-                            await PersistCreatedFolderAsync(folderName, nodeId, token).ConfigureAwait(false);
+                            // 1. Uzimamo reprezentativni zapis
+                            PreviewDocStaging? record;
+                            await using (var scope = _scopeFactory.CreateAsyncScope())
+                            {
+                                var uow  = scope.ServiceProvider.GetRequiredService<IUnitOfWork>();
+                                var repo = scope.ServiceProvider.GetRequiredService<IPreviewDocStagingRepository>();
 
-                            Interlocked.Increment(ref totalCreated);
-                            _fileLogger.LogInformation(
-                                "PreviewFolderCreationService: '{Folder}' kreiran → NodeId={NodeId}",
-                                folderName, nodeId);
+                                await uow.BeginAsync(ct: token).ConfigureAwait(false);
+                                record = await repo.GetFirstRecordByFolderNameAsync(folderName, token).ConfigureAwait(false);
+                                await uow.CommitAsync(ct: token).ConfigureAwait(false);
+                            }
+
+                            if (record == null)
+                                throw new InvalidOperationException($"Nije pronađen nijedan zapis za folder '{folderName}'.");
+
+                            string? nodeId = record.DossierDestinationFolderId;
+
+                            // 2. Kreiranje u Alfresci samo ako je potrebno
+                            if (needsCreation)
+                            {
+                                nodeId = await CreateInAlfrescoAsync(record, folderName, token).ConfigureAwait(false);
+                                await PersistCreatedFolderAsync(folderName, nodeId, token).ConfigureAwait(false);
+
+                                _fileLogger.LogInformation(
+                                    "PreviewFolderCreationService: '{Folder}' kreiran → NodeId={NodeId}",
+                                    folderName, nodeId);
+                            }
+                            else
+                            {
+                                _fileLogger.LogInformation(
+                                    "PreviewFolderCreationService: '{Folder}' vec postoji → NodeId={NodeId}",
+                                    folderName, nodeId);
+                            }
+
+                            // 3. Dodajemo u bag za FolderStaging
+                            folderStagingBag.Add(BuildFolderStagingRecord(record, nodeId, needsCreation));
+                            Interlocked.Increment(ref totalProcessed);
                         }
                         catch (OperationCanceledException) { throw; }
                         catch (Exception ex)
@@ -120,30 +154,54 @@ namespace Migration.Infrastructure.Implementation.Services
                                 folderName, ex.Message);
                             _dbLogger.LogError(ex, "PreviewFolderCreationService: Folder '{Folder}'", folderName);
 
-                            // Vraćamo na FOLDER_PENDING_CREATION da se može ponoviti
-                            await TryResetStatusAsync(folderName, token).ConfigureAwait(false);
+                            await TryResetStatusAsync(folderName, needsCreation ? "FOLDER_PENDING_CREATION" : "FOLDER_EXISTS", token)
+                                .ConfigureAwait(false);
                         }
 
                         progressCallback?.Invoke(new WorkerProgress
                         {
-                            ProcessedItems = (int)(Interlocked.Read(ref totalCreated) + Interlocked.Read(ref totalFailed)),
-                            SuccessCount   = (int)Interlocked.Read(ref totalCreated),
+                            ProcessedItems = (int)(Interlocked.Read(ref totalProcessed) + Interlocked.Read(ref totalFailed)),
+                            SuccessCount   = (int)Interlocked.Read(ref totalProcessed),
                             FailedCount    = (int)Interlocked.Read(ref totalFailed),
-                            Message        = $"Batch {batchNum}: kreirano {Interlocked.Read(ref totalCreated)}, greske {Interlocked.Read(ref totalFailed)}",
+                            Message        = $"Batch {batchNum}: obradjeno {Interlocked.Read(ref totalProcessed)}, greske {Interlocked.Read(ref totalFailed)}",
                             Timestamp      = DateTimeOffset.UtcNow
                         });
                     }).ConfigureAwait(false);
+
+                // Bulk-insert FolderStaging posle svakog batcha
+                if (!folderStagingBag.IsEmpty)
+                {
+                    var toInsert = folderStagingBag.ToList();
+                    await using var fsScope = _scopeFactory.CreateAsyncScope();
+                    var fsUow  = fsScope.ServiceProvider.GetRequiredService<IUnitOfWork>();
+                    var fsRepo = fsScope.ServiceProvider.GetRequiredService<IFolderStagingRepository>();
+
+                    await fsUow.BeginAsync(ct: ct).ConfigureAwait(false);
+                    try
+                    {
+                        await fsRepo.InsertManyIgnoreDuplicatesAsync(toInsert, ct).ConfigureAwait(false);
+                        await fsUow.CommitAsync(ct: ct).ConfigureAwait(false);
+                        _fileLogger.LogInformation(
+                            "PreviewFolderCreationService: FolderStaging — upisano {Count} foldera (batch {Batch})",
+                            toInsert.Count, batchNum);
+                    }
+                    catch
+                    {
+                        await fsUow.RollbackAsync(ct: ct).ConfigureAwait(false);
+                        throw;
+                    }
+                }
             }
 
             var summary = $"Faza 3 zavrsena za {sw.Elapsed.TotalSeconds:F1}s — " +
-                          $"kreirano={totalCreated}, greske={totalFailed}";
+                          $"obradjeno={totalProcessed}, greske={totalFailed}";
             _fileLogger.LogInformation("PreviewFolderCreationService: {Summary}", summary);
             _uiLogger.LogInformation("PreviewFolderCreationService: {Summary}", summary);
 
             progressCallback?.Invoke(new WorkerProgress
             {
-                ProcessedItems = (int)(totalCreated + totalFailed),
-                SuccessCount   = (int)totalCreated,
+                ProcessedItems = (int)(totalProcessed + totalFailed),
+                SuccessCount   = (int)totalProcessed,
                 FailedCount    = (int)totalFailed,
                 Message        = summary,
                 Timestamp      = DateTimeOffset.UtcNow
@@ -153,42 +211,22 @@ namespace Migration.Infrastructure.Implementation.Services
         }
 
         // ──────────────────────────────────────────────────────────────────────
-        // Kreiranje jednog foldera
+        // Kreiranje foldera u Alfresci
         // ──────────────────────────────────────────────────────────────────────
 
-        private async Task<string> CreateOneFolderAsync(string folderName, CancellationToken ct)
+        private async Task<string> CreateInAlfrescoAsync(PreviewDocStaging record, string folderName, CancellationToken ct)
         {
-            // 1. Uzimamo jedan reprezentativni zapis iz DB (sa ClientApi* podacima)
-            PreviewDocStaging? record;
-            await using (var scope = _scopeFactory.CreateAsyncScope())
-            {
-                var uow  = scope.ServiceProvider.GetRequiredService<IUnitOfWork>();
-                var repo = scope.ServiceProvider.GetRequiredService<IPreviewDocStagingRepository>();
-
-                await uow.BeginAsync(ct: ct).ConfigureAwait(false);
-                record = await repo.GetFirstRecordByFolderNameAsync(folderName, ct).ConfigureAwait(false);
-                await uow.CommitAsync(ct: ct).ConfigureAwait(false);
-            }
-
-            if (record == null)
-                throw new InvalidOperationException($"Nije pronađen nijedan zapis za folder '{folderName}'.");
-
-            // 2. Određujemo GUID parent foldera direktno iz konfiguracije
-            var prefix         = DossierIdFormatter.ExtractPrefix(folderName)?.ToUpperInvariant() ?? "";
+            var prefix          = DossierIdFormatter.ExtractPrefix(folderName)?.ToUpperInvariant() ?? "";
             var dossierParentId = ResolveDossierParentId(prefix);
 
-            // 3. Gradimo Alfresco properties iz ClientApi* kolona
             var clientData = ReconstructClientData(record);
             var properties = _clientApiEnricher.BuildFolderProperties(clientData, folderName);
-
-            // 4. Odredjujemo node type iz FolderNodeTypeMapping
-            var nodeType = DetermineNodeType(record.TargetDossierType);
+            var nodeType   = DetermineNodeType(record.TargetDossierType);
 
             _fileLogger.LogInformation(
                 "PreviewFolderCreationService: Kreiranje '{Folder}' pod '{Parent}' (nodeType={NodeType}, props={PropCount})",
                 folderName, dossierParentId, nodeType, properties.Count);
 
-            // 5. Kreiramo folder u Alfresci (sa handlovanjem race condition)
             try
             {
                 var created = await _alfrescoWriteApi
@@ -216,12 +254,100 @@ namespace Migration.Infrastructure.Implementation.Services
                     return existing.Entry.Id;
                 }
 
-                throw; // pravi problem, ne race condition
+                throw;
             }
         }
 
         // ──────────────────────────────────────────────────────────────────────
-        // Mapiranje prefix → GUID parent foldera iz konfiguracije
+        // DB persist
+        // ──────────────────────────────────────────────────────────────────────
+
+        private async Task PersistCreatedFolderAsync(string folderName, string nodeId, CancellationToken ct)
+        {
+            await using var scope = _scopeFactory.CreateAsyncScope();
+            var uow  = scope.ServiceProvider.GetRequiredService<IUnitOfWork>();
+            var repo = scope.ServiceProvider.GetRequiredService<IPreviewDocStagingRepository>();
+
+            await uow.BeginAsync(ct: ct).ConfigureAwait(false);
+            try
+            {
+                await repo.UpdateFolderDataAsync(folderName, nodeId, isCreated: 1, status: "FOLDER_CREATED", ct)
+                          .ConfigureAwait(false);
+                await uow.CommitAsync(ct: ct).ConfigureAwait(false);
+            }
+            catch
+            {
+                await uow.RollbackAsync(ct: ct).ConfigureAwait(false);
+                throw;
+            }
+        }
+
+        private async Task TryResetStatusAsync(string folderName, string originalStatus, CancellationToken ct)
+        {
+            try
+            {
+                await using var scope = _scopeFactory.CreateAsyncScope();
+                var uow  = scope.ServiceProvider.GetRequiredService<IUnitOfWork>();
+                var repo = scope.ServiceProvider.GetRequiredService<IPreviewDocStagingRepository>();
+
+                await uow.BeginAsync(ct: ct).ConfigureAwait(false);
+                await repo.UpdateFolderDataAsync(folderName, null, 0, originalStatus, ct).ConfigureAwait(false);
+                await uow.CommitAsync(ct: ct).ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                _fileLogger.LogError(
+                    "PreviewFolderCreationService: Ne mogu reset status za '{Folder}': {Error}",
+                    folderName, ex.Message);
+            }
+        }
+
+        // ──────────────────────────────────────────────────────────────────────
+        // Gradnja FolderStaging zapisa iz PreviewDocStaging
+        // ──────────────────────────────────────────────────────────────────────
+
+        private static FolderStaging BuildFolderStagingRecord(PreviewDocStaging record, string? nodeId, bool needsCreation)
+        {
+            var now = DateTime.UtcNow;
+            return new FolderStaging
+            {
+                NodeId            = nodeId,
+                Name              = record.DossierDestinationFolderName,
+                Status            = "DONE",
+                CreatedAt         = now,
+                UpdatedAt         = now,
+                ArchivedAt        = now,
+                ProcessDate       = now,
+                ClientType        = record.ClientApiClientType,
+                CoreId            = record.CoreId,
+                ClientName        = record.ClientApiClientName,
+                MbrJmbg           = record.ClientApiMbrJmbg,
+                ProductType       = record.ProductType,
+                Source            = record.Source,
+                Residency         = record.ClientApiResidency,
+                Segment           = record.ClientApiSegment,
+                ClientSubtype     = record.ClientApiClientSubtype,
+                Staff             = record.ClientApiStaff,
+                OpuUser           = record.ClientApiOpuUser,
+                OpuRealization    = record.ClientApiOpuRealization,
+                Barclex           = record.ClientApiBarclex,
+                Collaborator      = record.ClientApiCollaborator,
+                BarCLEXName       = record.ClientApiBarCLEXName,
+                BarCLEXOpu        = record.ClientApiBarCLEXOpu,
+                BarCLEXGroupName  = record.ClientApiBarCLEXGroupName,
+                BarCLEXGroupCode  = record.ClientApiBarCLEXGroupCode,
+                BarCLEXCode       = record.ClientApiBarCLEXCode,
+                TipDosijea        = record.DossierType,
+                TargetDossierType = record.TargetDossierType,
+                ClientSegment     = record.ClientApiSegment,
+                // needsCreation=true → folder kreiran migracijom → IsNewlyCreated=1
+                // needsCreation=false → folder vec postojao → IsNewlyCreated=0
+                IsNewlyCreated    = needsCreation ? 1 : 0,
+            };
+        }
+
+        // ──────────────────────────────────────────────────────────────────────
+        // Helpers
         // ──────────────────────────────────────────────────────────────────────
 
         private string ResolveDossierParentId(string prefix)
@@ -251,54 +377,6 @@ namespace Migration.Infrastructure.Implementation.Services
             return idx >= 0 ? workspaceUrl[(idx + 1)..] : workspaceUrl;
         }
 
-        // ──────────────────────────────────────────────────────────────────────
-        // DB persist
-        // ──────────────────────────────────────────────────────────────────────
-
-        private async Task PersistCreatedFolderAsync(string folderName, string nodeId, CancellationToken ct)
-        {
-            await using var scope = _scopeFactory.CreateAsyncScope();
-            var uow  = scope.ServiceProvider.GetRequiredService<IUnitOfWork>();
-            var repo = scope.ServiceProvider.GetRequiredService<IPreviewDocStagingRepository>();
-
-            await uow.BeginAsync(ct: ct).ConfigureAwait(false);
-            try
-            {
-                await repo.UpdateFolderDataAsync(folderName, nodeId, isCreated: 1, status: "FOLDER_CREATED", ct)
-                          .ConfigureAwait(false);
-                await uow.CommitAsync(ct: ct).ConfigureAwait(false);
-            }
-            catch
-            {
-                await uow.RollbackAsync(ct: ct).ConfigureAwait(false);
-                throw;
-            }
-        }
-
-        private async Task TryResetStatusAsync(string folderName, CancellationToken ct)
-        {
-            try
-            {
-                await using var scope = _scopeFactory.CreateAsyncScope();
-                var uow  = scope.ServiceProvider.GetRequiredService<IUnitOfWork>();
-                var repo = scope.ServiceProvider.GetRequiredService<IPreviewDocStagingRepository>();
-
-                await uow.BeginAsync(ct: ct).ConfigureAwait(false);
-                await repo.UpdateFolderDataAsync(folderName, null, 0, "FOLDER_PENDING_CREATION", ct).ConfigureAwait(false);
-                await uow.CommitAsync(ct: ct).ConfigureAwait(false);
-            }
-            catch (Exception ex)
-            {
-                _fileLogger.LogError(
-                    "PreviewFolderCreationService: Ne mogu reset status za '{Folder}': {Error}",
-                    folderName, ex.Message);
-            }
-        }
-
-        // ──────────────────────────────────────────────────────────────────────
-        // Helpers
-        // ──────────────────────────────────────────────────────────────────────
-
         private static ClientData ReconstructClientData(PreviewDocStaging record) => new ClientData
         {
             MbrJmbg          = record.ClientApiMbrJmbg          ?? string.Empty,
@@ -324,7 +402,7 @@ namespace Migration.Infrastructure.Implementation.Services
             if (int.TryParse(targetDossierTypeStr, out var typeInt))
             {
                 var dossierType = (DossierType)typeInt;
-                var enumName    = dossierType.ToString(); // npr. "ClientFL"
+                var enumName    = dossierType.ToString();
                 var mapping     = _options.Value.FolderNodeTypeMapping;
 
                 if (mapping.TryGetValue(enumName, out var nodeType))

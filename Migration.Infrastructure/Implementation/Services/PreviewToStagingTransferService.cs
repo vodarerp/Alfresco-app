@@ -165,26 +165,21 @@ namespace Migration.Infrastructure.Implementation.Services
             return true;
         }
 
-        // ──────────────────────────────────────────────────────────────────────
-        // TODO: Popuniti mapiranje kolona PreviewDocStaging → DocStaging
-        // ──────────────────────────────────────────────────────────────────────
         private static DocStaging MapToDocStaging(PreviewDocStaging src)
         {
             return new DocStaging
             {
-                // Obavezna polja
                 NodeId   = src.NodeId   ?? string.Empty,
                 Name     = src.Name     ?? string.Empty,
-                NodeType = src.NodeType ?? string.Empty,
-                ParentId = src.DossierDestinationFolderId ?? src.ParentId ?? string.Empty,
-                Status   = "READY",
                 IsFolder = false,
                 IsFile   = true,
-                CreatedAt  = DateTime.UtcNow,
-                UpdatedAt  = DateTime.UtcNow,
+                NodeType = src.NodeType ?? string.Empty,
+                ParentId = src.ParentId ?? string.Empty,
+                Status   = "READY",
+                CreatedAt = DateTime.UtcNow,
+                UpdatedAt = DateTime.UtcNow,
 
-                // TODO: Popuniti ostala polja prema poslovnoj logici
-                DocumentType          = src.DocumentType,
+                DocumentType          = src.NewDocumentCode,
                 DocumentTypeMigration = src.DocumentTypeMigration,
                 Source                = src.Source,
                 IsActive              = src.IsActive == 1,
@@ -194,20 +189,22 @@ namespace Migration.Infrastructure.Implementation.Services
                 ContractNumber        = src.ContractNumber,
                 CoreId                = src.CoreId,
                 AccountNumbers        = src.AccountNumbers,
-                FinalDocumentType     = src.FinalDocumentType,
                 ProductType           = src.ProductType,
                 OriginalDocumentName  = src.OriginalDocumentName,
                 NewDocumentName       = src.NewDocumentName,
                 OriginalDocumentCode  = src.OriginalDocumentCode,
                 NewDocumentCode       = src.NewDocumentCode,
+                TipDosijea            = src.DossierType,
+                TargetDossierType     = int.TryParse(src.TargetDossierType, out var tdt) ? tdt : null,
                 ClientSegment         = src.ClientSegment,
                 OldAlfrescoStatus     = src.OldAlfrescoStatus,
                 NewAlfrescoStatus     = src.NewAlfrescoStatus,
                 DocDescription        = src.DocDescription,
                 DossierDestFolderId   = src.DossierDestinationFolderName,
                 DestinationFolderId   = src.DossierDestinationFolderId,
-                DossierDestFolderIsCreated = src.DossierDestinationFolderIsCreated == 1,
-                TargetDossierType     = int.TryParse(src.TargetDossierType, out var tdt) ? tdt : null,
+                // DossierDestinationFolderIsCreated=1 znaci kreiran migracijom → DossierDestFolderIsCreated=false
+                // DossierDestinationFolderIsCreated=0 znaci vec postojao   → DossierDestFolderIsCreated=true
+                DossierDestFolderIsCreated = src.DossierDestinationFolderIsCreated != 1,
             };
         }
     }

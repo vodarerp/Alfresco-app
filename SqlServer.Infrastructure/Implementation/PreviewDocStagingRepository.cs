@@ -391,6 +391,37 @@ namespace SqlServer.Infrastructure.Implementation
             return Conn.Query<PreviewDocStaging>(sql, dp, Tx, buffered: false, commandTimeout: _commandTimeoutSeconds);
         }
 
+        public async Task<IEnumerable<(string FolderName, bool NeedsCreation)>> GetDistinctFoldersForFolderStagingAsync(int batchSize, CancellationToken ct = default)
+        {
+            const string sql = @"
+                WITH SelectedFolders AS (
+                    SELECT DISTINCT TOP (@BatchSize) DossierDestinationFolderName
+                    FROM PreviewDocStaging WITH (UPDLOCK, READPAST)
+                    WHERE Status IN ('FOLDER_PENDING_CREATION', 'FOLDER_EXISTS')
+                      AND ISNULL(DossierDestinationFolderName, '') <> ''
+                )
+                UPDATE d
+                SET d.Status = 'IN_PROGRESS'
+                OUTPUT INSERTED.DossierDestinationFolderName, DELETED.Status AS OriginalStatus
+                FROM PreviewDocStaging d
+                JOIN SelectedFolders s ON d.DossierDestinationFolderName = s.DossierDestinationFolderName;";
+
+            var dp = new DynamicParameters();
+            dp.Add("@BatchSize", batchSize);
+            var cmd = new CommandDefinition(sql, dp, Tx, commandTimeout: _commandTimeoutSeconds, cancellationToken: ct);
+            var rows = await Conn.QueryAsync<FolderSyncRow>(cmd).ConfigureAwait(false);
+            return rows
+                .GroupBy(r => r.DossierDestinationFolderName)
+                .Select(g => (g.Key, g.First().OriginalStatus == "FOLDER_PENDING_CREATION"))
+                .ToList();
+        }
+
+        private sealed class FolderSyncRow
+        {
+            public string DossierDestinationFolderName { get; set; } = "";
+            public string OriginalStatus               { get; set; } = "";
+        }
+
         private sealed class ExportCountRow
         {
             public string? TargetDossierType { get; set; }

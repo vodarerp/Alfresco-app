@@ -136,14 +136,14 @@ namespace SqlServer.Infrastructure.Implementation
                                     ProcessDate, Residency, Segment, ClientSubtype, Staff, OpuUser,
                                     OpuRealization, Barclex, Collaborator, BarCLEXName, BarCLEXOpu,
                                     BarCLEXGroupName, BarCLEXGroupCode, BarCLEXCode, Creator, ArchivedAt,
-                                    TipDosijea, TargetDossierType, ClientSegment)
+                                    TipDosijea, TargetDossierType, ClientSegment, IsNewlyCreated)
                             VALUES (@NodeId, @ParentId, @Name, @Status, @DestFolderId, @DossierDestFolderId,
                                     @CreatedAt, @UpdatedAt, @ClientType, @CoreId, @ClientName, @MbrJmbg,
                                     @ProductType, @ContractNumber, @Batch, @Source, @UniqueIdentifier,
                                     @ProcessDate, @Residency, @Segment, @ClientSubtype, @Staff, @OpuUser,
                                     @OpuRealization, @Barclex, @Collaborator, @BarCLEXName, @BarCLEXOpu,
                                     @BarCLEXGroupName, @BarCLEXGroupCode, @BarCLEXCode, @Creator, @ArchivedAt,
-                                    @TipDosijea, @TargetDossierType, @ClientSegment);";
+                                    @TipDosijea, @TargetDossierType, @ClientSegment, @IsNewlyCreated);";
 
                     var dp = new DynamicParameters();
                     dp.Add("@NodeId", folder.NodeId);
@@ -182,6 +182,7 @@ namespace SqlServer.Infrastructure.Implementation
                     dp.Add("@TipDosijea", folder.TipDosijea);
                     dp.Add("@TargetDossierType", folder.TargetDossierType);
                     dp.Add("@ClientSegment", folder.ClientSegment);
+                    dp.Add("@IsNewlyCreated", folder.IsNewlyCreated);
 
                     var cmd = new CommandDefinition(sql, dp, Tx, commandTimeout: _commandTimeoutSeconds, cancellationToken: ct);
                     var rowsAffected = await Conn.ExecuteAsync(cmd).ConfigureAwait(false);

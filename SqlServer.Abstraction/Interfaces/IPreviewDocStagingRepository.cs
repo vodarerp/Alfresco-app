@@ -57,6 +57,10 @@ namespace SqlServer.Abstraction.Interfaces
         // Rollback Faze 3: dohvata distinct (FolderName, FolderId) za sve FOLDER_CREATED zapise
         Task<IEnumerable<(string FolderName, string FolderId)>> GetCreatedFolderIdsAsync(CancellationToken ct = default);
 
+        // Atomično uzima batch foldera sa statusom FOLDER_PENDING_CREATION ili FOLDER_EXISTS i postavlja ih na IN_PROGRESS
+        // NeedsCreation = true → FOLDER_PENDING_CREATION (treba kreirati), false → FOLDER_EXISTS (samo upis u FolderStaging)
+        Task<IEnumerable<(string FolderName, bool NeedsCreation)>> GetDistinctFoldersForFolderStagingAsync(int batchSize, CancellationToken ct = default);
+
         // Dohvata zapise za eksport, opcionalno filtrirane po DossierType i TargetDossierType
         Task<IEnumerable<PreviewDocStaging>> GetForExportAsync(
             string? dossierType = null,
