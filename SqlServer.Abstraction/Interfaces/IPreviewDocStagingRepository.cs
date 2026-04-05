@@ -88,5 +88,15 @@ namespace SqlServer.Abstraction.Interfaces
             string? targetDossierType,
             long offset,
             int pageSize);
+
+        // Atomično uzima batch zapisa spremnih za transfer i postavlja ih na TRANSFER_IN_PROGRESS
+        Task<IList<PreviewDocStaging>> TakeReadyForTransferAsync(
+            int batchSize,
+            string? dossierType,
+            string? targetDossierType,
+            CancellationToken ct = default);
+
+        // Resetuje zapise sa statusom TRANSFER_IN_PROGRESS nazad na originalni status (za rollback pri grešci)
+        Task ResetTransferInProgressAsync(IEnumerable<long> ids, CancellationToken ct = default);
     }
 }

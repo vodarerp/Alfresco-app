@@ -1,4 +1,5 @@
 using Alfresco.Contracts.Oracle.Models;
+using Microsoft.Data.SqlClient;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Migration.Abstraction.Interfaces.Wrappers;
@@ -7,7 +8,7 @@ using SqlServer.Abstraction.Interfaces;
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
-using System.Linq;
+using System.Runtime.CompilerServices;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -19,7 +20,9 @@ namespace Migration.Infrastructure.Implementation.Services
         private readonly ILogger _fileLogger;
         private readonly ILogger _uiLogger;
 
-        private const int BatchSize = 500;
+        private const int BatchSize           = 500;
+        private const int DegreeOfParallelism = 4;
+        private const int MaxDeadlockRetries  = 3;
 
         public PreviewToStagingTransferService(
             IServiceScopeFactory scopeFactory,
@@ -45,108 +48,101 @@ namespace Migration.Infrastructure.Implementation.Services
             long totalTransferred = 0;
             long totalFailed      = 0;
 
-            // Dohvatamo sve kandidate odjednom (filtriramo u SQL-u)
-            IList<PreviewDocStaging> candidates;
-            await using (var scope = _scopeFactory.CreateAsyncScope())
-            {
-                var uow  = scope.ServiceProvider.GetRequiredService<IUnitOfWork>();
-                var repo = scope.ServiceProvider.GetRequiredService<IPreviewDocStagingRepository>();
+            await Parallel.ForEachAsync(
+                FetchBatchesAsync(dossierType, targetDossierType, ct),
+                new ParallelOptions { MaxDegreeOfParallelism = DegreeOfParallelism, CancellationToken = ct },
+                async (batch, innerCt) =>
+                {
+                    var docStagingBatch = new List<DocStaging>(batch.Count);
+                    var transferredIds  = new List<long>(batch.Count);
+                    var failedIds       = new List<long>(batch.Count);
 
-                await uow.BeginAsync(ct: ct).ConfigureAwait(false);
-                try
-                {
-                    var result = await repo.GetForTransferAsync(dossierType, targetDossierType, ct).ConfigureAwait(false);
-                    candidates = result.ToList();
-                    await uow.CommitAsync(ct: ct).ConfigureAwait(false);
-                }
-                catch
-                {
-                    await uow.RollbackAsync(ct: ct).ConfigureAwait(false);
-                    throw;
-                }
-            }
+                    foreach (var preview in batch)
+                    {
+                        try
+                        {
+                            var doc = MapToDocStaging(preview);
+                            docStagingBatch.Add(doc);
+                            transferredIds.Add(preview.Id);
+                        }
+                        catch (Exception ex)
+                        {
+                            failedIds.Add(preview.Id);
+                            _fileLogger.LogError(
+                                "PreviewToStagingTransferService: Greska pri mapiranju NodeId={NodeId}: {Error}",
+                                preview.NodeId, ex.Message);
+                        }
+                    }
 
-            if (candidates.Count == 0)
-            {
-                _uiLogger.LogInformation("PreviewToStagingTransferService: Nema zapisa za transfer.");
-                progressCallback?.Invoke(new WorkerProgress
-                {
-                    ProcessedItems = 0,
-                    SuccessCount   = 0,
-                    FailedCount    = 0,
-                    Message        = "Nema zapisa za transfer.",
-                    Timestamp      = DateTimeOffset.UtcNow
+                    if (docStagingBatch.Count > 0)
+                    {
+                        bool writeSuccess = false;
+                        for (int attempt = 1; attempt <= MaxDeadlockRetries && !writeSuccess; attempt++)
+                        {
+                            if (attempt > 1)
+                                await Task.Delay(attempt * 200, innerCt).ConfigureAwait(false);
+
+                            await using var scope   = _scopeFactory.CreateAsyncScope();
+                            var uow      = scope.ServiceProvider.GetRequiredService<IUnitOfWork>();
+                            var docRepo  = scope.ServiceProvider.GetRequiredService<IDocStagingRepository>();
+                            var prevRepo = scope.ServiceProvider.GetRequiredService<IPreviewDocStagingRepository>();
+
+                            await uow.BeginAsync(ct: innerCt).ConfigureAwait(false);
+                            try
+                            {
+                                await docRepo.InsertManyIgnoreDuplicatesAsync(docStagingBatch, innerCt).ConfigureAwait(false);
+                                await prevRepo.UpdateTransferredBatchAsync(transferredIds, innerCt).ConfigureAwait(false);
+                                await uow.CommitAsync(ct: innerCt).ConfigureAwait(false);
+
+                                Interlocked.Add(ref totalTransferred, transferredIds.Count);
+                                writeSuccess = true;
+                            }
+                            catch (SqlException ex) when (ex.Number == 1205) // Deadlock
+                            {
+                                await uow.RollbackAsync(ct: innerCt).ConfigureAwait(false);
+                                _fileLogger.LogWarning(
+                                    "PreviewToStagingTransferService: Deadlock na batch-u, pokusaj {Attempt}/{Max}.",
+                                    attempt, MaxDeadlockRetries);
+
+                                if (attempt == MaxDeadlockRetries)
+                                {
+                                    _fileLogger.LogError(
+                                        "PreviewToStagingTransferService: Batch nije uspeo nakon {Max} pokusaja, resetovanje.", MaxDeadlockRetries);
+                                    failedIds.AddRange(transferredIds);
+                                }
+                            }
+                            catch (Exception ex)
+                            {
+                                await uow.RollbackAsync(ct: innerCt).ConfigureAwait(false);
+                                _fileLogger.LogError(
+                                    "PreviewToStagingTransferService: Greska pri upisu batcha: {Error}", ex.Message);
+                                failedIds.AddRange(transferredIds);
+                                break;
+                            }
+                        }
+                    }
+
+                    // Reset zapisa koji su ostali na TRANSFER_IN_PROGRESS zbog greske
+                    if (failedIds.Count > 0)
+                    {
+                        Interlocked.Add(ref totalFailed, failedIds.Count);
+                        await TryResetAsync(failedIds, innerCt).ConfigureAwait(false);
+                    }
+
+                    var transferred = Interlocked.Read(ref totalTransferred);
+                    var failed      = Interlocked.Read(ref totalFailed);
+                    var msg = $"Transferovano {transferred}, greske {failed}";
+                    _fileLogger.LogInformation("PreviewToStagingTransferService: {Msg}", msg);
+
+                    progressCallback?.Invoke(new WorkerProgress
+                    {
+                        ProcessedItems = transferred + failed,
+                        SuccessCount   = (int)transferred,
+                        FailedCount    = (int)failed,
+                        Message        = msg,
+                        Timestamp      = DateTimeOffset.UtcNow
+                    });
                 });
-                return true;
-            }
-
-            _fileLogger.LogInformation(
-                "PreviewToStagingTransferService: Pronadjeno {Count} zapisa za transfer.",
-                candidates.Count);
-
-            // Procesiramo u batchevima
-            for (int offset = 0; offset < candidates.Count; offset += BatchSize)
-            {
-                ct.ThrowIfCancellationRequested();
-
-                var batch = candidates.Skip(offset).Take(BatchSize).ToList();
-
-                var docStagingBatch  = new List<DocStaging>(batch.Count);
-                var transferredIds   = new List<long>(batch.Count);
-
-                foreach (var preview in batch)
-                {
-                    ct.ThrowIfCancellationRequested();
-                    try
-                    {
-                        var doc = MapToDocStaging(preview);
-                        docStagingBatch.Add(doc);
-                        transferredIds.Add(preview.Id);
-                        totalTransferred++;
-                    }
-                    catch (Exception ex)
-                    {
-                        totalFailed++;
-                        _fileLogger.LogError(
-                            "PreviewToStagingTransferService: Greska pri mapiranju NodeId={NodeId}: {Error}",
-                            preview.NodeId, ex.Message);
-                    }
-                }
-
-                if (docStagingBatch.Count > 0)
-                {
-                    await using var scope = _scopeFactory.CreateAsyncScope();
-                    var uow      = scope.ServiceProvider.GetRequiredService<IUnitOfWork>();
-                    var docRepo  = scope.ServiceProvider.GetRequiredService<IDocStagingRepository>();
-                    var prevRepo = scope.ServiceProvider.GetRequiredService<IPreviewDocStagingRepository>();
-
-                    await uow.BeginAsync(ct: ct).ConfigureAwait(false);
-                    try
-                    {
-                        await docRepo.InsertManyIgnoreDuplicatesAsync(docStagingBatch, ct).ConfigureAwait(false);
-                        await prevRepo.UpdateTransferredBatchAsync(transferredIds, ct).ConfigureAwait(false);
-                        await uow.CommitAsync(ct: ct).ConfigureAwait(false);
-                    }
-                    catch
-                    {
-                        await uow.RollbackAsync(ct: ct).ConfigureAwait(false);
-                        throw;
-                    }
-                }
-
-                var batchNum = (offset / BatchSize) + 1;
-                var msg = $"Batch {batchNum}: transferovano {totalTransferred}, greske {totalFailed}";
-                _fileLogger.LogInformation("PreviewToStagingTransferService: {Msg}", msg);
-
-                progressCallback?.Invoke(new WorkerProgress
-                {
-                    ProcessedItems = totalTransferred + totalFailed,
-                    SuccessCount   = (int)totalTransferred,
-                    FailedCount    = (int)totalFailed,
-                    Message        = msg,
-                    Timestamp      = DateTimeOffset.UtcNow
-                });
-            }
 
             var summary = $"Transfer zavrsen za {sw.Elapsed.TotalSeconds:F1}s — " +
                           $"transferovano={totalTransferred}, greske={totalFailed}";
@@ -163,6 +159,65 @@ namespace Migration.Infrastructure.Implementation.Services
             });
 
             return true;
+        }
+
+        private async IAsyncEnumerable<IList<PreviewDocStaging>> FetchBatchesAsync(
+            string? dossierType,
+            string? targetDossierType,
+            [EnumeratorCancellation] CancellationToken ct)
+        {
+            while (!ct.IsCancellationRequested)
+            {
+                IList<PreviewDocStaging> batch;
+                await using (var scope = _scopeFactory.CreateAsyncScope())
+                {
+                    var uow  = scope.ServiceProvider.GetRequiredService<IUnitOfWork>();
+                    var repo = scope.ServiceProvider.GetRequiredService<IPreviewDocStagingRepository>();
+
+                    await uow.BeginAsync(ct: ct).ConfigureAwait(false);
+                    try
+                    {
+                        batch = await repo.TakeReadyForTransferAsync(BatchSize, dossierType, targetDossierType, ct)
+                                          .ConfigureAwait(false);
+                        await uow.CommitAsync(ct: ct).ConfigureAwait(false);
+                    }
+                    catch
+                    {
+                        await uow.RollbackAsync(ct: ct).ConfigureAwait(false);
+                        throw;
+                    }
+                }
+
+                if (batch.Count == 0)
+                {
+                    _uiLogger.LogInformation("PreviewToStagingTransferService: Nema vise zapisa za transfer.");
+                    yield break;
+                }
+
+                _fileLogger.LogInformation(
+                    "PreviewToStagingTransferService: Preuzet batch od {Count} zapisa.", batch.Count);
+
+                yield return batch;
+            }
+        }
+
+        private async Task TryResetAsync(IList<long> ids, CancellationToken ct)
+        {
+            try
+            {
+                await using var scope = _scopeFactory.CreateAsyncScope();
+                var uow  = scope.ServiceProvider.GetRequiredService<IUnitOfWork>();
+                var repo = scope.ServiceProvider.GetRequiredService<IPreviewDocStagingRepository>();
+
+                await uow.BeginAsync(ct: ct).ConfigureAwait(false);
+                await repo.ResetTransferInProgressAsync(ids, ct).ConfigureAwait(false);
+                await uow.CommitAsync(ct: ct).ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                _fileLogger.LogError(
+                    "PreviewToStagingTransferService: Reset TRANSFER_IN_PROGRESS nije uspeo: {Error}", ex.Message);
+            }
         }
 
         private static DocStaging MapToDocStaging(PreviewDocStaging src)
@@ -202,8 +257,6 @@ namespace Migration.Infrastructure.Implementation.Services
                 DocDescription        = src.DocDescription,
                 DossierDestFolderId   = src.DossierDestinationFolderName,
                 DestinationFolderId   = src.DossierDestinationFolderId,
-                // DossierDestinationFolderIsCreated=1 znaci kreiran migracijom → DossierDestFolderIsCreated=false
-                // DossierDestinationFolderIsCreated=0 znaci vec postojao   → DossierDestFolderIsCreated=true
                 DossierDestFolderIsCreated = src.DossierDestinationFolderIsCreated != 1,
             };
         }

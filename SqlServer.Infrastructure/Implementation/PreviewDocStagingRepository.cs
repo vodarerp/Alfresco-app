@@ -428,6 +428,66 @@ namespace SqlServer.Infrastructure.Implementation
             public long Count { get; set; }
         }
 
+        public async Task<IList<PreviewDocStaging>> TakeReadyForTransferAsync(
+            int batchSize,
+            string? dossierType,
+            string? targetDossierType,
+            CancellationToken ct = default)
+        {
+            var whereExtra = "";
+            var dp = new DynamicParameters();
+            dp.Add("@BatchSize", batchSize);
+
+            if (!string.IsNullOrWhiteSpace(dossierType))
+            {
+                whereExtra += " AND DossierType = @DossierType";
+                dp.Add("@DossierType", dossierType);
+            }
+            if (!string.IsNullOrWhiteSpace(targetDossierType))
+            {
+                whereExtra += " AND TargetDossierType = @TargetDossierType";
+                dp.Add("@TargetDossierType", targetDossierType);
+            }
+
+            var sql = $@"
+                WITH Selected AS (
+                    SELECT TOP (@BatchSize) Id
+                    FROM PreviewDocStaging WITH (ROWLOCK, UPDLOCK, READPAST)
+                    WHERE Status IN ('FOLDER_EXISTS', 'FOLDER_CREATED')
+                    {whereExtra}
+                    ORDER BY Id ASC
+                )
+                UPDATE p
+                SET p.Status = 'TRANSFER_IN_PROGRESS'
+                OUTPUT INSERTED.*
+                FROM PreviewDocStaging p
+                INNER JOIN Selected s ON p.Id = s.Id";
+
+            var cmd = new CommandDefinition(sql, dp, Tx, commandTimeout: _commandTimeoutSeconds, cancellationToken: ct);
+            var result = await Conn.QueryAsync<PreviewDocStaging>(cmd).ConfigureAwait(false);
+            return result.AsList();
+        }
+
+        public async Task ResetTransferInProgressAsync(IEnumerable<long> ids, CancellationToken ct = default)
+        {
+            var idList = ids.ToList();
+            if (idList.Count == 0) return;
+
+            const string sql = @"
+                UPDATE PreviewDocStaging
+                SET Status = CASE
+                    WHEN DossierDestinationFolderIsCreated = 1 THEN 'FOLDER_CREATED'
+                    ELSE 'FOLDER_EXISTS'
+                END
+                WHERE Id IN @Ids
+                  AND Status = 'TRANSFER_IN_PROGRESS'";
+
+            var dp = new DynamicParameters();
+            dp.Add("@Ids", idList);
+            var cmd = new CommandDefinition(sql, dp, Tx, commandTimeout: _commandTimeoutSeconds, cancellationToken: ct);
+            await Conn.ExecuteAsync(cmd).ConfigureAwait(false);
+        }
+
         public async Task<IEnumerable<PreviewDocStaging>> GetForTransferAsync(
             string? dossierType = null,
             string? targetDossierType = null,

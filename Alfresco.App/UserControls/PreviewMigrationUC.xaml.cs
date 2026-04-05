@@ -26,11 +26,14 @@ namespace Alfresco.App.UserControls
         private readonly IPreviewToStagingTransferService _transferService;
         private readonly IPreviewExportService _exportService;
         private readonly IPreviewFolderRollbackService _rollbackService;
+        private readonly IMoveService _moveService;
         private CancellationTokenSource? _cts;
         private CancellationTokenSource? _ctsFaza2;
         private CancellationTokenSource? _ctsFaza3;
         private CancellationTokenSource? _ctsTransfer;
         private CancellationTokenSource? _ctsRollback;
+        private CancellationTokenSource? _ctsMigration;
+        private long _docReadyCount = 0;
 
         // Pagination state
         private int _currentPage = 1;
@@ -60,6 +63,7 @@ namespace Alfresco.App.UserControls
             _transferService = App.AppHost.Services.GetRequiredService<IPreviewToStagingTransferService>();
             _exportService = App.AppHost.Services.GetRequiredService<IPreviewExportService>();
             _rollbackService = App.AppHost.Services.GetRequiredService<IPreviewFolderRollbackService>();
+            _moveService = App.AppHost.Services.GetRequiredService<IMoveService>();
 
             var config = App.AppHost.Services.GetRequiredService<IConfiguration>();
             if (config.GetValue<bool>("EnablePreviewFolderRollback"))
@@ -380,6 +384,67 @@ namespace Alfresco.App.UserControls
             }
         }
 
+        private async void BtnStartMigration_Click(object sender, RoutedEventArgs e)
+        {
+            try
+            {
+                SetButtonsRunning(true);
+                ProgressBar.Value = 0;
+                UpdateStatus("Pokrenuta Faza 8: Start Migration...");
+                AppendLog("=== Pokretanje Faze 8: Start Migration (MoveService) ===");
+
+                _ctsMigration = new CancellationTokenSource();
+
+                void OnProgress(WorkerProgress p)
+                {
+                    Dispatcher.Invoke(() =>
+                    {
+                        UpdateStatus(p.Message ?? "U toku...");
+                        AppendLog($"Migration: {p.ProcessedItems}  |  Greske: {p.FailedCount}  |  {p.Message}");
+
+                        if (p.TotalItems > 0)
+                            ProgressBar.Value = Math.Min(100, p.ProgressPercentage);
+                    });
+                }
+
+                var result = await Task.Run(
+                    () => _moveService.RunLoopAsync(_ctsMigration.Token, OnProgress),
+                    _ctsMigration.Token);
+
+                ProgressBar.Value = 100;
+                var msg = result ? "Faza 8 zavrsena uspesno." : "Faza 8 zavrsena sa upozorenjem.";
+                UpdateStatus(msg);
+                AppendLog($"=== {msg} ===");
+
+                await RefreshStatisticsAsync();
+            }
+            catch (OperationCanceledException)
+            {
+                UpdateStatus("Migracija zaustavljena.");
+                AppendLog("=== Migracija zaustavljena od strane korisnika. ===");
+            }
+            catch (Exception ex)
+            {
+                UpdateStatus($"GRESKA Migracija: {ex.Message}");
+                AppendLog($"GRESKA: {ex.Message}");
+                MessageBox.Show($"Greska pri migraciji:\n{ex.Message}", "Greska", MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+            finally
+            {
+                SetButtonsRunning(false);
+                _ctsMigration?.Dispose();
+                _ctsMigration = null;
+            }
+        }
+
+        private void BtnStopMigration_Click(object sender, RoutedEventArgs e)
+        {
+            _ctsMigration?.Cancel();
+            BtnStopMigration.IsEnabled = false;
+            UpdateStatus("Zaustavljanje migracije...");
+            AppendLog("Zahtev za zaustavljanje migracije primljen...");
+        }
+
         private void BtnStopTransfer_Click(object sender, RoutedEventArgs e)
         {
             _ctsTransfer?.Cancel();
@@ -543,26 +608,32 @@ namespace Alfresco.App.UserControls
         {
             await using var scope = App.AppHost.Services.CreateAsyncScope();
             var repo = scope.ServiceProvider.GetRequiredService<IPreviewDocStagingRepository>();
+            var docRepo = scope.ServiceProvider.GetRequiredService<IDocStagingRepository>();
             var unitOfWork = scope.ServiceProvider.GetRequiredService<IUnitOfWork>();
             try
             {
-               
-
-               await  unitOfWork.BeginAsync();
+                await unitOfWork.BeginAsync();
 
                 var piCount = await repo.GetCountByDossierTypeAsync("PI");
                 var leCount = await repo.GetCountByDossierTypeAsync("LE");
                 var pendingCount = await repo.GetCountByStatusAsync("PENDING");
                 var folderExistsCount = await repo.GetCountByStatusAsync("FOLDER_EXISTS");
                 var folderCreatedCount = await repo.GetCountByStatusAsync("FOLDER_CREATED");
+                var docReadyCount = await docRepo.CountReadyForProcessingAsync(CancellationToken.None);
                 var total = piCount + leCount;
+
+                await unitOfWork.CommitAsync();
+
+                _docReadyCount = docReadyCount;
 
                 TxtTotalCount.Text = total.ToString("N0");
                 TxtPiCount.Text = piCount.ToString("N0");
                 TxtLeCount.Text = leCount.ToString("N0");
                 TxtPendingCount.Text = pendingCount.ToString("N0");
                 TxtFolderReadyCount.Text = (folderExistsCount + folderCreatedCount).ToString("N0");
-                await unitOfWork.CommitAsync();
+                TxtDocReadyCount.Text = docReadyCount.ToString("N0");
+                TxtDocReadyCountAction.Text = docReadyCount.ToString("N0");
+                BtnStartMigration.IsEnabled = docReadyCount > 0;
             }
             catch (Exception ex)
             {
@@ -621,6 +692,8 @@ namespace Alfresco.App.UserControls
             BtnStopFaza3.IsEnabled = isRunning;
             BtnStartTransfer.IsEnabled = !isRunning;
             BtnStopTransfer.IsEnabled = isRunning;
+            BtnStartMigration.IsEnabled = !isRunning && _docReadyCount > 0;
+            BtnStopMigration.IsEnabled = isRunning;
             BtnResetCheckpoint.IsEnabled = !isRunning;
             BtnClearStaging.IsEnabled = !isRunning;
             BtnRefreshStats.IsEnabled = !isRunning;

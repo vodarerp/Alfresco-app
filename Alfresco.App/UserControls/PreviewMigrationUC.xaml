@@ -58,6 +58,12 @@
                             <TextBlock x:Name="TxtFolderReadyCount" Text="0" FontSize="15" FontWeight="SemiBold" Foreground="MediumSeaGreen"/>
                         </StackPanel>
                     </Border>
+                    <Border BorderBrush="#DDD" BorderThickness="0,0,1,0" Padding="8,2">
+                        <StackPanel>
+                            <TextBlock Text="Doc READY" FontSize="10" Foreground="Gray"/>
+                            <TextBlock x:Name="TxtDocReadyCount" Text="0" FontSize="15" FontWeight="SemiBold" Foreground="Teal"/>
+                        </StackPanel>
+                    </Border>
                     <Border Padding="8,2">
                         <StackPanel>
                             <TextBlock Text="Status" FontSize="10" Foreground="Gray"/>
@@ -71,6 +77,7 @@
             <GroupBox Grid.Row="1" Header="Akcije" Padding="8,4">
                 <Grid>
                     <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*"/>
                         <ColumnDefinition Width="*"/>
                         <ColumnDefinition Width="*"/>
                         <ColumnDefinition Width="*"/>
@@ -201,8 +208,30 @@
                         <!-- Filteri desno od dugmadi -->
                     </Grid>
 
+                    <!-- Faza 8 — Migracija -->
+                    <StackPanel Grid.Column="4" Margin="0,0,6,0">
+                        <TextBlock Text="Faza 8 — Start Migration" FontSize="10" Foreground="Gray" Margin="0,0,0,3"/>
+                        <TextBlock FontSize="10" Foreground="Gray" Margin="0,0,0,3">
+                            <Run Text="READY: "/>
+                            <Run x:Name="TxtDocReadyCountAction" Text="0" FontWeight="SemiBold" Foreground="Teal"/>
+                        </TextBlock>
+                        <Button x:Name="BtnStartMigration"
+                                Content="▶ Start Migration"
+                                Click="BtnStartMigration_Click"
+                                Height="30" Margin="0,0,0,3"
+                                Background="#1A5276" Foreground="White" FontWeight="SemiBold"
+                                IsEnabled="True"
+                                ToolTip="Pokrece MoveService — migrira dokumente iz DocStaging u Alfresco"/>
+                        <Button x:Name="BtnStopMigration"
+                                Content="⏹ Zaustavi"
+                                Click="BtnStopMigration_Click"
+                                Height="26" Margin="0"
+                                Background="#E74C3C" Foreground="White"
+                                IsEnabled="False"/>
+                    </StackPanel>
+
                     <!-- Utilitiji -->
-                    <StackPanel Grid.Column="4" Margin="0">
+                    <StackPanel Grid.Column="5" Margin="0">
                         <TextBlock Text="Utilitiji" FontSize="10" Foreground="Gray" Margin="0,0,0,3"/>
                         <Button x:Name="BtnRefreshStats"
                                 Content="↻ Osvezi Statistiku"
