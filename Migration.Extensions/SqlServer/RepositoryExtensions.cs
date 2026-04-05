@@ -87,6 +87,22 @@ namespace Migration.Extensions.SqlServer
             return await conn.ExecuteAsync(cmd).ConfigureAwait(false);
         }
 
+        public static async Task<int> ResetMoveStuckDocumentsAsync(this IDocStagingRepository repo, IDbConnection conn, IDbTransaction tran, TimeSpan timeSpan, bool isPreview, CancellationToken ct = default, int? commandTimeout = null)
+        {
+            var totalMinutes = (int)timeSpan.TotalMinutes;
+
+            var setStatus = isPreview ? MigrationStatus.Prepared.ToDbString() : MigrationStatus.Ready.ToDbString();
+            // SQL Server syntax: DATEADD(MINUTE, -n, GETUTCDATE())
+            var sql = $@"UPDATE DocStaging
+                        SET Status = '{setStatus}',
+                            ErrorMsg = 'Reset from stuck IN PROGRESS state',
+                            UpdatedAt = GETUTCDATE()
+                        WHERE Status = '{MigrationStatus.InProgress.ToDbString()}' ";
+
+            var cmd = new CommandDefinition(sql, transaction: tran, commandTimeout: commandTimeout, cancellationToken: ct);
+            return await conn.ExecuteAsync(cmd).ConfigureAwait(false);
+        }
+
         #endregion
 
         #region Folder Extension

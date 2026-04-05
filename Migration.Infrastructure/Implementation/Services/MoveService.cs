@@ -1,9 +1,9 @@
-﻿using Alfresco.Abstraction.Interfaces;
-using Alfresco.Abstraction.Models;
+﻿using Alfresco.Abstraction.Models;
 using Alfresco.Contracts.Enums;
 using Alfresco.Contracts.Models;
 using Alfresco.Contracts.Options;
 using Alfresco.Contracts.Oracle.Models;
+using Migration.Infrastructure.Implementation.Move;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -24,7 +24,6 @@ namespace Migration.Infrastructure.Implementation.Services
     public class MoveService : IMoveService
     {
         private readonly IMoveExecutor _moveExecutor;
-        private readonly IAlfrescoWriteApi _write;
         private readonly IOptions<MigrationOptions> _options;
         private readonly IServiceScopeFactory _scopeFactory;
 
@@ -39,13 +38,11 @@ namespace Migration.Infrastructure.Implementation.Services
         private const string ServiceName = "Move";
 
         public MoveService(IMoveExecutor moveExecutor,
-                           IAlfrescoWriteApi write,
                            IOptions<MigrationOptions> options,
                            IServiceScopeFactory scopeFactory,
                            ILoggerFactory logger)
         {
             _moveExecutor = moveExecutor;
-            _write = write;
             _options = options;
             _scopeFactory = scopeFactory;
             _dbLogger = logger.CreateLogger("DbLogger");
@@ -301,13 +298,15 @@ namespace Migration.Infrastructure.Implementation.Services
                 var uow = scope.ServiceProvider.GetRequiredService<IUnitOfWork>();
                 var docRepo = scope.ServiceProvider.GetRequiredService<IDocStagingRepository>();
 
+                var isPreview = _options.Value.PreviewTypeMigration;
                 await uow.BeginAsync(ct: ct).ConfigureAwait(false);
                 try
                 {
-                    var resetCount = await docRepo.ResetStuckDocumentsAsync(
+                    var resetCount = await docRepo.ResetMoveStuckDocumentsAsync(
                         uow.Connection,
                         uow.Transaction,
                         timeout,
+                        isPreview,
                         ct).ConfigureAwait(false);
 
                     await uow.CommitAsync(ct: ct).ConfigureAwait(false);
@@ -478,16 +477,6 @@ namespace Migration.Infrastructure.Implementation.Services
        
         private async Task<bool> MoveSingleDocumentAsync(DocStaging doc, CancellationToken ct)
         {
-            using var scope = _fileLogger.BeginScope(new Dictionary<string, object>
-            {
-                ["DocumentId"] = doc.Id,
-                ["NodeId"] = doc.NodeId,
-                ["DestinationFolderId"] = doc.DestinationFolderId ?? "null"
-            });
-
-            // ========================================
-            // VALIDATION: Ensure DestinationFolderId is populated by FolderPreparationService (FAZA 3)
-            // ========================================
             if (string.IsNullOrWhiteSpace(doc.DestinationFolderId))
             {
                 _uiLogger.LogError("Missing destination folder for document {DocId}", doc.Id);
@@ -496,200 +485,24 @@ namespace Migration.Infrastructure.Implementation.Services
                     $"FolderPreparationService (FAZA 3) must run first and populate this field!");
             }
 
-            _fileLogger.LogDebug("Using pre-resolved DestinationFolderId: {FolderId} for document {DocId}",
-                doc.DestinationFolderId, doc.Id);
+            var useCopy   = _options.Value.MoveService.UseCopy;
+            var properties = DocStagingPropertyMapper.BuildMigrationProperties(doc);
 
-            // ========================================
-            // STEP 1: Move or Copy document to destination folder - Returns Entry object
-            // ========================================
-            var useCopy = _options.Value.MoveService.UseCopy;
-            var operationName = useCopy ? "Copying" : "Moving";
-
-            _fileLogger.LogDebug("{Operation} document {DocId} (NodeId: {NodeId}) to folder {FolderId}",
-                operationName, doc.Id, doc.NodeId, doc.DestinationFolderId);
-
-            Entry? movedEntry;
-            try
-            {
-                if (useCopy)
-                {
-                    movedEntry = await _moveExecutor.CopyAsync(doc.NodeId, doc.DestinationFolderId, ct).ConfigureAwait(false);
-                }
-                else
-                {
-                    movedEntry = await _moveExecutor.MoveAsync(doc.NodeId, doc.DestinationFolderId, ct).ConfigureAwait(false);
-                }
-
-                if (movedEntry == null)
-                {
-                    _uiLogger.LogWarning("Document {DocId} {Operation} operation failed", doc.Id, useCopy ? "copy" : "move");
-                    throw new InvalidOperationException(
-                        $"{(useCopy ? "Copy" : "Move")} operation returned null for document {doc.Id} (NodeId: {doc.NodeId})");
-                }
-
-                _fileLogger.LogInformation(
-                    "Document {DocId} successfully {Operation} to {FolderId}. Entry has {PropCount} properties.",
-                    doc.Id, useCopy ? "copied" : "moved", doc.DestinationFolderId, movedEntry.Properties?.Count ?? 0);
-            }
-            catch (Exception ex)
-            {
-                // Move/Copy NIJE uspeo - dokument nije premešten, može se retry-ovati
+            if (!properties.ContainsKey("ecm:docTypeName"))
                 _fileLogger.LogError(
-                    "[{Method}] Failed to {Operation} document {DocId} (NodeId: {NodeId}) - {ErrorType}: {Message}",
-                    nameof(MoveSingleDocumentAsync), operationName.ToLower(), doc.Id, doc.NodeId, ex.GetType().Name, ex.Message);
-                _dbLogger.LogError(ex,
-                    "[{Method}] Failed to {Operation} document {DocId} (NodeId: {NodeId})",
-                    nameof(MoveSingleDocumentAsync), operationName.ToLower(), doc.Id, doc.NodeId);
-                _uiLogger.LogError("{Operation} failed for document {DocId}: {Error}", operationName, doc.Id, ex.Message);
-                throw;
-            }
+                    "ecm:docTypeName cannot be set for document {DocId} — NewDocumentName and DocDescription are both empty.",
+                    doc.Id);
 
-            // ========================================
-            // STEP 2+: Update properties - dokument je VEĆ PREMEŠTEN u ovom trenutku!
-            // ========================================
-            try
-            {
+            _fileLogger.LogDebug("{Op} document {DocId} (NodeId: {NodeId}) to folder {FolderId} with {PropCount} properties.",
+                useCopy ? "Copying" : "Moving", doc.Id, doc.NodeId, doc.DestinationFolderId, properties.Count);
 
+            await _moveExecutor.MoveWithPropertiesAsync(
+                doc.NodeId, doc.DestinationFolderId, useCopy, properties, ct).ConfigureAwait(false);
 
-                // STEP 2: Get migrated docType and naziv from DocStaging (populated by KdpDocumentProcessingService)
-                // ========================================
-                string? migratedDocType = doc.NewDocumentCode;
-                string? migratedNaziv = doc.NewDocumentName;
+            _fileLogger.LogInformation("Document {DocId} successfully {Op} and properties updated.",
+                doc.Id, useCopy ? "copied" : "moved");
 
-                _fileLogger.LogDebug("Updating properties for document {DocId} (NodeId: {NodeId})", doc.Id, doc.NodeId);
-
-
-                var propertiesToUpdate = new Dictionary<string, object>();
-
-                // Update ecm:docType if we have mapping
-                if (!string.IsNullOrWhiteSpace(migratedDocType))
-                {
-                    propertiesToUpdate["ecm:docType"] = migratedDocType;
-                    _fileLogger.LogDebug("Will update ecm:docType to '{DocType}' for document {DocId}", migratedDocType, doc.Id);
-                }
-                else if (!string.IsNullOrWhiteSpace(doc.DocumentType))
-                {
-                    propertiesToUpdate["ecm:docType"] = doc.DocumentType;
-                    _fileLogger.LogDebug("Will update ecm:docType to '{DocType}' (from DocStaging fallback) for document {DocId}", doc.DocumentType, doc.Id);
-                }
-
-                if (!string.IsNullOrWhiteSpace(doc.FinalDocumentType))
-                {
-                    propertiesToUpdate["ecm:docClientType"] = doc.FinalDocumentType;
-                    _fileLogger.LogDebug("Will update ecm:docClientType to '{FinalDocumentType}' for document {DocId}", doc.FinalDocumentType, doc.Id);
-                }
-
-                if (!string.IsNullOrWhiteSpace(doc.CoreId))
-                {
-                    propertiesToUpdate["ecm:coreId"] = doc.CoreId;
-                    _fileLogger.LogDebug("Will update ecm:coreId to '{CoreId}' for document {DocId}", doc.CoreId, doc.Id);
-                }
-
-                // Update ecm:docTypeName (migrated document type name)
-                if (!string.IsNullOrWhiteSpace(migratedNaziv))
-                {
-                    propertiesToUpdate["ecm:docTypeName"] = migratedNaziv;
-                    _fileLogger.LogDebug("Will update ecm:docTypeName to '{Naziv}' for document {DocId}", migratedNaziv, doc.Id);
-                }
-                else if (!string.IsNullOrWhiteSpace(doc.DocDescription))
-                {
-                    // FALLBACK: If migratedNaziv is still empty after lookup, use DocDescription
-                    propertiesToUpdate["ecm:docTypeName"] = doc.DocDescription;
-                    _fileLogger.LogWarning("Will update ecm:docTypeName to '{Naziv}' (from DocDescription fallback) for document {DocId}", doc.DocDescription, doc.Id);
-                }
-                else
-                {
-                    _fileLogger.LogError("Cannot set ecm:docTypeName for document {DocId} - both migratedNaziv and DocDescription are empty!", doc.Id);
-                }
-
-                // Update ecm:naziv (document description - original field)
-                if (!string.IsNullOrWhiteSpace(doc.DocDescription))
-                {
-                    propertiesToUpdate["ecm:naziv"] = doc.DocDescription;
-                    _fileLogger.LogDebug("Will update ecm:naziv to '{Naziv}' for document {DocId}", doc.DocDescription, doc.Id);
-                }
-
-                if (!string.IsNullOrWhiteSpace(doc.Status))
-                {
-                    propertiesToUpdate["ecm:docStatus"] = doc.NewAlfrescoStatus;
-                    _fileLogger.LogDebug("Will update ecm:status to '{Status}' for document {DocId}", doc.Status, doc.Id);
-                }
-
-                if (!string.IsNullOrWhiteSpace(doc.CategoryCode))
-                {
-                    propertiesToUpdate["ecm:docCategory"] = doc.CategoryCode;
-                    _fileLogger.LogDebug("Will update ecm:status to '{Status}' for document {DocId}", doc.Status, doc.Id);
-                }
-
-                if (!string.IsNullOrWhiteSpace(doc.CategoryName))
-                {
-                    propertiesToUpdate["ecm:docCategoryName"] = doc.CategoryName;
-                    _fileLogger.LogDebug("Will update ecm:docCategoryName to '{Status}' for document {DocId}", doc.Status, doc.Id);
-                }
-                if (!string.IsNullOrWhiteSpace(doc.DestinationFolderId))
-                {
-                    propertiesToUpdate["ecm:docDossierId"] = doc.DestinationFolderId;
-                    propertiesToUpdate["ecm:folderId"] = doc.DestinationFolderId;
-
-                    _fileLogger.LogDebug("Will update ecm:docDossierId and ecm:folderId to '{DestinationFolderId}' for document {DocId}", doc.DestinationFolderId, doc.Id);
-                }
-
-                if (!string.IsNullOrWhiteSpace(doc.DossierDestFolderId))
-                {
-                    string type = doc.DossierDestFolderId switch
-                    {
-                        var s when s.StartsWith("ACC-", StringComparison.OrdinalIgnoreCase) => "ACC",
-                        var s when s.StartsWith("PI-", StringComparison.OrdinalIgnoreCase) => "PI",
-                        var s when s.StartsWith("LE-", StringComparison.OrdinalIgnoreCase) => "LE",
-                        var s when s.StartsWith("DE-", StringComparison.OrdinalIgnoreCase) => "D",
-                        _ => ""
-                    };
-
-                    propertiesToUpdate["ecm:docDossierType"] = type;
-                }
-                   
-
-                //propertiesToUpdate["ecm:active"] = doc.IsActive;
-                //_fileLogger.LogDebug("Will update ecm:active to '{Active}' for document {DocId}", doc.IsActive.ToString(), doc.Id);
-
-                // Only update if we have properties to change
-                if (propertiesToUpdate.Count > 0)
-                {
-                    _fileLogger.LogInformation("Updating {Count} properties for document {DocId}: {Properties}",
-                        propertiesToUpdate.Count, doc.Id, string.Join(", ", propertiesToUpdate.Keys));
-
-                    await _write.UpdateNodePropertiesAsync(doc.NodeId, propertiesToUpdate, ct).ConfigureAwait(false);
-
-                    _fileLogger.LogInformation("Document {DocId} properties updated successfully (ecm:docType='{DocType}', ecm:naziv='{Naziv}')",
-                        doc.Id, propertiesToUpdate.ContainsKey("ecm:docType") ? propertiesToUpdate["ecm:docType"] : "unchanged",
-                        propertiesToUpdate.ContainsKey("ecm:naziv") ? propertiesToUpdate["ecm:naziv"] : "unchanged");
-                }
-                else
-                {
-                    _fileLogger.LogWarning("No properties to update for document {DocId} - skipping property update", doc.Id);
-                    _uiLogger.LogInformation("Document {DocId} has no properties to update", doc.Id);
-                }
-
-                return true;
-            }
-            catch (Exception ex)
-            {
-                // KRITIČNO: Move JE USPEO, ali Update properties NIJE!
-                // Dokument je fizički premešten u novi folder, ali propertiji nisu ažurirani.
-                // Ovaj dokument NE SME biti obrisan iz DocStaging prilikom sledeće migracije!
-                _fileLogger.LogError(
-                    "[{Method}] Document {DocId} (NodeId: {NodeId}) MOVED SUCCESSFULLY but property update FAILED - {ErrorType}: {Message}",
-                    nameof(MoveSingleDocumentAsync), doc.Id, doc.NodeId, ex.GetType().Name, ex.Message);
-                _dbLogger.LogError(ex,
-                    "[{Method}] Document {DocId} MOVED but properties failed",
-                    nameof(MoveSingleDocumentAsync), doc.Id);
-                _uiLogger.LogError("Document {DocId} moved but properties failed: {Error}", doc.Id, ex.Message);
-
-                // Bacamo exception sa specifičnom porukom koja će biti upisana u ErrorMsg
-                throw new InvalidOperationException(
-                    $"MOVED_UPDATE_PROPERTIES_FAILED: Original error: {ex.Message}",
-                    ex);
-            }
+            return true;
         }
 
         private async Task MarkDocumentsAsFailedAsync(

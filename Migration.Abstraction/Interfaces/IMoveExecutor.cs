@@ -25,5 +25,16 @@ namespace Migration.Abstraction.Interfaces
         /// <returns>Entry object for the copied document, or null if copy failed</returns>
         Task<Entry?> CopyAsync(string DocumentId, string DestFolderId, CancellationToken ct);
 
+        /// <summary>
+        /// Moves (or copies) a document to a destination folder and immediately updates its properties
+        /// in a single logical operation. If the move succeeds but the property update fails,
+        /// throws InvalidOperationException with prefix "MOVED_UPDATE_PROPERTIES_FAILED".
+        /// </summary>
+        Task<Entry?> MoveWithPropertiesAsync(
+            string nodeId,
+            string destFolderId,
+            bool useCopy,
+            Dictionary<string, object> properties,
+            CancellationToken ct);
     }
 }
