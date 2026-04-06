@@ -60,7 +60,7 @@ namespace Migration.Infrastructure.Implementation.Services
         {
             var sw = Stopwatch.StartNew();
             var rootDestId = _options.Value.RootDestinationFolderId;
-            const int folderBatchSize = 200;
+            var folderBatchSize = _options.Value.PreviewFolderPreparation.BatchSize ?? 200;
 
             if (string.IsNullOrWhiteSpace(rootDestId))
             {
@@ -115,7 +115,7 @@ namespace Migration.Infrastructure.Implementation.Services
 
                 var parallelOptions = new ParallelOptions
                 {
-                    MaxDegreeOfParallelism = 5,
+                    MaxDegreeOfParallelism = _options.Value.PreviewFolderPreparation.MaxDegreeOfParallelism ?? 10,
                     CancellationToken = ct
                 };
 

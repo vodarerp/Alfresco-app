@@ -52,7 +52,7 @@ namespace Migration.Infrastructure.Implementation.Services
         public async Task<bool> RunAsync(CancellationToken ct, Action<WorkerProgress>? progressCallback = null)
         {
             var sw = Stopwatch.StartNew();
-            const int batchSize = 50;
+            var batchSize = _options.Value.PreviewFolderCreation.BatchSize ?? 50;
 
             _fileLogger.LogInformation("PreviewFolderCreationService: Start.");
             _uiLogger.LogInformation("PreviewFolderCreationService: Pokretanje Faze 3 — kreiranje foldera i upis u FolderStaging...");
@@ -101,7 +101,7 @@ namespace Migration.Infrastructure.Implementation.Services
 
                 await Parallel.ForEachAsync(
                     folderItems,
-                    new ParallelOptions { MaxDegreeOfParallelism = 5, CancellationToken = ct },
+                    new ParallelOptions { MaxDegreeOfParallelism = _options.Value.PreviewFolderCreation.MaxDegreeOfParallelism ?? 5, CancellationToken = ct },
                     async (folderItem, token) =>
                     {
                         var (folderName, needsCreation) = folderItem;

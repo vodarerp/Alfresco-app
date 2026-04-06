@@ -32,6 +32,12 @@ namespace Alfresco.Contracts.Options
         public ServiceOptions FolderDiscovery { get; set; } = new();
 
         public ServiceOptions DocumentDiscovery { get; set; } = new();
+
+        public ServiceOptions PreviewFolderPreparation { get; set; } = new();
+
+        public ServiceOptions PreviewFolderCreation { get; set; } = new();
+
+        public ServiceOptions PreviewToStagingTransfer { get; set; } = new();
         
         public DocumentSearchOptions DocumentTypeDiscovery { get; set; } = new();
         

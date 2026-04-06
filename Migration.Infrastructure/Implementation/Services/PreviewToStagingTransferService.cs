@@ -1,7 +1,9 @@
+using Alfresco.Contracts.Options;
 using Alfresco.Contracts.Oracle.Models;
 using Microsoft.Data.SqlClient;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 using Migration.Abstraction.Interfaces.Wrappers;
 using Migration.Abstraction.Models;
 using SqlServer.Abstraction.Interfaces;
@@ -17,18 +19,19 @@ namespace Migration.Infrastructure.Implementation.Services
     public class PreviewToStagingTransferService : IPreviewToStagingTransferService
     {
         private readonly IServiceScopeFactory _scopeFactory;
+        private readonly IOptions<MigrationOptions> _options;
         private readonly ILogger _fileLogger;
         private readonly ILogger _uiLogger;
 
-        private const int BatchSize           = 500;
-        private const int DegreeOfParallelism = 4;
-        private const int MaxDeadlockRetries  = 3;
+        private const int MaxDeadlockRetries = 3;
 
         public PreviewToStagingTransferService(
             IServiceScopeFactory scopeFactory,
+            IOptions<MigrationOptions> options,
             ILoggerFactory loggerFactory)
         {
             _scopeFactory = scopeFactory ?? throw new ArgumentNullException(nameof(scopeFactory));
+            _options      = options      ?? throw new ArgumentNullException(nameof(options));
             _fileLogger   = loggerFactory.CreateLogger("FileLogger");
             _uiLogger     = loggerFactory.CreateLogger("UiLogger");
         }
@@ -40,17 +43,20 @@ namespace Migration.Infrastructure.Implementation.Services
             Action<WorkerProgress>? progressCallback = null)
         {
             var sw = Stopwatch.StartNew();
+            var mdp       = _options.Value.PreviewToStagingTransfer.MaxDegreeOfParallelism ?? 6;
+            var batchSize = _options.Value.PreviewToStagingTransfer.BatchSize ?? 500;
+
             _fileLogger.LogInformation(
-                "PreviewToStagingTransferService: Start. DossierType={DossierType}, TargetDossierType={TargetDossierType}",
-                dossierType ?? "*", targetDossierType ?? "*");
+                "PreviewToStagingTransferService: Start. DossierType={DossierType}, TargetDossierType={TargetDossierType}, MDP={MDP}, BatchSize={BatchSize}",
+                dossierType ?? "*", targetDossierType ?? "*", mdp, batchSize);
             _uiLogger.LogInformation("PreviewToStagingTransferService: Pokretanje transfera...");
 
             long totalTransferred = 0;
             long totalFailed      = 0;
 
             await Parallel.ForEachAsync(
-                FetchBatchesAsync(dossierType, targetDossierType, ct),
-                new ParallelOptions { MaxDegreeOfParallelism = DegreeOfParallelism, CancellationToken = ct },
+                FetchBatchesAsync(dossierType, targetDossierType, batchSize, ct),
+                new ParallelOptions { MaxDegreeOfParallelism = mdp, CancellationToken = ct },
                 async (batch, innerCt) =>
                 {
                     var docStagingBatch = new List<DocStaging>(batch.Count);
@@ -164,6 +170,7 @@ namespace Migration.Infrastructure.Implementation.Services
         private async IAsyncEnumerable<IList<PreviewDocStaging>> FetchBatchesAsync(
             string? dossierType,
             string? targetDossierType,
+            int batchSize,
             [EnumeratorCancellation] CancellationToken ct)
         {
             while (!ct.IsCancellationRequested)
@@ -177,7 +184,7 @@ namespace Migration.Infrastructure.Implementation.Services
                     await uow.BeginAsync(ct: ct).ConfigureAwait(false);
                     try
                     {
-                        batch = await repo.TakeReadyForTransferAsync(BatchSize, dossierType, targetDossierType, ct)
+                        batch = await repo.TakeReadyForTransferAsync(batchSize, dossierType, targetDossierType, ct)
                                           .ConfigureAwait(false);
                         await uow.CommitAsync(ct: ct).ConfigureAwait(false);
                     }
