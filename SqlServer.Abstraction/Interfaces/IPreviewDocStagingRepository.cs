@@ -9,8 +9,12 @@ namespace SqlServer.Abstraction.Interfaces
 {
     public interface IPreviewDocStagingRepository : IRepository<PreviewDocStaging, long>
     {
-        // Bulk insert sa MERGE (ignore duplicates po NodeId)
+        // Bulk insert sa MERGE (ignore duplicates po NodeId) — originalna, row-by-row, batch 100
         Task<int> InsertBatchAsync(IEnumerable<PreviewDocStaging> documents, CancellationToken ct = default);
+
+        // Bulk insert sa MERGE (ignore duplicates po NodeId) — nova metoda za FlushPendingBatches
+        // InsertManyAsync (base) ostaje kao backup (plain INSERT)
+        Task<int> InsertManyMergeAsync(IEnumerable<PreviewDocStaging> documents, CancellationToken ct = default);
 
         // Za checkpoint resume - broj već upisanih dokumenata za dati tip dosijea
         Task<long> GetCountByDossierTypeAsync(string dossierType, CancellationToken ct = default);

@@ -232,23 +232,30 @@ namespace Migration.Infrastructure.Implementation.Services
                 {
                     var searchResult = await SearchDocumentsAsync(folderPath, skipCount, batchSize, token).ConfigureAwait(false);
 
+                    // Broj svih dokumenata koje je Alfresco vratio (pre filtera) — koristi se za skip/checkpoint
+                    var totalFetchedFromAlfresco = searchResult.Documents.Count;
+
                     searchResult.Documents.RemoveAll(o =>
                     {
                         var lastParentName = o.Entry.Path?.Elements?.LastOrDefault()?.Name;
-
-                        // Bri�emo element ako je ime null ILI ako se NE poklapa sa regexom
                         return lastParentName == null || !regex.IsMatch(lastParentName);
                     });
-                    //searchResult.Documents.Where(o =>
-                    //{
-                    //    var lastParentName = o.Entry.Path?.Elements?.LastOrDefault()?.Name;
-                    //    return lastParentName != null && regex.IsMatch(lastParentName);
-                    //}).ToList();
 
                     var fetchedInBatch = searchResult.Documents.Count;
-                    if (fetchedInBatch > 0)
+                    var newDossierCount = totalFetchedFromAlfresco - fetchedInBatch;
+
+                    // Checkpoint prati UKUPNO fetchovano sa Alfresca (uključujući nove dosieje),
+                    // jer se ta vrednost koristi kao Alfresco skip pri resumeu
+                    if (totalFetchedFromAlfresco > 0)
                     {
-                        _fetchedCountsPerFolder.AddOrUpdate(currFolderType, fetchedInBatch, (_, existing) => existing + fetchedInBatch);
+                        _fetchedCountsPerFolder.AddOrUpdate(currFolderType, totalFetchedFromAlfresco, (_, existing) => existing + totalFetchedFromAlfresco);
+                    }
+
+                    if (newDossierCount > 0)
+                    {
+                        _fileLogger.LogInformation(
+                            "PreviewLoadService DOSSIER-{Type} skip={Skip}: {NewDossierCount} new-dossier docs skipped (already migrated)",
+                            currFolderType, skipCount, newDossierCount);
                     }
 
                     if (fetchedInBatch == 0) return;
@@ -296,8 +303,8 @@ namespace Migration.Infrastructure.Implementation.Services
                         {
                             try
                             {
-                                await FlushPendingBatchesAsync(pendingBatches, currFolderType, token).ConfigureAwait(false);
-                                await SaveCheckpointAsync(currFolderType, _fetchedCountsPerFolder.GetValueOrDefault(currFolderType, 0), token).ConfigureAwait(false);
+                                var checkpoint = _fetchedCountsPerFolder.GetValueOrDefault(currFolderType, 0);
+                                await FlushPendingBatchesAsync(pendingBatches, currFolderType, checkpoint, token).ConfigureAwait(false);
                             }
                             finally
                             {
@@ -316,11 +323,11 @@ namespace Migration.Infrastructure.Implementation.Services
             }).ConfigureAwait(false);
 
             // Final flush
-            if (!pendingBatches.IsEmpty)
             {
-                _fileLogger.LogInformation("PreviewLoadService DOSSIER-{Type}: Final flush - {Count} batches remaining",
-                    currFolderType, pendingBatches.Count);
-                await FlushPendingBatchesAsync(pendingBatches, currFolderType, ct).ConfigureAwait(false);
+                var checkpoint = _fetchedCountsPerFolder.GetValueOrDefault(currFolderType, 0);
+                _fileLogger.LogInformation("PreviewLoadService DOSSIER-{Type}: Final flush - {Count} batches remaining, checkpoint={Checkpoint}",
+                    currFolderType, pendingBatches.Count, checkpoint);
+                await FlushPendingBatchesAsync(pendingBatches, currFolderType, checkpoint, ct).ConfigureAwait(false);
             }
 
             _fileLogger.LogInformation(
@@ -328,30 +335,38 @@ namespace Migration.Infrastructure.Implementation.Services
                 currFolderType, _totalDocumentsProcessed);
         }
 
-        private async Task FlushPendingBatchesAsync(ConcurrentQueue<List<PreviewDocStaging>> pendingBatches, string folderType, CancellationToken ct)
+        private async Task FlushPendingBatchesAsync(
+            ConcurrentQueue<List<PreviewDocStaging>> pendingBatches,
+            string folderType,
+            long checkpointFetched,
+            CancellationToken ct)
         {
             var allDocs = new List<PreviewDocStaging>();
             while (pendingBatches.TryDequeue(out var batch))
                 allDocs.AddRange(batch);
 
-            if (allDocs.Count == 0) return;
-
             await using var scope = _scopeFactory.CreateAsyncScope();
             var uow = scope.ServiceProvider.GetRequiredService<IUnitOfWork>();
             var repo = scope.ServiceProvider.GetRequiredService<IPreviewDocStagingRepository>();
+            var checkpointRepo = scope.ServiceProvider.GetRequiredService<IPreviewLoadCheckpointRepository>();
 
             await uow.BeginAsync(ct: ct).ConfigureAwait(false);
             try
             {
-                //var inserted = await repo.InsertBatchAsync(allDocs, ct).ConfigureAwait(false);
-                var inserted = await repo.InsertManyAsync(allDocs, ct).ConfigureAwait(false);
+                var inserted = 0;
+                if (allDocs.Count > 0)
+                    inserted = await repo.InsertManyMergeAsync(allDocs, ct).ConfigureAwait(false);
+
+                await checkpointRepo.UpsertAsync(folderType, checkpointFetched, ct).ConfigureAwait(false);
                 await uow.CommitAsync(ct: ct).ConfigureAwait(false);
-                Interlocked.Add(ref _totalDocumentsProcessed, inserted);
+
+                if (inserted > 0)
+                    Interlocked.Add(ref _totalDocumentsProcessed, inserted);
                 Interlocked.Increment(ref _batchCounter);
 
                 _fileLogger.LogInformation(
-                    "PreviewLoadService DOSSIER-{Type}: Flushed {DocCount} docs to PreviewDocStaging",
-                    folderType, inserted);
+                    "PreviewLoadService DOSSIER-{Type}: Flushed {DocCount} docs, checkpoint={Checkpoint}",
+                    folderType, inserted, checkpointFetched);
             }
             catch (Exception ex)
             {
@@ -618,10 +633,21 @@ namespace Migration.Infrastructure.Implementation.Services
             try
             {
                 await using var scope = _scopeFactory.CreateAsyncScope();
+                var uow = scope.ServiceProvider.GetRequiredService<IUnitOfWork>();
                 var repo = scope.ServiceProvider.GetRequiredService<IPreviewLoadCheckpointRepository>();
-                await repo.UpsertAsync(folderType, totalFetched, ct).ConfigureAwait(false);
 
-                _fileLogger.LogInformation("PreviewLoadService checkpoint saved: {FolderType}={TotalFetched}", folderType, totalFetched);
+                await uow.BeginAsync(ct: ct).ConfigureAwait(false);
+                try
+                {
+                    await repo.UpsertAsync(folderType, totalFetched, ct).ConfigureAwait(false);
+                    await uow.CommitAsync(ct: ct).ConfigureAwait(false);
+                    _fileLogger.LogInformation("PreviewLoadService checkpoint saved: {FolderType}={TotalFetched}", folderType, totalFetched);
+                }
+                catch
+                {
+                    await uow.RollbackAsync(ct: ct).ConfigureAwait(false);
+                    throw;
+                }
             }
             catch (Exception ex)
             {
