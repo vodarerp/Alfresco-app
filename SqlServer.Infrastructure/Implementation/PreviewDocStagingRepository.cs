@@ -288,6 +288,63 @@ namespace SqlServer.Infrastructure.Implementation
             await Conn.ExecuteAsync(cmd).ConfigureAwait(false);
         }
 
+        public async Task UpdateFolderDataAndClientApiAsync(
+            string folderName,
+            string? folderId,
+            int isCreated,
+            string status,
+            Migration.Abstraction.Models.ClientData? clientData,
+            CancellationToken ct = default)
+        {
+            const string sql = @"
+                UPDATE PreviewDocStaging
+                SET DossierDestinationFolderId          = @FolderId,
+                    DossierDestinationFolderIsCreated   = @IsCreated,
+                    Status                              = @Status,
+                    ClientApiMbrJmbg                   = @MbrJmbg,
+                    ClientApiClientName                = @ClientName,
+                    ClientApiClientType                = @ClientType,
+                    ClientApiClientSubtype             = @ClientSubtype,
+                    ClientApiResidency                 = @Residency,
+                    ClientApiSegment                   = @Segment,
+                    ClientApiStaff                     = @Staff,
+                    ClientApiOpuUser                   = @OpuUser,
+                    ClientApiOpuRealization            = @OpuRealization,
+                    ClientApiBarclex                   = @Barclex,
+                    ClientApiCollaborator              = @Collaborator,
+                    ClientApiBarCLEXName               = @BarCLEXName,
+                    ClientApiBarCLEXOpu                = @BarCLEXOpu,
+                    ClientApiBarCLEXGroupName          = @BarCLEXGroupName,
+                    ClientApiBarCLEXGroupCode          = @BarCLEXGroupCode,
+                    ClientApiBarCLEXCode               = @BarCLEXCode
+                WHERE DossierDestinationFolderName = @FolderName";
+
+            var dp = new DynamicParameters();
+            dp.Add("@FolderName", folderName);
+            dp.Add("@FolderId", folderId);
+            dp.Add("@IsCreated", isCreated);
+            dp.Add("@Status", status);
+            dp.Add("@MbrJmbg",          clientData?.MbrJmbg);
+            dp.Add("@ClientName",       clientData?.ClientName);
+            dp.Add("@ClientType",       clientData?.ClientType);
+            dp.Add("@ClientSubtype",    clientData?.ClientSubtype);
+            dp.Add("@Residency",        clientData?.Residency);
+            dp.Add("@Segment",          clientData?.Segment);
+            dp.Add("@Staff",            clientData?.Staff);
+            dp.Add("@OpuUser",          clientData?.OpuUser);
+            dp.Add("@OpuRealization",   clientData?.OpuRealization);
+            dp.Add("@Barclex",          clientData?.Barclex);
+            dp.Add("@Collaborator",     clientData?.Collaborator);
+            dp.Add("@BarCLEXName",      clientData?.BarCLEXName);
+            dp.Add("@BarCLEXOpu",       clientData?.BarCLEXOpu);
+            dp.Add("@BarCLEXGroupName", clientData?.BarCLEXGroupName);
+            dp.Add("@BarCLEXGroupCode", clientData?.BarCLEXGroupCode);
+            dp.Add("@BarCLEXCode",      clientData?.BarCLEXCode);
+
+            var cmd = new CommandDefinition(sql, dp, Tx, commandTimeout: _commandTimeoutSeconds, cancellationToken: ct);
+            await Conn.ExecuteAsync(cmd).ConfigureAwait(false);
+        }
+
         public async Task<long> GetTotalCountAsync(CancellationToken ct = default)
         {
             const string sql = "SELECT COUNT(*) FROM PreviewDocStaging";

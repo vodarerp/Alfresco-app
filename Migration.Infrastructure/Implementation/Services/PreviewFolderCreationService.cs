@@ -157,16 +157,16 @@ namespace Migration.Infrastructure.Implementation.Services
                             await TryResetStatusAsync(folderName, needsCreation ? "FOLDER_PENDING_CREATION" : "FOLDER_EXISTS", token)
                                 .ConfigureAwait(false);
                         }
-
-                        progressCallback?.Invoke(new WorkerProgress
-                        {
-                            ProcessedItems = (int)(Interlocked.Read(ref totalProcessed) + Interlocked.Read(ref totalFailed)),
-                            SuccessCount   = (int)Interlocked.Read(ref totalProcessed),
-                            FailedCount    = (int)Interlocked.Read(ref totalFailed),
-                            Message        = $"Batch {batchNum}: obradjeno {Interlocked.Read(ref totalProcessed)}, greske {Interlocked.Read(ref totalFailed)}",
-                            Timestamp      = DateTimeOffset.UtcNow
-                        });
                     }).ConfigureAwait(false);
+
+                progressCallback?.Invoke(new WorkerProgress
+                {
+                    ProcessedItems = (int)(Interlocked.Read(ref totalProcessed) + Interlocked.Read(ref totalFailed)),
+                    SuccessCount   = (int)Interlocked.Read(ref totalProcessed),
+                    FailedCount    = (int)Interlocked.Read(ref totalFailed),
+                    Message        = $"Batch {batchNum}: obradjeno {Interlocked.Read(ref totalProcessed)}, greske {Interlocked.Read(ref totalFailed)}",
+                    Timestamp      = DateTimeOffset.UtcNow
+                });
 
                 // Bulk-insert FolderStaging posle svakog batcha
                 if (!folderStagingBag.IsEmpty)

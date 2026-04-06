@@ -60,7 +60,7 @@ namespace Migration.Infrastructure.Implementation.Services
         {
             var sw = Stopwatch.StartNew();
             var rootDestId = _options.Value.RootDestinationFolderId;
-            const int folderBatchSize = 50;
+            const int folderBatchSize = 200;
 
             if (string.IsNullOrWhiteSpace(rootDestId))
             {
@@ -113,17 +113,22 @@ namespace Migration.Infrastructure.Implementation.Services
                     "PreviewFolderPreparationService: Batch {Batch} - {Count} foldera za proveru",
                     batchNum, batch.Count);
 
-                foreach (var folderName in batch)
+                var parallelOptions = new ParallelOptions
                 {
-                    ct.ThrowIfCancellationRequested();
+                    MaxDegreeOfParallelism = 5,
+                    CancellationToken = ct
+                };
 
+                await Parallel.ForEachAsync(batch, parallelOptions, async (folderName, token) =>
+                {
                     try
                     {
-                        var result = await CheckFolderInAlfrescoAsync(folderName, rootDestId, ct).ConfigureAwait(false);
-                        await PersistFolderResultAsync(folderName, result, ct).ConfigureAwait(false);
+                        var result = await CheckFolderInAlfrescoAsync(folderName, rootDestId, token).ConfigureAwait(false);
+                        await PersistFolderResultAsync(folderName, result, token).ConfigureAwait(false);
 
-                        totalProcessed++;
-                        if (result.Exists) totalExists++; else totalPending++;
+                        Interlocked.Increment(ref totalProcessed);
+                        if (result.Exists) Interlocked.Increment(ref totalExists);
+                        else Interlocked.Increment(ref totalPending);
 
                         _fileLogger.LogInformation(
                             "PreviewFolderPreparationService: '{Folder}' → {Status}",
@@ -132,16 +137,16 @@ namespace Migration.Infrastructure.Implementation.Services
                     catch (OperationCanceledException) { throw; }
                     catch (Exception ex)
                     {
-                        totalFailed++;
+                        Interlocked.Increment(ref totalFailed);
                         _fileLogger.LogError(
                             "PreviewFolderPreparationService: Greska za folder '{Folder}': {Error}",
                             folderName, ex.Message);
                         _dbLogger.LogError(ex, "PreviewFolderPreparationService: Folder '{Folder}'", folderName);
 
                         // Vracamo status na PENDING da se moze ponoviti
-                        await TryResetFolderStatusAsync(folderName, ct).ConfigureAwait(false);
+                        await TryResetFolderStatusAsync(folderName, token).ConfigureAwait(false);
                     }
-                }
+                }).ConfigureAwait(false);
 
                 progressCallback?.Invoke(new WorkerProgress
                 {
@@ -274,27 +279,24 @@ namespace Migration.Infrastructure.Implementation.Services
             {
                 if (result.Exists)
                 {
-                    await repo.UpdateFolderDataAsync(
+                    await repo.UpdateFolderDataAndClientApiAsync(
                         folderName,
-                        result.NodeId,
+                        folderId: result.NodeId,
                         isCreated: 1,
                         status: "FOLDER_EXISTS",
+                        clientData: null,
                         ct).ConfigureAwait(false);
                 }
                 else
                 {
-                    await repo.UpdateFolderDataAsync(
+                    var clientData = result.ClientData is { HasError: false } ? result.ClientData : null;
+                    await repo.UpdateFolderDataAndClientApiAsync(
                         folderName,
                         folderId: null,
                         isCreated: 0,
                         status: "FOLDER_PENDING_CREATION",
+                        clientData: clientData,
                         ct).ConfigureAwait(false);
-
-                    if (result.ClientData != null && !result.ClientData.HasError)
-                    {
-                        await repo.UpdateClientApiDataAsync(folderName, result.ClientData, ct)
-                            .ConfigureAwait(false);
-                    }
                 }
 
                 await uow.CommitAsync(ct: ct).ConfigureAwait(false);

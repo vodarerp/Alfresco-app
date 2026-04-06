@@ -25,6 +25,9 @@ namespace SqlServer.Abstraction.Interfaces
         // Ažuriranje nakon provere Alfresca (folder postoji ili ne postoji)
         Task UpdateFolderDataAsync(string folderName, string? folderId, int isCreated, string status, CancellationToken ct = default);
 
+        // Kombinovani update: folder data + ClientAPI podaci u jednom SQL-u
+        Task UpdateFolderDataAndClientApiAsync(string folderName, string? folderId, int isCreated, string status, Migration.Abstraction.Models.ClientData? clientData, CancellationToken ct = default);
+
         // Za UI DataGrid sa server-side paginacijom
         Task<(IEnumerable<PreviewDocStaging> Items, int TotalCount)> GetPagedAsync(
             int pageNumber, int pageSize,
