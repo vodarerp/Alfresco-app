@@ -172,6 +172,7 @@ namespace Alfresco.App.UserControls
                 AppendLog($"=== {msg} ===");
 
                 await RefreshStatisticsAsync();
+                AppendLog($"Folder statistika: Obradjeno={TxtFaza2FolderProcessed.Text} | Za kreiranje={TxtFaza2FolderPending.Text}");
                 await LoadDataAsync();
             }
             catch (OperationCanceledException)
@@ -363,6 +364,7 @@ namespace Alfresco.App.UserControls
                 AppendLog($"=== {msg} ===");
 
                 await RefreshStatisticsAsync();
+                AppendLog($"Za Move (DocStaging PENDING): {TxtDocReadyCountAction.Text} dokumenata");
                 await LoadDataAsync();
             }
             catch (OperationCanceledException)
@@ -619,21 +621,36 @@ namespace Alfresco.App.UserControls
                 var pendingCount = await repo.GetCountByStatusAsync("PENDING");
                 var folderExistsCount = await repo.GetCountByStatusAsync("FOLDER_EXISTS");
                 var folderCreatedCount = await repo.GetCountByStatusAsync("FOLDER_CREATED");
-                var docReadyCount = await docRepo.CountReadyForProcessingAsync(CancellationToken.None);
+                var docPendingCount = await docRepo.CountByStatusAsync("PENDING", CancellationToken.None);
+                var folderDistinctCounts = await repo.GetDistinctFolderCountsPerStatusAsync();
                 var total = piCount + leCount;
 
                 await unitOfWork.CommitAsync();
 
-                _docReadyCount = docReadyCount;
+                _docReadyCount = docPendingCount;
+
+                var fpc = folderDistinctCounts;
+                var distinctExists  = fpc.GetValueOrDefault("FOLDER_EXISTS",           0);
+                var distinctPending = fpc.GetValueOrDefault("FOLDER_PENDING_CREATION", 0);
+                var distinctCreated = fpc.GetValueOrDefault("FOLDER_CREATED",          0);
 
                 TxtTotalCount.Text = total.ToString("N0");
                 TxtPiCount.Text = piCount.ToString("N0");
                 TxtLeCount.Text = leCount.ToString("N0");
                 TxtPendingCount.Text = pendingCount.ToString("N0");
                 TxtFolderReadyCount.Text = (folderExistsCount + folderCreatedCount).ToString("N0");
-                TxtDocReadyCount.Text = docReadyCount.ToString("N0");
-                TxtDocReadyCountAction.Text = docReadyCount.ToString("N0");
-                BtnStartMigration.IsEnabled = docReadyCount > 0;
+                TxtDocReadyCount.Text = docPendingCount.ToString("N0");
+                TxtDocReadyCountAction.Text = docPendingCount.ToString("N0");
+                BtnStartMigration.IsEnabled = docPendingCount > 0;
+
+                // Faza 2 — folder statistika
+                TxtFaza2FolderProcessed.Text = (distinctExists + distinctPending + distinctCreated).ToString("N0");
+                TxtFaza2FolderPending.Text   = distinctPending.ToString("N0");
+
+                // Faza 3 — folder statistika
+                TxtFaza3Total.Text   = (distinctPending + distinctCreated).ToString("N0");
+                TxtFaza3Pending.Text = distinctPending.ToString("N0");
+                TxtFaza3Created.Text = distinctCreated.ToString("N0");
             }
             catch (Exception ex)
             {

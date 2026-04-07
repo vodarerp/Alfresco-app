@@ -130,6 +130,15 @@ namespace SqlServer.Infrastructure.Implementation
             return count;
         }
 
+        public async Task<long> CountByStatusAsync(string status, CancellationToken ct = default)
+        {
+            const string sql = "SELECT COUNT(*) FROM DocStaging WHERE status = @Status";
+            var dp = new DynamicParameters();
+            dp.Add("@Status", status);
+            var cmd = new CommandDefinition(sql, dp, Tx, commandTimeout: _commandTimeoutSeconds, cancellationToken: ct);
+            return await Conn.ExecuteScalarAsync<long>(cmd).ConfigureAwait(false);
+        }
+
         public async Task<List<UniqueFolderInfo>> GetUniqueDestinationFoldersAsync(CancellationToken ct = default)
         {
             // ✅ THREAD-SAFE: CTE + UPDATE + OUTPUT pattern

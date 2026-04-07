@@ -1,4 +1,4 @@
-﻿<UserControl x:Class="Alfresco.App.UserControls.Main"
+<UserControl x:Class="Alfresco.App.UserControls.Main"
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
@@ -6,142 +6,153 @@
              xmlns:local="clr-namespace:Alfresco.App.UserControls"
              xmlns:workerstate="clr-namespace:Alfresco.App.UserControls.WorkerState"
              xmlns:app="clr-namespace:Alfresco.App"
-
              mc:Ignorable="d"
-             d:DesignHeight="550" d:DesignWidth="800"
-             >
+             d:DesignHeight="900" d:DesignWidth="1400">
+
     <UserControl.Resources>
         <BooleanToVisibilityConverter x:Key="BooleanToVisibilityConverter"/>
+
+        <!-- ══ TAB CONTROL TEMPLATE ══ -->
+        <ControlTemplate x:Key="TplDarkTabControl" TargetType="TabControl">
+            <Grid KeyboardNavigation.TabNavigation="Local">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="*"/>
+                </Grid.RowDefinitions>
+
+                <!-- Header strip -->
+                <Border Grid.Row="0"
+                        Background="#181B26"
+                        BorderBrush="#272C3F"
+                        BorderThickness="0,0,0,1">
+                    <TabPanel x:Name="HeaderPanel"
+                              IsItemsHost="True"
+                              Background="Transparent"
+                              Margin="8,0,0,0"/>
+                </Border>
+
+                <!-- Content -->
+                <ContentPresenter x:Name="PART_SelectedContentHost"
+                                  Grid.Row="1"
+                                  ContentSource="SelectedContent"/>
+            </Grid>
+        </ControlTemplate>
+
+        <!-- ══ TAB ITEM STYLE ══ -->
+        <Style x:Key="StyDarkTabItem" TargetType="TabItem">
+            <Setter Property="Foreground"      Value="#4A5568"/>
+            <Setter Property="Background"      Value="Transparent"/>
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="Padding"         Value="0"/>
+            <Setter Property="Margin"          Value="0"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="TabItem">
+                        <Border x:Name="bd"
+                                Background="Transparent"
+                                BorderBrush="Transparent"
+                                BorderThickness="0,0,0,2"
+                                Padding="18,11">
+                            <ContentPresenter ContentSource="Header"
+                                              VerticalAlignment="Center"
+                                              TextElement.FontSize="12"
+                                              TextElement.FontWeight="SemiBold"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsSelected" Value="True">
+                                <Setter TargetName="bd" Property="BorderBrush" Value="#3B82F6"/>
+                                <Setter Property="Foreground"                   Value="#D8E0F0"/>
+                            </Trigger>
+                            <MultiTrigger>
+                                <MultiTrigger.Conditions>
+                                    <Condition Property="IsMouseOver" Value="True"/>
+                                    <Condition Property="IsSelected"  Value="False"/>
+                                </MultiTrigger.Conditions>
+                                <Setter Property="Foreground" Value="#7A8FAD"/>
+                            </MultiTrigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
     </UserControl.Resources>
-    <Grid Margin="10">
-        <Grid.RowDefinitions>
-            <RowDefinition Height="*"></RowDefinition>
-            <RowDefinition Height="Auto"></RowDefinition>
-        </Grid.RowDefinitions>
-        <TabControl  x:Name="tcMain" Grid.Row="0" SelectedIndex="0" SelectionChanged="TabControl_SelectionChanged" >
-            <TabItem Header="Dashboard" Visibility="Collapsed">
-                <Grid x:Name="MainGrid" Grid.Row="0">
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="Auto"></ColumnDefinition>
-                        <ColumnDefinition Width="*"></ColumnDefinition>
-                    </Grid.ColumnDefinitions>
-                    <Grid Grid.Column="1">
-                        <Grid.RowDefinitions>
-                            <RowDefinition Height="auto"></RowDefinition>
-                            <RowDefinition Height="2*"></RowDefinition>
-                        </Grid.RowDefinitions>
-                        <local:UsageHeader Grid.Row ="0" />
-                        <!--<DataGrid x:Name="dataGridA" Grid.Row="0"  Margin="10" AutoGenerateColumns="false" ItemsSource="{Binding Folders}" IsReadOnly="True">
-                            <DataGrid.Columns>
-                                <DataGridTemplateColumn Header="ID" Width="*">
-                                    <DataGridTemplateColumn.CellTemplate>
-                                        <DataTemplate>
-                                            <TextBlock Text="{Binding Id}" TextWrapping="Wrap"/>
-                                        </DataTemplate>
-                                    </DataGridTemplateColumn.CellTemplate>
-                                </DataGridTemplateColumn>
-                                <DataGridTemplateColumn Header="Name" Width="*">
-                                    <DataGridTemplateColumn.CellTemplate>
-                                        <DataTemplate>
-                                            <TextBlock Text="{Binding Name}" TextWrapping="Wrap"/>
-                                        </DataTemplate>
-                                    </DataGridTemplateColumn.CellTemplate>
-                                </DataGridTemplateColumn>
-                            </DataGrid.Columns>
-                        </DataGrid>-->
-                        <!--<DataGrid  x:Name="dataGridOracle" Grid.Row="1"  Margin="0" AutoGenerateColumns="false" ItemsSource="{Binding Documents}" IsReadOnly="True">
-                            <DataGrid.Columns>
-                                <DataGridTemplateColumn Header="ID" Width="*">
-                                    <DataGridTemplateColumn.CellTemplate>
-                                        <DataTemplate>
-                                            <TextBlock Text="{Binding Id}" TextWrapping="Wrap"/>
-                                        </DataTemplate>
-                                    </DataGridTemplateColumn.CellTemplate>
-                                </DataGridTemplateColumn>
-                                <DataGridTemplateColumn Header="NodeId" Width="*">
-                                    <DataGridTemplateColumn.CellTemplate>
-                                        <DataTemplate>
-                                            <TextBlock Text="{Binding NodeId}" TextWrapping="Wrap"/>
-                                        </DataTemplate>
-                                    </DataGridTemplateColumn.CellTemplate>
-                                </DataGridTemplateColumn>
-                            </DataGrid.Columns>
-                        </DataGrid>-->
-                        <workerstate:WorkerMonitorWrapper Grid.Row="1" />
-                    </Grid>
-                    <Grid Grid.Column="0">
-                        <Grid Grid.Row="1">
-                            <workerstate:WorkerStateWrapper/>
+
+    <!-- Root: dark background filling the whole control -->
+    <Border Background="#13151C">
+        <Grid>
+            <Grid.RowDefinitions>
+                <RowDefinition Height="*"/>
+                <RowDefinition Height="Auto"/>
+            </Grid.RowDefinitions>
+
+            <!-- ══ TAB CONTROL ══ -->
+            <TabControl x:Name="tcMain"
+                        Grid.Row="0"
+                        SelectedIndex="0"
+                        SelectionChanged="TabControl_SelectionChanged"
+                        Template="{StaticResource TplDarkTabControl}"
+                        Background="Transparent"
+                        BorderThickness="0">
+
+                <!-- Tab 0: Preview Migration (default) -->
+                <TabItem Style="{StaticResource StyDarkTabItem}"
+                         Visibility="{Binding IsPreviewMigrationTabVisible, Converter={StaticResource BooleanToVisibilityConverter}}">
+                    <TabItem.Header>
+                        <StackPanel Orientation="Horizontal">
+                            <TextBlock Text="Preview Migration" VerticalAlignment="Center"/>
+                        </StackPanel>
+                    </TabItem.Header>
+                    <local:PreviewMigrationUC/>
+                </TabItem>
+
+                <!-- Tab 1: LiveLogger -->
+                <TabItem x:Name="LiveLoggerTab"
+                         Style="{StaticResource StyDarkTabItem}">
+                    <TabItem.Header>
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto"/>
+                                <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+
+                            <!-- Error badge (shown only when UnreadErrors > 0) -->
+                            <Grid Grid.Column="1" Margin="0,-4,0,0" HorizontalAlignment="Right" VerticalAlignment="Top">
+                                <Grid.Style>
+                                    <Style TargetType="Grid">
+                                        <Setter Property="Visibility" Value="Visible"/>
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding UnreadErrors}" Value="0">
+                                                <Setter Property="Visibility" Value="Collapsed"/>
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </Grid.Style>
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="Auto"/>
+                                    <RowDefinition Height="Auto"/>
+                                </Grid.RowDefinitions>
+                                <TextBlock Grid.Row="0" Text="{Binding UnreadErrors}"
+                                           FontSize="9" HorizontalAlignment="Right"
+                                           Foreground="#F8FAFC" Panel.ZIndex="1"/>
+                                <TextBlock Grid.Row="1" FontFamily="Segoe Fluent Icons" Text="&#xe783;"
+                                           Margin="0,-3,-2,0" Foreground="#EF4444"
+                                           HorizontalAlignment="Center" VerticalAlignment="Center"
+                                           FontSize="16"/>
+                            </Grid>
+
+                            <TextBlock Grid.Column="0" Text="Log" VerticalAlignment="Center" Margin="0,0,4,0"/>
                         </Grid>
-                    </Grid>
-                </Grid>
-            </TabItem>
+                    </TabItem.Header>
+                    <!-- Content added programmatically in code-behind (App.LogViewer) -->
+                </TabItem>
 
-            <!-- NEW: Migration Pipeline Tab -->
-            <TabItem Header="Migration Pipeline">
-                <local:MigrationPhaseMonitor/>
-            </TabItem>
+            </TabControl>
 
-            <!-- NEW: KDP Document Processing Tab -->
-            <TabItem Header="KDP Processing" Visibility="{Binding IsKdpProcessingTabVisible, Converter={StaticResource BooleanToVisibilityConverter}}">
-                <local:KdpProcessingUC/>
-            </TabItem>
+            <!-- ══ STATUS BAR ══ -->
+            <local:StatusBarUC Grid.Row="1" Height="46"/>
 
-            <!-- Preview Migration Tab -->
-            <TabItem Header="Preview Migration" Visibility="{Binding IsPreviewMigrationTabVisible, Converter={StaticResource BooleanToVisibilityConverter}}">
-                <local:PreviewMigrationUC/>
-            </TabItem>
+        </Grid>
+    </Border>
 
-            <TabItem x:Name="LiveLoggerTab">
-                <TabItem.Header>
-                    <Grid>
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="Auto"/>
-                            <ColumnDefinition Width="Auto"/>
-                        </Grid.ColumnDefinitions>
-                        <Grid  Grid.Column="1" Margin="0,-3,0,0" HorizontalAlignment="Right"
-                               VerticalAlignment="Top">
-                            <Grid.Style>
-                                <Style TargetType="Grid">
-                                    <Setter Property="Visibility" Value="Visible"/>
-                                    <Style.Triggers>
-                                        <DataTrigger Binding="{Binding UnreadErrors}" Value="0">
-                                            <Setter Property="Visibility" Value="Collapsed"/>
-                                        </DataTrigger>
-                                    </Style.Triggers>
-                                </Style>
-                            </Grid.Style>
-                            <Grid.RowDefinitions>
-                                <RowDefinition Height="Auto"/>
-                                <RowDefinition Height="Auto" />
-                            </Grid.RowDefinitions>
-                            <TextBlock Grid.Row="0" Text="{Binding UnreadErrors}" FontSize="10" HorizontalAlignment="Right"
-                                      Foreground="Black" Panel.ZIndex="1"
-                                       />
-                            <TextBlock Grid.Row="1" FontFamily="Segoe Fluent Icons" Text="&#xe783;"
-                                        Margin="0,-4,-2,0"  Foreground="Red"
-                                        HorizontalAlignment="Center" VerticalAlignment="Center"
-                                       FontSize="18" />
-
-                        </Grid>
-                        <TextBlock Grid.Column="0" Text="LiveLogger"
-                                   VerticalAlignment="Center"
-                                   Margin="0,0,3,0"/>
-                        <!--<Border x:Name="Badge" Grid.Column="1"
-                                HorizontalAlignment="Right" VerticalAlignment="Top"
-                        Background="#E74C3C" CornerRadius="8"
-                        MinWidth="18" Height="18" Padding="0"
-                        Visibility="Visible">
-                            <TextBlock Text="10" HorizontalAlignment="Center" VerticalAlignment="Center"/>
-                        </Border>-->
-                    </Grid>
-                </TabItem.Header>
-                <!-- LogViewer will be added programmatically in code-behind -->
-            </TabItem>
-
-        </TabControl>
-        
-        <local:StatusBarUC Grid.Row="1" Height="60"/>
-
-    </Grid>
 </UserControl>

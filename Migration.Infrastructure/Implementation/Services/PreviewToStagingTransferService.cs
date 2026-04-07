@@ -237,7 +237,7 @@ namespace Migration.Infrastructure.Implementation.Services
                 IsFile   = true,
                 NodeType = src.NodeType ?? string.Empty,
                 ParentId = src.ParentId ?? string.Empty,
-                Status   = "READY",
+                Status   = "PENDING",
                 CreatedAt = DateTime.UtcNow,
                 UpdatedAt = DateTime.UtcNow,
 

@@ -361,6 +361,23 @@ namespace SqlServer.Infrastructure.Implementation
             return await Conn.ExecuteScalarAsync<long>(cmd).ConfigureAwait(false);
         }
 
+        public async Task<IReadOnlyDictionary<string, long>> GetDistinctFolderCountsPerStatusAsync(CancellationToken ct = default)
+        {
+            const string sql = @"
+                SELECT Status, COUNT(DISTINCT DossierDestinationFolderName) AS Cnt
+                FROM PreviewDocStaging
+                GROUP BY Status";
+            var cmd = new CommandDefinition(sql, transaction: Tx, commandTimeout: _commandTimeoutSeconds, cancellationToken: ct);
+            var rows = await Conn.QueryAsync<StatusFolderCount>(cmd).ConfigureAwait(false);
+            return rows.ToDictionary(r => r.Status, r => r.Cnt);
+        }
+
+        private sealed class StatusFolderCount
+        {
+            public string Status { get; set; } = "";
+            public long Cnt { get; set; }
+        }
+
         public async Task UpdateClientApiDataAsync(string dossierDestinationFolderName, Migration.Abstraction.Models.ClientData clientData, CancellationToken ct = default)
         {
             const string sql = @"

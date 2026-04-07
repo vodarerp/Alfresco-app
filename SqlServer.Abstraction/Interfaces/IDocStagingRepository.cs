@@ -13,6 +13,7 @@ namespace SqlServer.Abstraction.Interfaces
     {
         Task<IReadOnlyList<DocStaging>> TakeReadyForProcessingAsync(int take, CancellationToken ct);
         Task<long> CountReadyForProcessingAsync(CancellationToken ct);
+        Task<long> CountByStatusAsync(string status, CancellationToken ct = default);
         Task SetStatusAsync(long id, string status, string? error, CancellationToken ct);
         Task FailAsync(long id, string error, CancellationToken ct);
 

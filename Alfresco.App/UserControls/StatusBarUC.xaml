@@ -1,102 +1,221 @@
-﻿<UserControl x:Class="Alfresco.App.UserControls.StatusBarUC"
+<UserControl x:Class="Alfresco.App.UserControls.StatusBarUC"
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006" 
-             xmlns:d="http://schemas.microsoft.com/expression/blend/2008" 
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
              xmlns:local="clr-namespace:Alfresco.App.UserControls"
-             mc:Ignorable="d" 
-             d:DesignHeight="450" d:DesignWidth="800" >
-    <Grid >
-        <Border >
-            <Grid Grid.Row="0">
-                <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="auto"></ColumnDefinition>
-                    <ColumnDefinition Width="*"></ColumnDefinition>
-                    <ColumnDefinition Width="*"></ColumnDefinition>
-                </Grid.ColumnDefinitions>
-                <Grid Grid.Column="0" Margin="10,0,0,0">
-                    <Button Name="ConfigButton" Content="⚙" Width="30" Height="25" VerticalAlignment="Center" HorizontalAlignment="Left" Click="ConfigButton_Click" ToolTip="Configuration"/>
-                </Grid>
-                <Grid Grid.Column="1">
-                </Grid>
-                <!--<StackPanel Grid.Column="0" Orientation="Horizontal" VerticalAlignment="Center" HorizontalAlignment="Left" Margin="10,0,0,0">
-                <TextBlock Text="Total: " FontWeight="Bold" VerticalAlignment="Center"/>
-                <TextBlock Text="Ready" VerticalAlignment="Center"/>
-            </StackPanel>-->
-                <Grid Grid.Column="2">
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="*"/>
-                        <ColumnDefinition Width="auto"/>
-                    </Grid.ColumnDefinitions>
-                    <StackPanel Grid.Column="0" Orientation="Vertical" VerticalAlignment="Center" HorizontalAlignment="Right" Margin="0,0,10,0">
-                    <Grid Name="AlfGrid">
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="Auto"/>
-                            <ColumnDefinition Width="Auto"/>
-                        </Grid.ColumnDefinitions>
-                        <TextBlock Grid.Column="0" Text="Alfresco Connection: " FontWeight="Bold" VerticalAlignment="Center"  />
-                        <TextBlock VerticalAlignment="Center" Grid.Column="1" >
-                            <TextBlock.Style>
-                                <Style TargetType="TextBlock">
-                                    <Setter Property="Text" Value="Disconnected"/>                                        
-                                        <Setter Property="Foreground" Value="Red"/>
+             mc:Ignorable="d"
+             d:DesignHeight="46" d:DesignWidth="1400">
+
+    <UserControl.Resources>
+        <BooleanToVisibilityConverter x:Key="BoolToVis"/>
+
+        <!-- Gear / config button -->
+        <Style x:Key="StyIconBtn" TargetType="Button">
+            <Setter Property="Width"           Value="30"/>
+            <Setter Property="Height"          Value="30"/>
+            <Setter Property="Foreground"      Value="#6B7A99"/>
+            <Setter Property="Background"      Value="Transparent"/>
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="Cursor"          Value="Hand"/>
+            <Setter Property="FontSize"        Value="15"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="bd" Background="{TemplateBinding Background}"
+                                CornerRadius="4">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="bd" Property="Background" Value="#1E2233"/>
+                                <Setter Property="Foreground"                 Value="#A0B0C8"/>
+                            </Trigger>
+                            <Trigger Property="IsPressed" Value="True">
+                                <Setter TargetName="bd" Property="Background" Value="#252A38"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!-- Reset / secondary action button -->
+        <Style x:Key="StyResetBtn" TargetType="Button">
+            <Setter Property="Height"          Value="26"/>
+            <Setter Property="Padding"         Value="12,0"/>
+            <Setter Property="FontSize"        Value="11"/>
+            <Setter Property="FontWeight"      Value="SemiBold"/>
+            <Setter Property="Foreground"      Value="White"/>
+            <Setter Property="Background"      Value="#B45309"/>
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="Cursor"          Value="Hand"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="bd" Background="{TemplateBinding Background}"
+                                CornerRadius="4" Padding="{TemplateBinding Padding}">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="bd" Property="Opacity" Value="0.82"/>
+                            </Trigger>
+                            <Trigger Property="IsPressed" Value="True">
+                                <Setter TargetName="bd" Property="Opacity" Value="0.65"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+    </UserControl.Resources>
+
+    <Border Background="#181B26"
+            BorderBrush="#272C3F"
+            BorderThickness="0,1,0,0">
+        <Grid Margin="10,0">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="Auto"/>   <!-- Config button -->
+                <ColumnDefinition Width="*"/>      <!-- Spacer -->
+                <ColumnDefinition Width="Auto"/>   <!-- Connection indicators -->
+                <ColumnDefinition Width="Auto"/>   <!-- Reset button -->
+            </Grid.ColumnDefinitions>
+
+            <!-- ── Config gear button ── -->
+            <Button Name="ConfigButton"
+                    Grid.Column="0"
+                    Content="⚙"
+                    Style="{StaticResource StyIconBtn}"
+                    VerticalAlignment="Center"
+                    Click="ConfigButton_Click"
+                    ToolTip="Application Settings"/>
+
+            <!-- ── Connection status indicators ── -->
+            <StackPanel Grid.Column="2"
+                        Orientation="Horizontal"
+                        VerticalAlignment="Center"
+                        Margin="0,0,8,0">
+
+                <!-- Alfresco -->
+                <Border Background="#1B1E2A" CornerRadius="4"
+                        Padding="8,4" Margin="0,0,6,0">
+                    <StackPanel Orientation="Horizontal">
+                        <Ellipse Width="7" Height="7" VerticalAlignment="Center" Margin="0,0,6,0">
+                            <Ellipse.Style>
+                                <Style TargetType="Ellipse">
+                                    <Setter Property="Fill" Value="#EF4444"/>
                                     <Style.Triggers>
                                         <DataTrigger Binding="{Binding Connected}" Value="True">
-                                            <Setter Property="Text" Value="Connected"/>
-                                            <Setter Property="Foreground" Value="Green"/>
+                                            <Setter Property="Fill" Value="#22C55E"/>
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </Ellipse.Style>
+                        </Ellipse>
+                        <TextBlock Text="Alfresco" FontSize="10" FontWeight="SemiBold"
+                                   Foreground="#535E7A" VerticalAlignment="Center" Margin="0,0,5,0"/>
+                        <TextBlock VerticalAlignment="Center" FontSize="10" FontFamily="Consolas">
+                            <TextBlock.Style>
+                                <Style TargetType="TextBlock">
+                                    <Setter Property="Text"       Value="Disconnected"/>
+                                    <Setter Property="Foreground" Value="#EF4444"/>
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding Connected}" Value="True">
+                                            <Setter Property="Text"       Value="OK"/>
+                                            <Setter Property="Foreground" Value="#22C55E"/>
                                         </DataTrigger>
                                     </Style.Triggers>
                                 </Style>
                             </TextBlock.Style>
                         </TextBlock>
-                    </Grid>
-                    <Grid Name="DbConn">
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="Auto"/>
-                            <ColumnDefinition Width="Auto"/>
-                        </Grid.ColumnDefinitions>
-                        <TextBlock Grid.Column="0" Text="SqlServer Connection: " FontWeight="Bold" VerticalAlignment="Center"  />
-                        <TextBlock VerticalAlignment="Center" Grid.Column="1">
-                            <TextBlock.Style>
-                                <Style TargetType="TextBlock">
-                                    <Setter Property="Text" Value="Disconnected"/>
-                                    <Setter Property="Foreground" Value="Red"/>
+                    </StackPanel>
+                </Border>
+
+                <!-- SQL Server -->
+                <Border Background="#1B1E2A" CornerRadius="4"
+                        Padding="8,4" Margin="0,0,6,0">
+                    <StackPanel Orientation="Horizontal">
+                        <Ellipse Width="7" Height="7" VerticalAlignment="Center" Margin="0,0,6,0">
+                            <Ellipse.Style>
+                                <Style TargetType="Ellipse">
+                                    <Setter Property="Fill" Value="#EF4444"/>
                                     <Style.Triggers>
                                         <DataTrigger Binding="{Binding DbConnected}" Value="True">
-                                            <Setter Property="Text" Value="Connected"/>
-                                            <Setter Property="Foreground" Value="Green"/>
+                                            <Setter Property="Fill" Value="#22C55E"/>
                                         </DataTrigger>
                                     </Style.Triggers>
                                 </Style>
-                            </TextBlock.Style>
-                        </TextBlock>
-                    </Grid>
-                    <Grid Name="ClientApiConn">
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="Auto"/>
-                            <ColumnDefinition Width="Auto"/>
-                        </Grid.ColumnDefinitions>
-                        <TextBlock Grid.Column="0" Text="Client API Connection: " FontWeight="Bold" VerticalAlignment="Center"  />
-                        <TextBlock VerticalAlignment="Center" Grid.Column="1">
+                            </Ellipse.Style>
+                        </Ellipse>
+                        <TextBlock Text="SQL Server" FontSize="10" FontWeight="SemiBold"
+                                   Foreground="#535E7A" VerticalAlignment="Center" Margin="0,0,5,0"/>
+                        <TextBlock VerticalAlignment="Center" FontSize="10" FontFamily="Consolas">
                             <TextBlock.Style>
                                 <Style TargetType="TextBlock">
-                                    <Setter Property="Text" Value="Disconnected"/>
-                                    <Setter Property="Foreground" Value="Red"/>
+                                    <Setter Property="Text"       Value="Disconnected"/>
+                                    <Setter Property="Foreground" Value="#EF4444"/>
                                     <Style.Triggers>
-                                        <DataTrigger Binding="{Binding ClientApiConnected}" Value="True">
-                                            <Setter Property="Text" Value="Connected"/>
-                                            <Setter Property="Foreground" Value="Green"/>
+                                        <DataTrigger Binding="{Binding DbConnected}" Value="True">
+                                            <Setter Property="Text"       Value="OK"/>
+                                            <Setter Property="Foreground" Value="#22C55E"/>
                                         </DataTrigger>
                                     </Style.Triggers>
                                 </Style>
                             </TextBlock.Style>
                         </TextBlock>
-                    </Grid>
-                </StackPanel>
-                    <Button Visibility="{Binding ResetButtonVisibilitiCheck}" Grid.Column="1" Content="Reset" Width="75" Height="25" VerticalAlignment="Center" HorizontalAlignment="Right" Margin="0,0,10,0" Click="SettingsButton_Click"/>
-                </Grid>
-            </Grid>
-        </Border>
+                    </StackPanel>
+                </Border>
 
-    </Grid>
+                <!-- Client API -->
+                <Border Background="#1B1E2A" CornerRadius="4"
+                        Padding="8,4" Margin="0">
+                    <StackPanel Orientation="Horizontal">
+                        <Ellipse Width="7" Height="7" VerticalAlignment="Center" Margin="0,0,6,0">
+                            <Ellipse.Style>
+                                <Style TargetType="Ellipse">
+                                    <Setter Property="Fill" Value="#EF4444"/>
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding ClientApiConnected}" Value="True">
+                                            <Setter Property="Fill" Value="#22C55E"/>
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </Ellipse.Style>
+                        </Ellipse>
+                        <TextBlock Text="Client API" FontSize="10" FontWeight="SemiBold"
+                                   Foreground="#535E7A" VerticalAlignment="Center" Margin="0,0,5,0"/>
+                        <TextBlock VerticalAlignment="Center" FontSize="10" FontFamily="Consolas">
+                            <TextBlock.Style>
+                                <Style TargetType="TextBlock">
+                                    <Setter Property="Text"       Value="Disconnected"/>
+                                    <Setter Property="Foreground" Value="#EF4444"/>
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding ClientApiConnected}" Value="True">
+                                            <Setter Property="Text"       Value="OK"/>
+                                            <Setter Property="Foreground" Value="#22C55E"/>
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </TextBlock.Style>
+                        </TextBlock>
+                    </StackPanel>
+                </Border>
+
+            </StackPanel>
+
+            <!-- ── Reset button (shown when any connection fails) ── -->
+            <Button Visibility="{Binding ResetButtonVisibilitiCheck}"
+                    Grid.Column="3"
+                    Content="↻  Retry"
+                    Style="{StaticResource StyResetBtn}"
+                    VerticalAlignment="Center"
+                    Margin="8,0,0,0"
+                    Click="SettingsButton_Click"
+                    ToolTip="Retry connection checks"/>
+
+        </Grid>
+    </Border>
+
 </UserControl>

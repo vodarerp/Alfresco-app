@@ -159,7 +159,7 @@ namespace Alfresco.App.UserControls
             // Add LogViewer programmatically to avoid XAML binding thread issues
             // This ensures LogViewer is created and bound on the same UI thread
             Loaded += Main_Loaded;
-            tcMain.SelectedIndex = 1;
+            tcMain.SelectedIndex = 0;
         }
 
         private void Main_Loaded(object sender, RoutedEventArgs e)

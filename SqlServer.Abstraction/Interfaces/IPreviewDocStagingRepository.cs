@@ -89,6 +89,9 @@ namespace SqlServer.Abstraction.Interfaces
             string? dossierType = null,
             CancellationToken ct = default);
 
+        // Vraca COUNT(DISTINCT DossierDestinationFolderName) grupisano po Status — jedan round-trip za sve folder statistike
+        Task<IReadOnlyDictionary<string, long>> GetDistinctFolderCountsPerStatusAsync(CancellationToken ct = default);
+
         // Paged unbuffered za sheet splitting kada ima > 900k redova
         IEnumerable<PreviewDocStaging> GetForExportUnbufferedPaged(
             string? dossierType,
