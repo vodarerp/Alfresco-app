@@ -153,7 +153,7 @@ namespace Migration.Infrastructure.Implementation.Services
                     ProcessedItems = totalProcessed,
                     SuccessCount = (int)(totalExists + totalPending),
                     FailedCount = (int)totalFailed,
-                    Message = $"Batch {batchNum}: provjereno {totalProcessed} foldera (postoji={totalExists}, kreira={totalPending})",
+                    Message = $"Batch {batchNum}: provereno {totalProcessed} foldera (postoji={totalExists}, kreira={totalPending})",
                     Timestamp = DateTimeOffset.UtcNow
                 });
             }

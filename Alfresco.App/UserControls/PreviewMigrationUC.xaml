@@ -551,7 +551,7 @@
                                 <StackPanel Grid.Row="0" Orientation="Horizontal" Margin="0,0,0,6">
                                     <Border Width="3" CornerRadius="2" Background="#14B8A6" Margin="0,1,7,1"/>
                                     <StackPanel>
-                                        <TextBlock Text="FAZA 6 + 7" FontSize="9" FontWeight="Bold" Foreground="#14B8A6"/>
+                                        <TextBlock Text="FAZA 4/5" FontSize="9" FontWeight="Bold" Foreground="#14B8A6"/>
                                         <TextBlock Text="Export / Transfer" FontSize="11"
                                                    FontWeight="SemiBold" Foreground="{StaticResource BrTextPri}"/>
                                     </StackPanel>
@@ -636,7 +636,7 @@
                                 <StackPanel Grid.Row="0" Orientation="Horizontal" Margin="0,0,0,8">
                                     <Border Width="3" CornerRadius="2" Background="#2563EB" Margin="0,1,7,1"/>
                                     <StackPanel>
-                                        <TextBlock Text="FAZA 8" FontSize="9" FontWeight="Bold" Foreground="#2563EB"/>
+                                        <TextBlock Text="FAZA 6" FontSize="9" FontWeight="Bold" Foreground="#2563EB"/>
                                         <TextBlock Text="Start Migration" FontSize="11"
                                                    FontWeight="SemiBold" Foreground="{StaticResource BrTextPri}"/>
                                     </StackPanel>
@@ -685,7 +685,7 @@
                         <!-- ┌─────────────────────────────────────┐
                              │ UTILITIJI                            │
                              └─────────────────────────────────────┘ -->
-                        <Border Grid.Row="2" Grid.Column="4"
+                        <Border Grid.Row="2" Grid.Column="4" Visibility="Hidden"
                                 Background="{StaticResource BrBgCard}"
                                 BorderBrush="#475569" BorderThickness="0,2,0,0"
                                 CornerRadius="6" Padding="12,10">
