@@ -337,6 +337,21 @@
                                     </StackPanel>
                                 </Grid>
 
+                                <StackPanel Grid.Row="2" Margin="0,0,0,8">
+                                    <TextBlock Text="IZVOR FOLDERA"
+                                               Style="{StaticResource StyLbl}"
+                                               Margin="0,0,0,4"/>
+                                    <ComboBox x:Name="CmbFaza1FolderFilter"
+                                              Height="24" FontSize="11"
+                                              Background="#1E2233" Foreground="Black"
+                                              BorderBrush="{StaticResource BrBorder}"
+                                              SelectedIndex="0">
+                                        <ComboBoxItem Content="Sve (PI + LE)" Tag=""/>
+                                        <ComboBoxItem Content="Samo PI"        Tag="PI"/>
+                                        <ComboBoxItem Content="Samo LE"        Tag="LE"/>
+                                    </ComboBox>
+                                </StackPanel>
+
                                 <StackPanel Grid.Row="3">
                                     <Button x:Name="BtnStartFaza1"
                                             Content="▶  Pokreni Fazu 1"

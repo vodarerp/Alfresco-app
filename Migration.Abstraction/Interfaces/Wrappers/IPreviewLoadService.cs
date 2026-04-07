@@ -12,5 +12,6 @@ namespace Migration.Abstraction.Interfaces.Wrappers
         Task<DocumentSearchBatchResult> RunBatchAsync(CancellationToken ct);
         Task<bool> RunLoopAsync(CancellationToken ct);
         Task<bool> RunLoopAsync(CancellationToken ct, Action<WorkerProgress>? progressCallback);
+        Task<bool> RunLoopAsync(CancellationToken ct, Action<WorkerProgress>? progressCallback, string? folderFilter);
     }
 }

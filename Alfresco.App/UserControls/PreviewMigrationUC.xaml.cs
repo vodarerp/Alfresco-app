@@ -91,6 +91,13 @@ namespace Alfresco.App.UserControls
 
                 _cts = new CancellationTokenSource();
 
+                var folderFilter = CmbFaza1FolderFilter.SelectedItem is ComboBoxItem fi &&
+                                   !string.IsNullOrEmpty(fi.Tag?.ToString())
+                    ? fi.Tag.ToString()
+                    : null;
+
+                AppendLog($"Izvor foldera: {(folderFilter ?? "Sve (PI + LE)")}");
+
                 void OnProgress(WorkerProgress p)
                 {
                     Dispatcher.Invoke(() =>
@@ -104,7 +111,7 @@ namespace Alfresco.App.UserControls
                 }
 
                 var result = await Task.Run(
-                    () => _previewLoadService.RunLoopAsync(_cts.Token, OnProgress),
+                    () => _previewLoadService.RunLoopAsync(_cts.Token, OnProgress, folderFilter),
                     _cts.Token);
 
                 ProgressBar.Value = 100;

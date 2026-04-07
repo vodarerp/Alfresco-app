@@ -59,14 +59,24 @@ namespace Migration.Infrastructure.Implementation.Services
             _uiLogger = loggerFactory.CreateLogger("UiLogger");
         }
 
-        public async Task<bool> RunLoopAsync(CancellationToken ct, Action<WorkerProgress>? progressCallback)
+        public Task<bool> RunLoopAsync(CancellationToken ct, Action<WorkerProgress>? progressCallback)
+            => RunLoopAsync(ct, progressCallback, folderFilter: null);
+
+        public async Task<bool> RunLoopAsync(CancellationToken ct, Action<WorkerProgress>? progressCallback, string? folderFilter)
         {
             var sw = Stopwatch.StartNew();
             var batchSize = _options.Value.DocumentTypeDiscovery.BatchSize;
             var maxDocs = _options.Value.MaxDocumentsToProcess;
 
-            _fileLogger.LogInformation("PreviewLoadService started");
-            _uiLogger.LogInformation("PreviewLoadService started");
+            // Reset per-run state so each click processes a fresh MaxDocumentsToProcess batch
+            _totalDocumentsProcessed = 0;
+            _totalFailed = 0;
+            _batchCounter = 0;
+            _currentFolderTypeIndex = 0;
+            _fetchedCountsPerFolder = new ConcurrentDictionary<string, long>();
+
+            _fileLogger.LogInformation("PreviewLoadService started (folderFilter={FolderFilter})", folderFilter ?? "sve");
+            _uiLogger.LogInformation("PreviewLoadService started (folderFilter={FolderFilter})", folderFilter ?? "sve");
 
             await LoadCheckpointAsync(ct).ConfigureAwait(false);
 
@@ -88,9 +98,18 @@ namespace Migration.Infrastructure.Implementation.Services
             {
                 _dossierFolders = GetSubDossiersFolders();
 
+                // Apply folder filter if specified ("PI" or "LE"); null/empty = process all
+                if (!string.IsNullOrWhiteSpace(folderFilter))
+                {
+                    var key = folderFilter.Trim().ToUpperInvariant();
+                    _dossierFolders = _dossierFolders
+                        .Where(kv => kv.Key.Equals(key, StringComparison.OrdinalIgnoreCase))
+                        .ToDictionary(kv => kv.Key, kv => kv.Value);
+                }
+
                 if (_dossierFolders == null || !_dossierFolders.Any())
                 {
-                    _uiLogger.LogWarning("PreviewLoadService: No dossier folders configured. Check RootPIFolderId/RootLEFolderId in appsettings.");
+                    _uiLogger.LogWarning("PreviewLoadService: No dossier folders configured (filter={Filter}). Check RootPIFolderId/RootLEFolderId in appsettings.", folderFilter ?? "sve");
                     return false;
                 }
 
