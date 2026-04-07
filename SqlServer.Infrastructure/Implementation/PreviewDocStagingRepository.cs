@@ -583,7 +583,7 @@ namespace SqlServer.Infrastructure.Implementation
                 WITH SelectedFolders AS (
                     SELECT DISTINCT TOP (@BatchSize) DossierDestinationFolderName
                     FROM PreviewDocStaging WITH (UPDLOCK, READPAST)
-                    WHERE Status IN ('FOLDER_PENDING_CREATION', 'FOLDER_EXISTS')
+                    WHERE Status IN ('FOLDER_PENDING_CREATION', 'FOLDER_PENDING_EXISTS')
                       AND ISNULL(DossierDestinationFolderName, '') <> ''
                 )
                 UPDATE d

@@ -132,7 +132,7 @@ namespace Migration.Infrastructure.Implementation.Services
 
                         _fileLogger.LogInformation(
                             "PreviewFolderPreparationService: '{Folder}' → {Status}",
-                            folderName, result.Exists ? "FOLDER_EXISTS" : "FOLDER_PENDING_CREATION");
+                            folderName, result.Exists ? "FOLDER_PENDING_EXISTS" : "FOLDER_PENDING_CREATION");
                     }
                     catch (OperationCanceledException) { throw; }
                     catch (Exception ex)
@@ -283,7 +283,7 @@ namespace Migration.Infrastructure.Implementation.Services
                         folderName,
                         folderId: result.NodeId,
                         isCreated: 1,
-                        status: "FOLDER_EXISTS",
+                        status: "FOLDER_PENDING_EXISTS",
                         clientData: null,
                         ct).ConfigureAwait(false);
                 }

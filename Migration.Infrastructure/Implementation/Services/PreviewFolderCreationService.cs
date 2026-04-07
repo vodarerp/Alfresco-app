@@ -139,6 +139,9 @@ namespace Migration.Infrastructure.Implementation.Services
                                 _fileLogger.LogInformation(
                                     "PreviewFolderCreationService: '{Folder}' vec postoji → NodeId={NodeId}",
                                     folderName, nodeId);
+                                // Vracamo status sa IN_PROGRESS na FOLDER_EXISTS
+                                // kako bi ih naredne faze (export/transfer) mogle obuhvatiti
+                                await PersistExistingFolderAsync(folderName, nodeId, token).ConfigureAwait(false);
                             }
 
                             // 3. Dodajemo u bag za FolderStaging
@@ -154,7 +157,7 @@ namespace Migration.Infrastructure.Implementation.Services
                                 folderName, ex.Message);
                             _dbLogger.LogError(ex, "PreviewFolderCreationService: Folder '{Folder}'", folderName);
 
-                            await TryResetStatusAsync(folderName, needsCreation ? "FOLDER_PENDING_CREATION" : "FOLDER_EXISTS", token)
+                            await TryResetStatusAsync(folderName, needsCreation ? "FOLDER_PENDING_CREATION" : "FOLDER_PENDING_EXISTS", token)
                                 .ConfigureAwait(false);
                         }
                     }).ConfigureAwait(false);
@@ -272,6 +275,26 @@ namespace Migration.Infrastructure.Implementation.Services
             try
             {
                 await repo.UpdateFolderDataAsync(folderName, nodeId, isCreated: 1, status: "FOLDER_CREATED", ct)
+                          .ConfigureAwait(false);
+                await uow.CommitAsync(ct: ct).ConfigureAwait(false);
+            }
+            catch
+            {
+                await uow.RollbackAsync(ct: ct).ConfigureAwait(false);
+                throw;
+            }
+        }
+
+        private async Task PersistExistingFolderAsync(string folderName, string? nodeId, CancellationToken ct)
+        {
+            await using var scope = _scopeFactory.CreateAsyncScope();
+            var uow  = scope.ServiceProvider.GetRequiredService<IUnitOfWork>();
+            var repo = scope.ServiceProvider.GetRequiredService<IPreviewDocStagingRepository>();
+
+            await uow.BeginAsync(ct: ct).ConfigureAwait(false);
+            try
+            {
+                await repo.UpdateFolderDataAsync(folderName, nodeId, isCreated: 1, status: "FOLDER_EXISTS", ct)
                           .ConfigureAwait(false);
                 await uow.CommitAsync(ct: ct).ConfigureAwait(false);
             }
