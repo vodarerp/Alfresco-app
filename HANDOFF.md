@@ -1,7 +1,7 @@
 # HANDOFF — PreviewTypeMigration
 
-**Datum:** 2026-04-02  
-**Poslednji commit:** `941c739 PreviewTypeMigration: Excel Export`  
+**Datum:** 2026-04-07  
+**Poslednji commit:** `765cdbe Version 5.2.0`  
 **Trenutna grana:** `master`
 
 ---
@@ -13,12 +13,12 @@ Koristi svoju tabelu `PreviewDocStaging` (SQL Server) i ima sopstvene faze:
 
 | Faza | Servis | Opis |
 |------|--------|------|
-| 1 | `PreviewLoadService` | Čita dokumente iz Alfresca (PI/LE folderi), upisuje u `PreviewDocStaging` sa statusom `PENDING` |
-| 2 | `PreviewFolderPreparationService` | Proverava da li destination folder postoji na Alfresciu; zove ClientAPI za enrichment; status → `FOLDER_EXISTS` ili `FOLDER_PENDING_CREATION` |
-| 3 | `PreviewFolderCreationService` | Kreira Alfresco foldere za `FOLDER_PENDING_CREATION` zapise; status → `FOLDER_CREATED` |
+| 1 | `PreviewLoadService` | Čita dokumente iz Alfresca (PI i/ili LE folderi — izbor na UI), upisuje u `PreviewDocStaging` sa statusom `PENDING` |
+| 2 | `PreviewFolderPreparationService` | Proverava da li destination folder postoji na Alfresciu; zove ClientAPI za enrichment; status → `FOLDER_PENDING_EXISTS` ili `FOLDER_PENDING_CREATION` |
+| 3 | `PreviewFolderCreationService` | Kreira Alfresco foldere za `FOLDER_PENDING_CREATION`; potvrđuje postojeće za `FOLDER_PENDING_EXISTS`; status → `FOLDER_CREATED` ili `FOLDER_EXISTS`; upisuje u `FolderStaging` |
 | 6 | `PreviewToStagingTransferService` | Prenosi `FOLDER_EXISTS`/`FOLDER_CREATED` zapise u `DocStaging`; status → `TRANSFERRED` |
-| 7 | `PreviewExportService` | Eksportuje `PreviewDocStaging` u `.xlsx` (dva sheet-a: PI i LE) |
-| R | `PreviewFolderRollbackService` | **NOVO (TEST)** — briše kreirane Alfresco foldere i resetuje status na `FOLDER_PENDING_CREATION` |
+| 7 | `PreviewExportService` | Eksportuje `PreviewDocStaging` u `.xlsx` (sheet-ovi po `TargetDossierType`) |
+| R | `PreviewFolderRollbackService` | **(TEST)** — briše kreirane Alfresco foldere i resetuje status na `FOLDER_PENDING_CREATION` |
 
 ---
 
@@ -26,12 +26,26 @@ Koristi svoju tabelu `PreviewDocStaging` (SQL Server) i ima sopstvene faze:
 
 ```
 PENDING                  → početni status nakon Faze 1
-IN_PROGRESS              → privremeni (atomično zauzimanje batch-a)
-FOLDER_EXISTS            → folder već postoji na Alfresciu (Faza 2)
-FOLDER_PENDING_CREATION  → folder ne postoji, ClientAPI enrichment obavljen (Faza 2)
-FOLDER_CREATED           → folder kreiran u Fazi 3
+IN_PROGRESS              → privremeni (atomično zauzimanje batch-a za Fazu 2 ili 3)
+FOLDER_PENDING_EXISTS    → folder pronađen u Alfresciu tokom Faze 2, čeka Fazu 3 da potvrdi
+FOLDER_PENDING_CREATION  → folder ne postoji, ClientAPI enrichment obavljen (Faza 2), čeka Fazu 3 da kreira
+FOLDER_EXISTS            → FINAL — folder potvrđen u Fazi 3 (nije trebalo kreirati)
+FOLDER_CREATED           → FINAL — folder kreiran u Fazi 3
 TRANSFERRED              → prebačen u DocStaging (Faza 6)
 ```
+
+**Tok statusa:**
+```
+Faza 1: PENDING
+Faza 2: PENDING → (IN_PROGRESS lock) → FOLDER_PENDING_EXISTS | FOLDER_PENDING_CREATION
+Faza 3: FOLDER_PENDING_EXISTS | FOLDER_PENDING_CREATION → (IN_PROGRESS lock) → FOLDER_EXISTS | FOLDER_CREATED
+Faza 6: FOLDER_EXISTS | FOLDER_CREATED → TRANSFERRED
+```
+
+> **NAPOMENA:** `FOLDER_PENDING_EXISTS` je uveden da razbije beskonačnu petlju u Fazi 3.  
+> `FOLDER_EXISTS` je sada isključivo **finalni** status — Faza 3 ga nikada ne čita, samo upisuje.  
+> Pre ove izmene Faza 2 je direktno pisala `FOLDER_EXISTS`, a Faza 3 je čitala `FOLDER_EXISTS`,  
+> što je uzrokovalo beskonačno ponavljanje obrade istih foldera.
 
 ---
 
@@ -62,7 +76,58 @@ Alfresco.App/appsettings.json                              — konfiguracija
 
 ---
 
-## Izmene u ovoj sesiji (UNCOMMITTED)
+## Izmene u sesiji 2026-04-07
+
+### 1. PreviewLoadService — reset stanja i filter po folderu
+
+**Problem:** Servis je singleton, pa su `_totalDocumentsProcessed` i ostali brojači zadržavali vrednosti iz prethodnog pokretanja, sprečavajući ponovni load.
+
+**Fix — reset na početku `RunLoopAsync`:**
+```csharp
+_totalDocumentsProcessed = 0;
+_totalFailed = 0;
+_batchCounter = 0;
+_currentFolderTypeIndex = 0;
+_fetchedCountsPerFolder = new ConcurrentDictionary<string, long>();
+```
+
+**Nova funkcionalnost — filter izvora (PI / LE / sve):**
+- `IPreviewLoadService` dobio novi overload: `RunLoopAsync(ct, progressCallback, string? folderFilter)`
+- Stari overload delegira na novi sa `folderFilter: null`
+- Ako `folderFilter = "PI"`, procesira samo PI folder; `null` = oba
+- UI: `CmbFaza1FolderFilter` ComboBox u Faza 1 kartici (vrednosti: "Sve (PI + LE)", "Samo PI", "Samo LE")
+
+### 2. Uveden status FOLDER_PENDING_EXISTS (fix beskonačne petlje u Fazi 3)
+
+**Problem:** Faza 2 je pisala `FOLDER_EXISTS` za folder koji postoji u Alfresciu. Faza 3 je čitala `FOLDER_EXISTS` — lock `IN_PROGRESS` — ali nikada nije ažurirala status na ništa, pa su se isti zapisi beskonačno ponavljali u obradi.
+
+**Rešenje:**
+- Faza 2 (`PreviewFolderPreparationService`) sada piše `FOLDER_PENDING_EXISTS` umesto `FOLDER_EXISTS`
+- Faza 3 (`PreviewFolderCreationService`) čita `FOLDER_PENDING_EXISTS` + `FOLDER_PENDING_CREATION`
+  - Za `FOLDER_PENDING_EXISTS`: poziva novi `PersistExistingFolderAsync` → piše `FOLDER_EXISTS` (finalni)
+  - Za `FOLDER_PENDING_CREATION`: kreira folder → piše `FOLDER_CREATED` (finalni)
+  - Error reset vraća na odgovarajući prethodni status (`FOLDER_PENDING_EXISTS` ili `FOLDER_PENDING_CREATION`)
+- `GetDistinctFoldersForFolderStagingAsync` u `PreviewDocStagingRepository` — SQL uslov promenjen:
+  ```sql
+  WHERE Status IN ('FOLDER_PENDING_CREATION', 'FOLDER_PENDING_EXISTS')
+  -- bylo: WHERE Status IN ('FOLDER_PENDING_CREATION', 'FOLDER_EXISTS')
+  ```
+
+**Izmenjeni fajlovi:**
+- `Migration.Infrastructure/Implementation/Services/PreviewFolderPreparationService.cs`
+- `Migration.Infrastructure/Implementation/Services/PreviewFolderCreationService.cs`
+- `SqlServer.Infrastructure/Implementation/PreviewDocStagingRepository.cs`
+- `Alfresco.App/UserControls/PreviewMigrationUC.xaml.cs` (stats za novi status)
+
+### 3. UI izmene (PreviewMigrationUC)
+
+- **Faza 1 kartica:** Dodat `CmbFaza1FolderFilter` — izbor izvora foldera (Sve / PI / LE)
+- **`RefreshStatisticsAsync`:** Statistike sada broje `FOLDER_PENDING_EXISTS` zajedno sa ostalim pending statusima
+- **`BtnStartFaza1_Click`:** Čita odabrani filter iz ComboBox-a i prosleđuje servisu
+
+---
+
+## Izmene u ovoj sesiji (prethodna — UNCOMMITTED)
 
 ### Uklonjena funkcionalnost
 - Filteri na Preview Data tab-u (dosije + tip dokumenta) — korisnik odlučio da ih ne treba
