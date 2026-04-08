@@ -400,6 +400,8 @@ namespace Alfresco.App
 
         protected override void OnStartup(StartupEventArgs e)
         {
+            // Load theme before any window is created (StartupUri window is created after OnStartup)
+            LoadTheme();
 
             AppHost.Start();
 
@@ -419,6 +421,56 @@ namespace Alfresco.App
             base.OnExit(e);
         }
 
+
+        private static void LoadTheme()
+        {
+            try
+            {
+                var basePath = AppDomain.CurrentDomain.BaseDirectory;
+                string appSettingsPath;
+
+                if (basePath.Contains(@"\bin\Debug\") || basePath.Contains(@"\bin\Release\"))
+                {
+                    var projectRoot = Directory.GetParent(basePath)!.Parent!.Parent!.Parent!.FullName;
+                    appSettingsPath = Path.Combine(projectRoot, "appsettings.json");
+                }
+                else
+                {
+                    appSettingsPath = Path.Combine(basePath, "appsettings.json");
+                }
+
+                string theme = "Default";
+                if (File.Exists(appSettingsPath))
+                {
+                    var json = File.ReadAllText(appSettingsPath);
+                    using var doc = System.Text.Json.JsonDocument.Parse(json);
+                    if (doc.RootElement.TryGetProperty("Theme", out var themeEl))
+                        theme = themeEl.GetString() ?? "Default";
+                }
+
+                var themeSource = theme.Equals("Default", StringComparison.OrdinalIgnoreCase)
+                    ? "Resources/DefaultTheme.xaml"
+                    : "Resources/GlobalStyles.xaml";
+
+                var dict = new ResourceDictionary
+                {
+                    Source = new Uri(themeSource, UriKind.Relative)
+                };
+
+                Current.Resources.MergedDictionaries.Clear();
+                Current.Resources.MergedDictionaries.Add(dict);
+            }
+            catch
+            {
+                // Fallback: load dark theme
+                var dict = new ResourceDictionary
+                {
+                    Source = new Uri("Resources/GlobalStyles.xaml", UriKind.Relative)
+                };
+                Current.Resources.MergedDictionaries.Clear();
+                Current.Resources.MergedDictionaries.Add(dict);
+            }
+        }
 
         private static void EnsureConnectionsConfigExists()
         {

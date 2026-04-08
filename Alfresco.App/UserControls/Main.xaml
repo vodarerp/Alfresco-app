@@ -22,8 +22,8 @@
 
                 <!-- Header strip -->
                 <Border Grid.Row="0"
-                        Background="#181B26"
-                        BorderBrush="#272C3F"
+                        Background="{StaticResource Clr.TabStrip.Bg}"
+                        BorderBrush="{StaticResource Clr.TabStrip.Border}"
                         BorderThickness="0,0,0,1">
                     <TabPanel x:Name="HeaderPanel"
                               IsItemsHost="True"
@@ -40,7 +40,7 @@
 
         <!-- ══ TAB ITEM STYLE ══ -->
         <Style x:Key="StyDarkTabItem" TargetType="TabItem">
-            <Setter Property="Foreground"      Value="#4A5568"/>
+            <Setter Property="Foreground"      Value="{StaticResource Clr.Tab.Text}"/>
             <Setter Property="Background"      Value="Transparent"/>
             <Setter Property="BorderThickness" Value="0"/>
             <Setter Property="Padding"         Value="0"/>
@@ -60,15 +60,15 @@
                         </Border>
                         <ControlTemplate.Triggers>
                             <Trigger Property="IsSelected" Value="True">
-                                <Setter TargetName="bd" Property="BorderBrush" Value="#3B82F6"/>
-                                <Setter Property="Foreground"                   Value="#D8E0F0"/>
+                                <Setter TargetName="bd" Property="BorderBrush" Value="{StaticResource Clr.Tab.Underline}"/>
+                                <Setter Property="Foreground"                   Value="{StaticResource Clr.Tab.TextActive}"/>
                             </Trigger>
                             <MultiTrigger>
                                 <MultiTrigger.Conditions>
                                     <Condition Property="IsMouseOver" Value="True"/>
                                     <Condition Property="IsSelected"  Value="False"/>
                                 </MultiTrigger.Conditions>
-                                <Setter Property="Foreground" Value="#7A8FAD"/>
+                                <Setter Property="Foreground" Value="{StaticResource Clr.Tab.TextHover}"/>
                             </MultiTrigger>
                         </ControlTemplate.Triggers>
                     </ControlTemplate>
@@ -78,8 +78,8 @@
 
     </UserControl.Resources>
 
-    <!-- Root: dark background filling the whole control -->
-    <Border Background="#13151C">
+    <!-- Root background -->
+    <Border Background="{StaticResource Clr.Root.Bg}">
         <Grid>
             <Grid.RowDefinitions>
                 <RowDefinition Height="*"/>
@@ -134,7 +134,7 @@
                                 </Grid.RowDefinitions>
                                 <TextBlock Grid.Row="0" Text="{Binding UnreadErrors}"
                                            FontSize="9" HorizontalAlignment="Right"
-                                           Foreground="#F8FAFC" Panel.ZIndex="1"/>
+                                           Foreground="{StaticResource Clr.Tab.ErrorFg}" Panel.ZIndex="1"/>
                                 <TextBlock Grid.Row="1" FontFamily="Segoe Fluent Icons" Text="&#xe783;"
                                            Margin="0,-3,-2,0" Foreground="#EF4444"
                                            HorizontalAlignment="Center" VerticalAlignment="Center"

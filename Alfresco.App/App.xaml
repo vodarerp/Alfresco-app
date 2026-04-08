@@ -5,9 +5,8 @@
              StartupUri="MainWindow.xaml">
     <Application.Resources>
         <ResourceDictionary>
-            <ResourceDictionary.MergedDictionaries>                <!-- Globalni stilovi -->
-               
-                <ResourceDictionary Source="Resources/GlobalStyles.xaml"/>
+            <ResourceDictionary.MergedDictionaries>
+                <!-- Tema se ucitava dinamicki u App.xaml.cs na osnovu appsettings.json "Theme" -->
             </ResourceDictionary.MergedDictionaries>
         </ResourceDictionary>
     </Application.Resources>

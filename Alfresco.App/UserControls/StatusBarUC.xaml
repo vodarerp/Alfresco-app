@@ -14,7 +14,7 @@
         <Style x:Key="StyIconBtn" TargetType="Button">
             <Setter Property="Width"           Value="30"/>
             <Setter Property="Height"          Value="30"/>
-            <Setter Property="Foreground"      Value="#6B7A99"/>
+            <Setter Property="Foreground"      Value="{StaticResource Clr.IconBtn.Fg}"/>
             <Setter Property="Background"      Value="Transparent"/>
             <Setter Property="BorderThickness" Value="0"/>
             <Setter Property="Cursor"          Value="Hand"/>
@@ -28,11 +28,11 @@
                         </Border>
                         <ControlTemplate.Triggers>
                             <Trigger Property="IsMouseOver" Value="True">
-                                <Setter TargetName="bd" Property="Background" Value="#1E2233"/>
-                                <Setter Property="Foreground"                 Value="#A0B0C8"/>
+                                <Setter TargetName="bd" Property="Background" Value="{StaticResource Clr.IconBtn.HoverBg}"/>
+                                <Setter Property="Foreground"                 Value="{StaticResource Clr.IconBtn.HoverFg}"/>
                             </Trigger>
                             <Trigger Property="IsPressed" Value="True">
-                                <Setter TargetName="bd" Property="Background" Value="#252A38"/>
+                                <Setter TargetName="bd" Property="Background" Value="{StaticResource Clr.IconBtn.PressedBg}"/>
                             </Trigger>
                         </ControlTemplate.Triggers>
                     </ControlTemplate>
@@ -72,8 +72,8 @@
 
     </UserControl.Resources>
 
-    <Border Background="#181B26"
-            BorderBrush="#272C3F"
+    <Border Background="{StaticResource Clr.StatusBar.Bg}"
+            BorderBrush="{StaticResource Clr.StatusBar.Border}"
             BorderThickness="0,1,0,0">
         <Grid Margin="10,0">
             <Grid.ColumnDefinitions>
@@ -99,7 +99,7 @@
                         Margin="0,0,8,0">
 
                 <!-- Alfresco -->
-                <Border Background="#1B1E2A" CornerRadius="4"
+                <Border Background="{StaticResource Clr.Conn.Bg}" CornerRadius="4"
                         Padding="8,4" Margin="0,0,6,0">
                     <StackPanel Orientation="Horizontal">
                         <Ellipse Width="7" Height="7" VerticalAlignment="Center" Margin="0,0,6,0">
@@ -115,7 +115,7 @@
                             </Ellipse.Style>
                         </Ellipse>
                         <TextBlock Text="Alfresco" FontSize="10" FontWeight="SemiBold"
-                                   Foreground="#535E7A" VerticalAlignment="Center" Margin="0,0,5,0"/>
+                                   Foreground="{StaticResource Clr.Conn.Label}" VerticalAlignment="Center" Margin="0,0,5,0"/>
                         <TextBlock VerticalAlignment="Center" FontSize="10" FontFamily="Consolas">
                             <TextBlock.Style>
                                 <Style TargetType="TextBlock">
@@ -134,7 +134,7 @@
                 </Border>
 
                 <!-- SQL Server -->
-                <Border Background="#1B1E2A" CornerRadius="4"
+                <Border Background="{StaticResource Clr.Conn.Bg}" CornerRadius="4"
                         Padding="8,4" Margin="0,0,6,0">
                     <StackPanel Orientation="Horizontal">
                         <Ellipse Width="7" Height="7" VerticalAlignment="Center" Margin="0,0,6,0">
@@ -150,7 +150,7 @@
                             </Ellipse.Style>
                         </Ellipse>
                         <TextBlock Text="SQL Server" FontSize="10" FontWeight="SemiBold"
-                                   Foreground="#535E7A" VerticalAlignment="Center" Margin="0,0,5,0"/>
+                                   Foreground="{StaticResource Clr.Conn.Label}" VerticalAlignment="Center" Margin="0,0,5,0"/>
                         <TextBlock VerticalAlignment="Center" FontSize="10" FontFamily="Consolas">
                             <TextBlock.Style>
                                 <Style TargetType="TextBlock">
@@ -169,7 +169,7 @@
                 </Border>
 
                 <!-- Client API -->
-                <Border Background="#1B1E2A" CornerRadius="4"
+                <Border Background="{StaticResource Clr.Conn.Bg}" CornerRadius="4"
                         Padding="8,4" Margin="0">
                     <StackPanel Orientation="Horizontal">
                         <Ellipse Width="7" Height="7" VerticalAlignment="Center" Margin="0,0,6,0">
@@ -185,7 +185,7 @@
                             </Ellipse.Style>
                         </Ellipse>
                         <TextBlock Text="Client API" FontSize="10" FontWeight="SemiBold"
-                                   Foreground="#535E7A" VerticalAlignment="Center" Margin="0,0,5,0"/>
+                                   Foreground="{StaticResource Clr.Conn.Label}" VerticalAlignment="Center" Margin="0,0,5,0"/>
                         <TextBlock VerticalAlignment="Center" FontSize="10" FontFamily="Consolas">
                             <TextBlock.Style>
                                 <Style TargetType="TextBlock">

@@ -7,154 +7,7 @@
              d:DesignHeight="900" d:DesignWidth="1400">
 
     <UserControl.Resources>
-
-        <!-- ══ COLORS ══ -->
-        <SolidColorBrush x:Key="BrBgMain"    Color="#13151C"/>
-        <SolidColorBrush x:Key="BrBgCard"    Color="#1B1E2A"/>
-        <SolidColorBrush x:Key="BrBgHeader"  Color="#181B26"/>
-        <SolidColorBrush x:Key="BrBorder"    Color="#272C3F"/>
-        <SolidColorBrush x:Key="BrTextPri"   Color="#D8E0F0"/>
-        <SolidColorBrush x:Key="BrTextSec"   Color="#535E7A"/>
-        <SolidColorBrush x:Key="BrDanger"    Color="#DC2626"/>
-
-        <!-- ══ FLAT BUTTON CONTROL TEMPLATE ══ -->
-        <ControlTemplate x:Key="TplFlatBtn" TargetType="Button">
-            <Border x:Name="bd"
-                    Background="{TemplateBinding Background}"
-                    CornerRadius="4" Padding="6,0">
-                <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
-            </Border>
-            <ControlTemplate.Triggers>
-                <Trigger Property="IsMouseOver" Value="True">
-                    <Setter TargetName="bd" Property="Opacity" Value="0.80"/>
-                </Trigger>
-                <Trigger Property="IsPressed" Value="True">
-                    <Setter TargetName="bd" Property="Opacity" Value="0.60"/>
-                </Trigger>
-                <Trigger Property="IsEnabled" Value="False">
-                    <Setter TargetName="bd" Property="Opacity" Value="0.30"/>
-                </Trigger>
-            </ControlTemplate.Triggers>
-        </ControlTemplate>
-
-        <!-- Primary (Start) button -->
-        <Style x:Key="StyBtnPrimary" TargetType="Button">
-            <Setter Property="Height"          Value="30"/>
-            <Setter Property="FontWeight"      Value="SemiBold"/>
-            <Setter Property="FontSize"        Value="12"/>
-            <Setter Property="Foreground"      Value="White"/>
-            <Setter Property="BorderThickness" Value="0"/>
-            <Setter Property="Cursor"          Value="Hand"/>
-            <Setter Property="Template"        Value="{StaticResource TplFlatBtn}"/>
-        </Style>
-
-        <!-- Stop / Danger button -->
-        <Style x:Key="StyBtnStop" TargetType="Button" BasedOn="{StaticResource StyBtnPrimary}">
-            <Setter Property="Height"      Value="26"/>
-            <Setter Property="Background"  Value="{StaticResource BrDanger}"/>
-            <Setter Property="FontSize"    Value="11"/>
-        </Style>
-
-        <!-- Utility / secondary button -->
-        <Style x:Key="StyBtnUtil" TargetType="Button">
-            <Setter Property="Height"      Value="26"/>
-            <Setter Property="FontSize"    Value="11"/>
-            <Setter Property="Background"  Value="#1E2233"/>
-            <Setter Property="Foreground"  Value="{StaticResource BrTextPri}"/>
-            <Setter Property="Cursor"      Value="Hand"/>
-            <Setter Property="Template">
-                <Setter.Value>
-                    <ControlTemplate TargetType="Button">
-                        <Border x:Name="bd"
-                                Background="{TemplateBinding Background}"
-                                BorderBrush="{StaticResource BrBorder}"
-                                BorderThickness="1" CornerRadius="3" Padding="8,0">
-                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
-                        </Border>
-                        <ControlTemplate.Triggers>
-                            <Trigger Property="IsMouseOver" Value="True">
-                                <Setter TargetName="bd" Property="Opacity" Value="0.80"/>
-                            </Trigger>
-                            <Trigger Property="IsEnabled" Value="False">
-                                <Setter TargetName="bd" Property="Opacity" Value="0.35"/>
-                            </Trigger>
-                        </ControlTemplate.Triggers>
-                    </ControlTemplate>
-                </Setter.Value>
-            </Setter>
-        </Style>
-
-        <!-- Destructive utility button -->
-        <Style x:Key="StyBtnDestr" TargetType="Button">
-            <Setter Property="Height"      Value="26"/>
-            <Setter Property="FontSize"    Value="11"/>
-            <Setter Property="Background"  Value="#6B1515"/>
-            <Setter Property="Foreground"  Value="White"/>
-            <Setter Property="Cursor"      Value="Hand"/>
-            <Setter Property="Template">
-                <Setter.Value>
-                    <ControlTemplate TargetType="Button">
-                        <Border x:Name="bd"
-                                Background="{TemplateBinding Background}"
-                                BorderThickness="0" CornerRadius="3" Padding="8,0">
-                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
-                        </Border>
-                        <ControlTemplate.Triggers>
-                            <Trigger Property="IsMouseOver" Value="True">
-                                <Setter TargetName="bd" Property="Opacity" Value="0.80"/>
-                            </Trigger>
-                            <Trigger Property="IsEnabled" Value="False">
-                                <Setter TargetName="bd" Property="Opacity" Value="0.35"/>
-                            </Trigger>
-                        </ControlTemplate.Triggers>
-                    </ControlTemplate>
-                </Setter.Value>
-            </Setter>
-        </Style>
-
-        <!-- Stat label -->
-        <Style x:Key="StyLbl" TargetType="TextBlock">
-            <Setter Property="FontSize"   Value="9"/>
-            <Setter Property="FontWeight" Value="Bold"/>
-            <Setter Property="Foreground" Value="{StaticResource BrTextSec}"/>
-            <Setter Property="Margin"     Value="0,0,0,2"/>
-        </Style>
-
-        <!-- Stat value (large) -->
-        <Style x:Key="StyVal" TargetType="TextBlock">
-            <Setter Property="FontSize"   Value="16"/>
-            <Setter Property="FontWeight" Value="Bold"/>
-            <Setter Property="FontFamily" Value="Consolas"/>
-            <Setter Property="Foreground" Value="{StaticResource BrTextPri}"/>
-        </Style>
-
-        <!-- Stat value (small, in phase cards) -->
-        <Style x:Key="StyValSm" TargetType="TextBlock">
-            <Setter Property="FontSize"   Value="13"/>
-            <Setter Property="FontWeight" Value="Bold"/>
-            <Setter Property="FontFamily" Value="Consolas"/>
-            <Setter Property="Foreground" Value="{StaticResource BrTextPri}"/>
-        </Style>
-
-        <!-- ProgressBar -->
-        <Style x:Key="StyPbar" TargetType="ProgressBar">
-            <Setter Property="Height" Value="5"/>
-            <Setter Property="Template">
-                <Setter.Value>
-                    <ControlTemplate TargetType="ProgressBar">
-                        <Border CornerRadius="3" Background="#1E2233" Height="5">
-                            <Grid x:Name="PART_Track">
-                                <Border x:Name="PART_Indicator"
-                                        HorizontalAlignment="Left"
-                                        Background="#3B82F6"
-                                        CornerRadius="3"/>
-                            </Grid>
-                        </Border>
-                    </ControlTemplate>
-                </Setter.Value>
-            </Setter>
-        </Style>
-
+        <!-- Stilovi su u GlobalStyles.xaml (Dark) i DefaultTheme.xaml (Light) -->
     </UserControl.Resources>
 
     <!-- Outer grid: visible UI + collapsed compatibility layer -->
@@ -188,10 +41,10 @@
 
                         <!-- Title -->
                         <StackPanel Grid.Column="0" Orientation="Horizontal" VerticalAlignment="Center">
-                            <TextBlock FontSize="17" FontWeight="Black" Foreground="#3B82F6">PREVIEW</TextBlock>
-                            <TextBlock FontSize="17" FontWeight="Black" Foreground="{StaticResource BrTextPri}" Margin="3,0,0,0">MIGRATION</TextBlock>
-                            <Border Background="#1A3461" CornerRadius="3" Padding="5,2" Margin="10,0,0,0" VerticalAlignment="Center">
-                                <TextBlock Text="PREVIEW TYPE" FontSize="8" FontWeight="Bold" Foreground="#60A5FA"/>
+                            <TextBlock FontSize="17" FontWeight="Black" Foreground="{StaticResource Clr.Preview.Title}">PREVIEW</TextBlock>
+                            <TextBlock FontSize="17" FontWeight="Black" Foreground="{StaticResource Clr.Preview.Title}" Margin="3,0,0,0">MIGRATION</TextBlock>
+                            <Border Background="{StaticResource Clr.Preview.BadgeBg}" CornerRadius="3" Padding="5,2" Margin="10,0,0,0" VerticalAlignment="Center">
+                                <TextBlock Text="PREVIEW TYPE" FontSize="8" FontWeight="Bold" Foreground="{StaticResource Clr.Preview.BadgeFg}"/>
                             </Border>
                         </StackPanel>
 
@@ -199,52 +52,52 @@
                         <StackPanel Grid.Column="1" Orientation="Horizontal"
                                     HorizontalAlignment="Center" VerticalAlignment="Center">
 
-                            <Border Background="#191D2C" CornerRadius="5" Padding="12,5" Margin="3,0">
+                            <Border Background="{StaticResource Clr.Chip.Bg}" CornerRadius="5" Padding="12,5" Margin="3,0">
                                 <StackPanel>
                                     <TextBlock Style="{StaticResource StyLbl}" Text="UKUPNO"/>
-                                    <TextBlock x:Name="TxtTotalCount" Style="{StaticResource StyVal}" Text="0" Foreground="#60A5FA"/>
+                                    <TextBlock x:Name="TxtTotalCount" Style="{StaticResource StyVal}" Text="0"/>
                                 </StackPanel>
                             </Border>
 
-                            <Border Background="#191D2C" CornerRadius="5" Padding="12,5" Margin="3,0">
+                            <Border Background="{StaticResource Clr.Chip.Bg}" CornerRadius="5" Padding="12,5" Margin="3,0">
                                 <StackPanel>
                                     <TextBlock Style="{StaticResource StyLbl}" Text="PI"/>
-                                    <TextBlock x:Name="TxtPiCount" Style="{StaticResource StyVal}" Text="0" Foreground="#22C55E"/>
+                                    <TextBlock x:Name="TxtPiCount" Style="{StaticResource StyVal}" Text="0"/>
                                 </StackPanel>
                             </Border>
 
-                            <Border Background="#191D2C" CornerRadius="5" Padding="12,5" Margin="3,0">
+                            <Border Background="{StaticResource Clr.Chip.Bg}" CornerRadius="5" Padding="12,5" Margin="3,0">
                                 <StackPanel>
                                     <TextBlock Style="{StaticResource StyLbl}" Text="LE"/>
-                                    <TextBlock x:Name="TxtLeCount" Style="{StaticResource StyVal}" Text="0" Foreground="#F97316"/>
+                                    <TextBlock x:Name="TxtLeCount" Style="{StaticResource StyVal}" Text="0"/>
                                 </StackPanel>
                             </Border>
 
-                            <Border Background="#191D2C" CornerRadius="5" Padding="12,5" Margin="3,0">
+                            <Border Background="{StaticResource Clr.Chip.Bg}" CornerRadius="5" Padding="12,5" Margin="3,0">
                                 <StackPanel>
                                     <TextBlock Style="{StaticResource StyLbl}" Text="PENDING"/>
-                                    <TextBlock x:Name="TxtPendingCount" Style="{StaticResource StyVal}" Text="0" Foreground="#94A3B8"/>
+                                    <TextBlock x:Name="TxtPendingCount" Style="{StaticResource StyVal}" Text="0"/>
                                 </StackPanel>
                             </Border>
 
-                            <Border Background="#191D2C" CornerRadius="5" Padding="12,5" Margin="3,0">
+                            <Border Background="{StaticResource Clr.Chip.Bg}" CornerRadius="5" Padding="12,5" Margin="3,0">
                                 <StackPanel>
                                     <TextBlock Style="{StaticResource StyLbl}" Text="FOLDER READY"/>
-                                    <TextBlock x:Name="TxtFolderReadyCount" Style="{StaticResource StyVal}" Text="0" Foreground="#34D399"/>
+                                    <TextBlock x:Name="TxtFolderReadyCount" Style="{StaticResource StyVal}" Text="0"/>
                                 </StackPanel>
                             </Border>
 
-                            <Border Background="#191D2C" CornerRadius="5" Padding="12,5" Margin="3,0">
+                            <Border Background="{StaticResource Clr.Chip.Bg}" CornerRadius="5" Padding="12,5" Margin="3,0">
                                 <StackPanel>
                                     <TextBlock Style="{StaticResource StyLbl}" Text="ZA MOVE"/>
-                                    <TextBlock x:Name="TxtDocReadyCount" Style="{StaticResource StyVal}" Text="0" Foreground="#2DD4BF"/>
+                                    <TextBlock x:Name="TxtDocReadyCount" Style="{StaticResource StyVal}" Text="0"/>
                                 </StackPanel>
                             </Border>
 
                         </StackPanel>
 
                         <!-- Status -->
-                        <Border Grid.Column="2" Background="#191D2C" CornerRadius="5" Padding="12,5">
+                        <Border Grid.Column="2" Background="{StaticResource Clr.Chip.Bg}" CornerRadius="5" Padding="12,5">
                             <StackPanel>
                                 <TextBlock Style="{StaticResource StyLbl}" Text="STATUS"/>
                                 <TextBlock x:Name="TxtStatus" Text="Spremno"
@@ -292,8 +145,8 @@
                              └─────────────────────────────────────┘ -->
                         <Border Grid.Row="0" Grid.Column="0"
                                 Background="{StaticResource BrBgCard}"
-                                BorderBrush="#22C55E" BorderThickness="0,2,0,0"
-                                CornerRadius="6" Padding="12,10">
+                                BorderBrush="{StaticResource BrBorder}" BorderThickness="1"
+                                CornerRadius="4" Padding="12,10">
                             <Grid>
                                 <Grid.RowDefinitions>
                                     <RowDefinition Height="Auto"/>
@@ -303,9 +156,9 @@
                                 </Grid.RowDefinitions>
 
                                 <StackPanel Grid.Row="0" Orientation="Horizontal" Margin="0,0,0,8">
-                                    <Border Width="3" CornerRadius="2" Background="#22C55E" Margin="0,1,7,1"/>
+                                    <Border Width="3" CornerRadius="2" Background="{StaticResource Clr.Strip.Faza1}" Margin="0,1,7,1"/>
                                     <StackPanel>
-                                        <TextBlock Text="FAZA 1" FontSize="9" FontWeight="Bold" Foreground="#22C55E"/>
+                                        <TextBlock Text="FAZA 1" FontSize="9" FontWeight="Bold" Foreground="{StaticResource BrTextSec}"/>
                                         <TextBlock Text="Ucitavanje dokumenata" FontSize="11"
                                                    FontWeight="SemiBold" Foreground="{StaticResource BrTextPri}"/>
                                     </StackPanel>
@@ -343,7 +196,7 @@
                                                Margin="0,0,0,4"/>
                                     <ComboBox x:Name="CmbFaza1FolderFilter"
                                               Height="24" FontSize="11"
-                                              Background="#1E2233" Foreground="Black"
+                                              Background="{StaticResource Clr.BtnUtil.Bg}" Foreground="Black"
                                               BorderBrush="{StaticResource BrBorder}"
                                               SelectedIndex="0">
                                         <ComboBoxItem Content="Sve (PI + LE)" Tag=""/>
@@ -354,13 +207,13 @@
 
                                 <StackPanel Grid.Row="3">
                                     <Button x:Name="BtnStartFaza1"
-                                            Content="▶  Pokreni Fazu 1"
+                                            Content="Start"
                                             Style="{StaticResource StyBtnPrimary}"
-                                            Background="#16A34A"
+                                            Background="{StaticResource Clr.Btn.Faza1}"
                                             Click="BtnStartFaza1_Click"
                                             Margin="0,0,0,4"/>
                                     <Button x:Name="BtnStopFaza1"
-                                            Content="⏹  Zaustavi"
+                                            Content="Stop"
                                             Style="{StaticResource StyBtnStop}"
                                             Click="BtnStopFaza1_Click"
                                             IsEnabled="False"/>
@@ -373,8 +226,8 @@
                              └─────────────────────────────────────┘ -->
                         <Border Grid.Row="0" Grid.Column="2"
                                 Background="{StaticResource BrBgCard}"
-                                BorderBrush="#3B82F6" BorderThickness="0,2,0,0"
-                                CornerRadius="6" Padding="12,10">
+                                BorderBrush="{StaticResource BrBorder}" BorderThickness="1"
+                                CornerRadius="4" Padding="12,10">
                             <Grid>
                                 <Grid.RowDefinitions>
                                     <RowDefinition Height="Auto"/>
@@ -384,9 +237,9 @@
                                 </Grid.RowDefinitions>
 
                                 <StackPanel Grid.Row="0" Orientation="Horizontal" Margin="0,0,0,8">
-                                    <Border Width="3" CornerRadius="2" Background="#3B82F6" Margin="0,1,7,1"/>
+                                    <Border Width="3" CornerRadius="2" Background="{StaticResource Clr.Strip.Faza2}" Margin="0,1,7,1"/>
                                     <StackPanel>
-                                        <TextBlock Text="FAZA 2" FontSize="9" FontWeight="Bold" Foreground="#3B82F6"/>
+                                        <TextBlock Text="FAZA 2" FontSize="9" FontWeight="Bold" Foreground="{StaticResource BrTextSec}"/>
                                         <TextBlock Text="Priprema foldera" FontSize="11"
                                                    FontWeight="SemiBold" Foreground="{StaticResource BrTextPri}"/>
                                     </StackPanel>
@@ -442,14 +295,14 @@
 
                                 <StackPanel Grid.Row="3">
                                     <Button x:Name="BtnStartFaza2"
-                                            Content="▶  Pokreni Fazu 2"
+                                            Content="Start"
                                             Style="{StaticResource StyBtnPrimary}"
-                                            Background="#2563EB"
+                                            Background="{StaticResource Clr.Btn.Faza2}"
                                             Click="BtnStartFaza2_Click"
                                             ToolTip="Proverava da li destination folderi postoje u Alfresci, zove ClientAPI za nepostojece"
                                             Margin="0,0,0,4"/>
                                     <Button x:Name="BtnStopFaza2"
-                                            Content="⏹  Zaustavi"
+                                            Content="Stop"
                                             Style="{StaticResource StyBtnStop}"
                                             Click="BtnStopFaza2_Click"
                                             IsEnabled="False"/>
@@ -462,8 +315,8 @@
                              └─────────────────────────────────────┘ -->
                         <Border Grid.Row="0" Grid.Column="4"
                                 Background="{StaticResource BrBgCard}"
-                                BorderBrush="#A855F7" BorderThickness="0,2,0,0"
-                                CornerRadius="6" Padding="12,10">
+                                BorderBrush="{StaticResource BrBorder}" BorderThickness="1"
+                                CornerRadius="4" Padding="12,10">
                             <Grid>
                                 <Grid.RowDefinitions>
                                     <RowDefinition Height="Auto"/>
@@ -473,9 +326,9 @@
                                 </Grid.RowDefinitions>
 
                                 <StackPanel Grid.Row="0" Orientation="Horizontal" Margin="0,0,0,8">
-                                    <Border Width="3" CornerRadius="2" Background="#A855F7" Margin="0,1,7,1"/>
+                                    <Border Width="3" CornerRadius="2" Background="{StaticResource Clr.Strip.Faza3}" Margin="0,1,7,1"/>
                                     <StackPanel>
-                                        <TextBlock Text="FAZA 3" FontSize="9" FontWeight="Bold" Foreground="#A855F7"/>
+                                        <TextBlock Text="FAZA 3" FontSize="9" FontWeight="Bold" Foreground="{StaticResource BrTextSec}"/>
                                         <TextBlock Text="Kreiranje foldera" FontSize="11"
                                                    FontWeight="SemiBold" Foreground="{StaticResource BrTextPri}"/>
                                     </StackPanel>
@@ -511,20 +364,20 @@
 
                                 <StackPanel Grid.Row="3">
                                     <Button x:Name="BtnStartFaza3"
-                                            Content="▶  Pokreni Fazu 3"
+                                            Content="Start"
                                             Style="{StaticResource StyBtnPrimary}"
-                                            Background="#9333EA"
+                                            Background="{StaticResource Clr.Btn.Faza3}"
                                             Click="BtnStartFaza3_Click"
                                             ToolTip="Kreira Alfresco foldere za sve FOLDER_PENDING_CREATION zapise"
                                             Margin="0,0,0,4"/>
                                     <Button x:Name="BtnStopFaza3"
-                                            Content="⏹  Zaustavi"
+                                            Content="Stop"
                                             Style="{StaticResource StyBtnStop}"
                                             Click="BtnStopFaza3_Click"
                                             IsEnabled="False"
                                             Margin="0,0,0,4"/>
                                     <Button x:Name="BtnRollbackFaza3"
-                                            Content="↩  Rollback (TEST)"
+                                            Content="Rollback"
                                             Style="{StaticResource StyBtnDestr}"
                                             Click="BtnRollbackFaza3_Click"
                                             Visibility="Collapsed"
@@ -538,8 +391,8 @@
                              └─────────────────────────────────────┘ -->
                         <Border Grid.Row="2" Grid.Column="0"
                                 Background="{StaticResource BrBgCard}"
-                                BorderBrush="#14B8A6" BorderThickness="0,2,0,0"
-                                CornerRadius="6" Padding="12,10">
+                                BorderBrush="{StaticResource BrBorder}" BorderThickness="1"
+                                CornerRadius="4" Padding="12,10">
                             <Grid>
                                 <Grid.RowDefinitions>
                                     <RowDefinition Height="Auto"/>
@@ -549,9 +402,9 @@
                                 </Grid.RowDefinitions>
 
                                 <StackPanel Grid.Row="0" Orientation="Horizontal" Margin="0,0,0,6">
-                                    <Border Width="3" CornerRadius="2" Background="#14B8A6" Margin="0,1,7,1"/>
+                                    <Border Width="3" CornerRadius="2" Background="{StaticResource Clr.Strip.Faza45}" Margin="0,1,7,1"/>
                                     <StackPanel>
-                                        <TextBlock Text="FAZA 4/5" FontSize="9" FontWeight="Bold" Foreground="#14B8A6"/>
+                                        <TextBlock Text="FAZA 4/5" FontSize="9" FontWeight="Bold" Foreground="{StaticResource BrTextSec}"/>
                                         <TextBlock Text="Export / Transfer" FontSize="11"
                                                    FontWeight="SemiBold" Foreground="{StaticResource BrTextPri}"/>
                                     </StackPanel>
@@ -596,21 +449,21 @@
 
                                 <StackPanel Grid.Row="3">
                                     <Button x:Name="BtnExport"
-                                            Content="📊  Eksportuj (Faza 7)"
+                                            Content="Export"
                                             Style="{StaticResource StyBtnPrimary}"
-                                            Background="#6D28D9"
+                                            Background="{StaticResource Clr.Btn.Export}"
                                             Click="BtnExport_Click"
                                             ToolTip="Eksportuje PreviewDocStaging u .xlsx (2 sheet-a: PI i LE)"
                                             Margin="0,0,0,4"/>
                                     <Button x:Name="BtnStartTransfer"
-                                            Content="▶  Transfer (Faza 6)"
+                                            Content="Transfer"
                                             Style="{StaticResource StyBtnPrimary}"
-                                            Background="#0D9488"
+                                            Background="{StaticResource Clr.Btn.Transfer}"
                                             Click="BtnStartTransfer_Click"
                                             ToolTip="Prenosi zapise iz PreviewDocStaging u DocStaging"
                                             Margin="0,0,0,4"/>
                                     <Button x:Name="BtnStopTransfer"
-                                            Content="⏹  Zaustavi Transfer"
+                                            Content="Stop"
                                             Style="{StaticResource StyBtnStop}"
                                             Click="BtnStopTransfer_Click"
                                             IsEnabled="False"/>
@@ -623,8 +476,8 @@
                              └─────────────────────────────────────┘ -->
                         <Border Grid.Row="2" Grid.Column="2"
                                 Background="{StaticResource BrBgCard}"
-                                BorderBrush="#2563EB" BorderThickness="0,2,0,0"
-                                CornerRadius="6" Padding="12,10">
+                                BorderBrush="{StaticResource BrBorder}" BorderThickness="1"
+                                CornerRadius="4" Padding="12,10">
                             <Grid>
                                 <Grid.RowDefinitions>
                                     <RowDefinition Height="Auto"/>
@@ -634,9 +487,9 @@
                                 </Grid.RowDefinitions>
 
                                 <StackPanel Grid.Row="0" Orientation="Horizontal" Margin="0,0,0,8">
-                                    <Border Width="3" CornerRadius="2" Background="#2563EB" Margin="0,1,7,1"/>
+                                    <Border Width="3" CornerRadius="2" Background="{StaticResource Clr.Strip.Faza6}" Margin="0,1,7,1"/>
                                     <StackPanel>
-                                        <TextBlock Text="FAZA 6" FontSize="9" FontWeight="Bold" Foreground="#2563EB"/>
+                                        <TextBlock Text="FAZA 6" FontSize="9" FontWeight="Bold" Foreground="{StaticResource BrTextSec}"/>
                                         <TextBlock Text="Start Migration" FontSize="11"
                                                    FontWeight="SemiBold" Foreground="{StaticResource BrTextPri}"/>
                                     </StackPanel>
@@ -667,14 +520,14 @@
 
                                 <StackPanel Grid.Row="3">
                                     <Button x:Name="BtnStartMigration"
-                                            Content="▶  Start Migration"
+                                            Content="Start"
                                             Style="{StaticResource StyBtnPrimary}"
-                                            Background="#1D4ED8"
+                                            Background="{StaticResource Clr.Btn.Faza6}"
                                             Click="BtnStartMigration_Click"
                                             ToolTip="Pokrece MoveService — migrira dokumente iz DocStaging u Alfresco"
                                             Margin="0,0,0,4"/>
                                     <Button x:Name="BtnStopMigration"
-                                            Content="⏹  Zaustavi"
+                                            Content="Stop"
                                             Style="{StaticResource StyBtnStop}"
                                             Click="BtnStopMigration_Click"
                                             IsEnabled="False"/>
@@ -687,8 +540,8 @@
                              └─────────────────────────────────────┘ -->
                         <Border Grid.Row="2" Grid.Column="4" Visibility="Hidden"
                                 Background="{StaticResource BrBgCard}"
-                                BorderBrush="#475569" BorderThickness="0,2,0,0"
-                                CornerRadius="6" Padding="12,10">
+                                BorderBrush="{StaticResource BrBorder}" BorderThickness="1"
+                                CornerRadius="4" Padding="12,10">
                             <Grid>
                                 <Grid.RowDefinitions>
                                     <RowDefinition Height="Auto"/>
@@ -697,9 +550,9 @@
                                 </Grid.RowDefinitions>
 
                                 <StackPanel Grid.Row="0" Orientation="Horizontal" Margin="0,0,0,10">
-                                    <Border Width="3" CornerRadius="2" Background="#475569" Margin="0,1,7,1"/>
+                                    <Border Width="3" CornerRadius="2" Background="{StaticResource Clr.Strip.Util}" Margin="0,1,7,1"/>
                                     <TextBlock Text="UTILITIJI" FontSize="9" FontWeight="Bold"
-                                               Foreground="#64748B" VerticalAlignment="Center"/>
+                                               Foreground="{StaticResource BrTextSec}" VerticalAlignment="Center"/>
                                 </StackPanel>
 
                                 <StackPanel Grid.Row="2">
@@ -710,25 +563,24 @@
                                             <ColumnDefinition Width="*"/>
                                         </Grid.ColumnDefinitions>
                                         <Button x:Name="BtnRefreshStats" Grid.Column="0"
-                                                Content="↻ Statistika"
+                                                Content="Statistika"
                                                 Style="{StaticResource StyBtnUtil}"
                                                 Click="BtnRefreshStats_Click"/>
                                         <Button x:Name="BtnRefreshData" Grid.Column="2"
-                                                Content="↻ Podaci"
+                                                Content="Podaci"
                                                 Style="{StaticResource StyBtnUtil}"
                                                 Click="BtnRefreshData_Click"/>
                                     </Grid>
                                     <Button x:Name="BtnResetCheckpoint"
-                                            Content="↺  Reset Checkpoint"
-                                            Style="{StaticResource StyBtnUtil}"
-                                            Background="#78350F" Foreground="White" BorderThickness="0"
-                                            Height="28" Margin="0,0,0,4"
+                                            Content="Reset Checkpoint"
+                                            Style="{StaticResource StyBtnDestr}"
+                                            Margin="0,0,0,4"
                                             Click="BtnResetCheckpoint_Click"
                                             ToolTip="Brise checkpoint - sledece pokretanje krece od pocetka"/>
                                     <Button x:Name="BtnClearStaging"
-                                            Content="⚠  Ocisti PreviewDocStaging"
+                                            Content="Clear Staging"
                                             Style="{StaticResource StyBtnDestr}"
-                                            Height="28"
+                                            Height="24"
                                             Click="BtnClearStaging_Click"
                                             ToolTip="PAZI: Brise sve zapise iz PreviewDocStaging tabele"/>
                                 </StackPanel>
@@ -749,29 +601,24 @@
 
                         <!-- Terminal title bar -->
                         <Border Grid.Row="0"
-                                Background="#101320"
+                                Background="{StaticResource Clr.LogTitle.Bg}"
                                 BorderBrush="{StaticResource BrBorder}"
                                 BorderThickness="1,1,1,0"
                                 CornerRadius="5,5,0,0"
                                 Padding="9,5">
-                            <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
-                                <Ellipse Width="7" Height="7" Fill="#EF4444" Margin="0,0,4,0"/>
-                                <Ellipse Width="7" Height="7" Fill="#F59E0B" Margin="0,0,4,0"/>
-                                <Ellipse Width="7" Height="7" Fill="#22C55E" Margin="0,0,9,0"/>
-                                <TextBlock Text="LOG OUTPUT" FontSize="9" FontWeight="Bold"
-                                           Foreground="{StaticResource BrTextSec}"/>
-                            </StackPanel>
+                            <TextBlock Text="LOG OUTPUT" FontSize="9" FontWeight="Bold"
+                                       Foreground="{StaticResource BrTextSec}" VerticalAlignment="Center"/>
                         </Border>
 
                         <!-- Log text area -->
                         <Border Grid.Row="1"
-                                Background="#0B0D14"
+                                Background="{StaticResource Clr.Log.Bg}"
                                 BorderBrush="{StaticResource BrBorder}"
                                 BorderThickness="1,0,1,1"
                                 CornerRadius="0,0,5,5">
                             <TextBox x:Name="TxtLog"
                                      Background="Transparent"
-                                     Foreground="#4ADE80"
+                                     Foreground="{StaticResource Clr.Log.Text}"
                                      FontFamily="Cascadia Code, Consolas, Courier New"
                                      FontSize="10.5"
                                      BorderThickness="0"

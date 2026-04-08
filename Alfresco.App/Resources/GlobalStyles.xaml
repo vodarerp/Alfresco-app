@@ -1,5 +1,11 @@
-﻿<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
                     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+
+    <!-- ═══════════════════════════════════════
+         DARK THEME
+         ═══════════════════════════════════════ -->
+
+    <!-- Base -->
     <SolidColorBrush x:Key="Clr.Surface"     Color="#111318"/>
     <SolidColorBrush x:Key="Clr.Panel"       Color="#171A1F"/>
     <SolidColorBrush x:Key="Clr.Separator"   Color="#2A2E36"/>
@@ -8,7 +14,199 @@
     <SolidColorBrush x:Key="Clr.Success"     Color="#2FAE7B"/>
     <SolidColorBrush x:Key="Clr.BackgroudCompomentColor" Color="#20252b"/>
 
-    <!-- Badge “Running” -->
+    <!-- Root / chrome -->
+    <SolidColorBrush x:Key="Clr.Root.Bg"         Color="#13151C"/>
+
+    <!-- Tab control -->
+    <SolidColorBrush x:Key="Clr.TabStrip.Bg"     Color="#181B26"/>
+    <SolidColorBrush x:Key="Clr.TabStrip.Border" Color="#272C3F"/>
+    <SolidColorBrush x:Key="Clr.Tab.Text"        Color="#4A5568"/>
+    <SolidColorBrush x:Key="Clr.Tab.TextActive"  Color="#D8E0F0"/>
+    <SolidColorBrush x:Key="Clr.Tab.TextHover"   Color="#7A8FAD"/>
+    <SolidColorBrush x:Key="Clr.Tab.Underline"   Color="#3B82F6"/>
+    <SolidColorBrush x:Key="Clr.Tab.ErrorFg"     Color="#F8FAFC"/>
+
+    <!-- Status bar -->
+    <SolidColorBrush x:Key="Clr.StatusBar.Bg"      Color="#181B26"/>
+    <SolidColorBrush x:Key="Clr.StatusBar.Border"  Color="#272C3F"/>
+    <SolidColorBrush x:Key="Clr.IconBtn.Fg"        Color="#6B7A99"/>
+    <SolidColorBrush x:Key="Clr.IconBtn.HoverBg"   Color="#1E2233"/>
+    <SolidColorBrush x:Key="Clr.IconBtn.HoverFg"   Color="#A0B0C8"/>
+    <SolidColorBrush x:Key="Clr.IconBtn.PressedBg" Color="#252A38"/>
+    <SolidColorBrush x:Key="Clr.Conn.Bg"           Color="#1B1E2A"/>
+    <SolidColorBrush x:Key="Clr.Conn.Label"        Color="#535E7A"/>
+
+    <!-- Preview Migration -->
+    <SolidColorBrush x:Key="BrBgMain"           Color="#13151C"/>
+    <SolidColorBrush x:Key="BrBgCard"           Color="#1B1E2A"/>
+    <SolidColorBrush x:Key="BrBgHeader"         Color="#181B26"/>
+    <SolidColorBrush x:Key="BrBorder"           Color="#272C3F"/>
+    <SolidColorBrush x:Key="BrTextPri"          Color="#D8E0F0"/>
+    <SolidColorBrush x:Key="BrTextSec"          Color="#535E7A"/>
+    <SolidColorBrush x:Key="BrDanger"           Color="#DC2626"/>
+    <SolidColorBrush x:Key="Clr.Chip.Bg"        Color="#191D2C"/>
+    <SolidColorBrush x:Key="Clr.Preview.BadgeBg" Color="#1A3461"/>
+    <SolidColorBrush x:Key="Clr.Preview.BadgeFg" Color="#60A5FA"/>
+    <SolidColorBrush x:Key="Clr.Preview.Title"   Color="#3B82F6"/>
+    <SolidColorBrush x:Key="Clr.Pbar.Track"     Color="#1E2233"/>
+    <SolidColorBrush x:Key="Clr.Pbar.Fill"      Color="#3B82F6"/>
+    <SolidColorBrush x:Key="Clr.BtnUtil.Bg"     Color="#1E2233"/>
+    <SolidColorBrush x:Key="Clr.LogTitle.Bg"   Color="#101320"/>
+    <SolidColorBrush x:Key="Clr.Log.Bg"        Color="#0B0D14"/>
+    <SolidColorBrush x:Key="Clr.Log.Text"      Color="#4ADE80"/>
+
+    <!-- Phase strip accents — per-phase colors for Dark theme -->
+    <SolidColorBrush x:Key="Clr.Strip.Faza1"   Color="#22C55E"/>
+    <SolidColorBrush x:Key="Clr.Strip.Faza2"   Color="#3B82F6"/>
+    <SolidColorBrush x:Key="Clr.Strip.Faza3"   Color="#A855F7"/>
+    <SolidColorBrush x:Key="Clr.Strip.Faza45"  Color="#14B8A6"/>
+    <SolidColorBrush x:Key="Clr.Strip.Faza6"   Color="#2563EB"/>
+    <SolidColorBrush x:Key="Clr.Strip.Util"    Color="#475569"/>
+
+    <!-- Button action colors -->
+    <SolidColorBrush x:Key="Clr.Btn.Faza1"     Color="#16A34A"/>
+    <SolidColorBrush x:Key="Clr.Btn.Faza2"     Color="#2563EB"/>
+    <SolidColorBrush x:Key="Clr.Btn.Faza3"     Color="#9333EA"/>
+    <SolidColorBrush x:Key="Clr.Btn.Export"    Color="#6D28D9"/>
+    <SolidColorBrush x:Key="Clr.Btn.Transfer"  Color="#0D9488"/>
+    <SolidColorBrush x:Key="Clr.Btn.Faza6"     Color="#1D4ED8"/>
+
+    <!-- ═══════════════════════════════════════
+         PREVIEW MIGRATION — BUTTON STYLES (Dark)
+         ═══════════════════════════════════════ -->
+
+    <ControlTemplate x:Key="TplFlatBtn" TargetType="Button">
+        <Border x:Name="bd"
+                Background="{TemplateBinding Background}"
+                CornerRadius="4" Padding="6,0">
+            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+        </Border>
+        <ControlTemplate.Triggers>
+            <Trigger Property="IsMouseOver" Value="True">
+                <Setter TargetName="bd" Property="Opacity" Value="0.80"/>
+            </Trigger>
+            <Trigger Property="IsPressed" Value="True">
+                <Setter TargetName="bd" Property="Opacity" Value="0.60"/>
+            </Trigger>
+            <Trigger Property="IsEnabled" Value="False">
+                <Setter TargetName="bd" Property="Opacity" Value="0.30"/>
+            </Trigger>
+        </ControlTemplate.Triggers>
+    </ControlTemplate>
+
+    <Style x:Key="StyBtnPrimary" TargetType="Button">
+        <Setter Property="Height"          Value="28"/>
+        <Setter Property="FontWeight"      Value="SemiBold"/>
+        <Setter Property="FontSize"        Value="12"/>
+        <Setter Property="Foreground"      Value="White"/>
+        <Setter Property="BorderThickness" Value="0"/>
+        <Setter Property="Cursor"          Value="Hand"/>
+        <Setter Property="Template"        Value="{StaticResource TplFlatBtn}"/>
+    </Style>
+
+    <Style x:Key="StyBtnStop" TargetType="Button" BasedOn="{StaticResource StyBtnPrimary}">
+        <Setter Property="Height"      Value="24"/>
+        <Setter Property="Background"  Value="{StaticResource BrDanger}"/>
+        <Setter Property="FontSize"    Value="11"/>
+    </Style>
+
+    <Style x:Key="StyBtnUtil" TargetType="Button">
+        <Setter Property="Height"      Value="24"/>
+        <Setter Property="FontSize"    Value="11"/>
+        <Setter Property="Background"  Value="{StaticResource Clr.BtnUtil.Bg}"/>
+        <Setter Property="Foreground"  Value="{StaticResource BrTextPri}"/>
+        <Setter Property="Cursor"      Value="Hand"/>
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="Button">
+                    <Border x:Name="bd"
+                            Background="{TemplateBinding Background}"
+                            BorderBrush="{StaticResource BrBorder}"
+                            BorderThickness="1" CornerRadius="3" Padding="8,0">
+                        <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="bd" Property="Opacity" Value="0.80"/>
+                        </Trigger>
+                        <Trigger Property="IsEnabled" Value="False">
+                            <Setter TargetName="bd" Property="Opacity" Value="0.35"/>
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <Style x:Key="StyBtnDestr" TargetType="Button">
+        <Setter Property="Height"      Value="24"/>
+        <Setter Property="FontSize"    Value="11"/>
+        <Setter Property="Background"  Value="#6B1515"/>
+        <Setter Property="Foreground"  Value="White"/>
+        <Setter Property="Cursor"      Value="Hand"/>
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="Button">
+                    <Border x:Name="bd"
+                            Background="{TemplateBinding Background}"
+                            BorderThickness="0" CornerRadius="3" Padding="8,0">
+                        <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="bd" Property="Opacity" Value="0.80"/>
+                        </Trigger>
+                        <Trigger Property="IsEnabled" Value="False">
+                            <Setter TargetName="bd" Property="Opacity" Value="0.35"/>
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <Style x:Key="StyLbl" TargetType="TextBlock">
+        <Setter Property="FontSize"   Value="9"/>
+        <Setter Property="FontWeight" Value="Bold"/>
+        <Setter Property="Foreground" Value="{StaticResource BrTextSec}"/>
+        <Setter Property="Margin"     Value="0,0,0,2"/>
+    </Style>
+
+    <Style x:Key="StyVal" TargetType="TextBlock">
+        <Setter Property="FontSize"   Value="16"/>
+        <Setter Property="FontWeight" Value="Bold"/>
+        <Setter Property="Foreground" Value="{StaticResource BrTextPri}"/>
+    </Style>
+
+    <Style x:Key="StyValSm" TargetType="TextBlock">
+        <Setter Property="FontSize"   Value="13"/>
+        <Setter Property="FontWeight" Value="Bold"/>
+        <Setter Property="Foreground" Value="{StaticResource BrTextPri}"/>
+    </Style>
+
+    <Style x:Key="StyPbar" TargetType="ProgressBar">
+        <Setter Property="Height" Value="5"/>
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="ProgressBar">
+                    <Border CornerRadius="3" Background="{StaticResource Clr.Pbar.Track}" Height="5">
+                        <Grid x:Name="PART_Track">
+                            <Border x:Name="PART_Indicator"
+                                    HorizontalAlignment="Left"
+                                    Background="{StaticResource Clr.Pbar.Fill}"
+                                    CornerRadius="3"/>
+                        </Grid>
+                    </Border>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <!-- ═══════════════════════════════════════
+         GLOBAL STYLES (shared, use theme keys)
+         ═══════════════════════════════════════ -->
+
+    <!-- Badge "Running" -->
     <Style x:Key="RunningBadge" TargetType="Border">
         <Setter Property="Background" Value="{StaticResource Clr.Success}"/>
         <Setter Property="CornerRadius" Value="10"/>
@@ -51,9 +249,9 @@
 
     <!-- Wrapper panela -->
     <Style x:Key="HeaderPanel" TargetType="Border">
-        <Setter Property="Background" Value="{StaticResource Clr.BackgroudCompomentColor}"/>        
+        <Setter Property="Background" Value="{StaticResource Clr.BackgroudCompomentColor}"/>
         <Setter Property="CornerRadius" Value="12"/>
-        <Setter Property="SnapsToDevicePixels" Value="True"/>       
+        <Setter Property="SnapsToDevicePixels" Value="True"/>
         <Setter Property="ClipToBounds" Value="True"/>
         <Setter Property="Margin" Value="0"/>
         <Setter Property="Effect">
