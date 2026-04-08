@@ -82,9 +82,9 @@ public static class Program
             BaseUrl = "http://localhost:8080/",
             Username =  "admin",
             Password = "admin",
-            RootParentId = "f1796b62-0c37-4ab5-b96b-620c370ab5d9",
-            FolderCount = 150,
-            DocsPerFolder = 20,
+            RootParentId = "20c56a27-23d4-4a82-856a-2723d4ca8245",
+            FolderCount = 1000,
+            DocsPerFolder = 50,
             DegreeOfParallelism = 5,
             MaxRetries = 5,
             RetryBaseDelayMs = 100,
@@ -104,8 +104,8 @@ public static class Program
             // Each dossier gets a random number of documents between Min and Max
             // Document descriptions are picked randomly from the static DocumentDescriptions list
             GenerateRandomDocuments = true,         // Set to true to generate random documents
-            MinDocsPerFolder = 15,                  // Minimum documents per dossier
-            MaxDocsPerFolder = 35                   // Maximum documents per dossier
+            MinDocsPerFolder = 5,                  // Minimum documents per dossier
+            MaxDocsPerFolder = 50                   // Maximum documents per dossier
         };
 
 

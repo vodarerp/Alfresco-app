@@ -258,7 +258,7 @@ namespace SqlServer.Infrastructure.Implementation
                       AND ISNULL(DossierDestinationFolderName, '') <> ''
                 )
                 UPDATE d
-                SET d.Status = 'IN_PROGRESS'
+                SET d.Status = 'IN_PROGRESS_F2'
                 OUTPUT INSERTED.DossierDestinationFolderName
                 FROM PreviewDocStaging d
                 JOIN SelectedFolders s ON d.DossierDestinationFolderName = s.DossierDestinationFolderName;";
@@ -587,7 +587,7 @@ namespace SqlServer.Infrastructure.Implementation
                       AND ISNULL(DossierDestinationFolderName, '') <> ''
                 )
                 UPDATE d
-                SET d.Status = 'IN_PROGRESS'
+                SET d.Status = 'IN_PROGRESS_F3'
                 OUTPUT INSERTED.DossierDestinationFolderName, DELETED.Status AS OriginalStatus
                 FROM PreviewDocStaging d
                 JOIN SelectedFolders s ON d.DossierDestinationFolderName = s.DossierDestinationFolderName;";
@@ -738,6 +738,31 @@ namespace SqlServer.Infrastructure.Implementation
         {
             public string DossierDestinationFolderName { get; set; } = "";
             public string DossierDestinationFolderId { get; set; } = "";
+        }
+
+        public async Task<int> ResetStuckF2InProgressAsync(CancellationToken ct = default)
+        {
+            const string sql = @"
+                UPDATE PreviewDocStaging
+                SET Status = 'PENDING'
+                WHERE Status = 'IN_PROGRESS_F2'";
+
+            var cmd = new CommandDefinition(sql, transaction: Tx, commandTimeout: _commandTimeoutSeconds, cancellationToken: ct);
+            return await Conn.ExecuteAsync(cmd).ConfigureAwait(false);
+        }
+
+        public async Task<int> ResetStuckF3InProgressAsync(CancellationToken ct = default)
+        {
+            const string sql = @"
+                UPDATE PreviewDocStaging
+                SET Status = CASE
+                    WHEN ISNULL(DossierDestinationFolderId, '') <> '' THEN 'FOLDER_PENDING_EXISTS'
+                    ELSE 'FOLDER_PENDING_CREATION'
+                END
+                WHERE Status = 'IN_PROGRESS_F3'";
+
+            var cmd = new CommandDefinition(sql, transaction: Tx, commandTimeout: _commandTimeoutSeconds, cancellationToken: ct);
+            return await Conn.ExecuteAsync(cmd).ConfigureAwait(false);
         }
 
         public async Task DeleteAllAsync(CancellationToken ct = default)

@@ -108,5 +108,14 @@ namespace SqlServer.Abstraction.Interfaces
 
         // Resetuje zapise sa statusom TRANSFER_IN_PROGRESS nazad na originalni status (za rollback pri grešci)
         Task ResetTransferInProgressAsync(IEnumerable<long> ids, CancellationToken ct = default);
+
+        // Resetuje zaglavjene IN_PROGRESS_F2 zapise nazad na PENDING (poziva se na pocetku Faze 2)
+        Task<int> ResetStuckF2InProgressAsync(CancellationToken ct = default);
+
+        // Resetuje zaglavjene IN_PROGRESS_F3 zapise nazad na odgovarajuci status:
+        // - DossierDestinationFolderId IS NOT NULL → FOLDER_PENDING_EXISTS
+        // - DossierDestinationFolderId IS NULL     → FOLDER_PENDING_CREATION
+        // Poziva se na pocetku Faze 3.
+        Task<int> ResetStuckF3InProgressAsync(CancellationToken ct = default);
     }
 }

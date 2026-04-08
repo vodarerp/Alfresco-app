@@ -57,6 +57,18 @@ namespace Migration.Infrastructure.Implementation.Services
             _fileLogger.LogInformation("PreviewFolderCreationService: Start.");
             _uiLogger.LogInformation("PreviewFolderCreationService: Pokretanje Faze 3 — kreiranje foldera i upis u FolderStaging...");
 
+            // Reset zaglavljenih IN_PROGRESS_F3 zapisa iz prethodnog (neuspesnog) pokretanja
+            await using (var scope = _scopeFactory.CreateAsyncScope())
+            {
+                var uow  = scope.ServiceProvider.GetRequiredService<IUnitOfWork>();
+                var repo = scope.ServiceProvider.GetRequiredService<IPreviewDocStagingRepository>();
+                await uow.BeginAsync(ct: ct).ConfigureAwait(false);
+                var resetCount = await repo.ResetStuckF3InProgressAsync(ct).ConfigureAwait(false);
+                await uow.CommitAsync(ct: ct).ConfigureAwait(false);
+                if (resetCount > 0)
+                    _uiLogger.LogWarning("PreviewFolderCreationService: Resetovano {Count} zaglavljenih IN_PROGRESS_F3 zapisa na prethodni status.", resetCount);
+            }
+
             long totalProcessed = 0;
             long totalFailed    = 0;
             int  batchNum       = 0;

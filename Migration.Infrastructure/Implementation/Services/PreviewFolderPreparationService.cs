@@ -71,6 +71,18 @@ namespace Migration.Infrastructure.Implementation.Services
             _fileLogger.LogInformation("PreviewFolderPreparationService: Start. RootDestId={RootDestId}", rootDestId);
             _uiLogger.LogInformation("PreviewFolderPreparationService: Pokretanje Faze 2...");
 
+            // Reset zaglavljenih IN_PROGRESS_F2 zapisa iz prethodnog (neuspesnog) pokretanja
+            await using (var scope = _scopeFactory.CreateAsyncScope())
+            {
+                var uow  = scope.ServiceProvider.GetRequiredService<IUnitOfWork>();
+                var repo = scope.ServiceProvider.GetRequiredService<IPreviewDocStagingRepository>();
+                await uow.BeginAsync(ct: ct).ConfigureAwait(false);
+                var resetCount = await repo.ResetStuckF2InProgressAsync(ct).ConfigureAwait(false);
+                await uow.CommitAsync(ct: ct).ConfigureAwait(false);
+                if (resetCount > 0)
+                    _uiLogger.LogWarning("PreviewFolderPreparationService: Resetovano {Count} zaglavljenih IN_PROGRESS_F2 zapisa na PENDING.", resetCount);
+            }
+
             long totalProcessed = 0;
             long totalExists = 0;
             long totalPending = 0;
