@@ -1,7 +1,10 @@
+using Alfresco.Abstraction.Interfaces;
+using Alfresco.Contracts.Options;
 using Alfresco.Contracts.Oracle.Models;
 using Alfresco.Contracts.SqlServer;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Options;
 using Migration.Abstraction.Interfaces.Wrappers;
 using Migration.Abstraction.Models;
 using SqlServer.Abstraction.Interfaces;
@@ -27,6 +30,8 @@ namespace Alfresco.App.UserControls
         private readonly IPreviewExportService _exportService;
         private readonly IPreviewFolderRollbackService _rollbackService;
         private readonly IMoveService _moveService;
+        private readonly IAlfrescoHealthChecker _healthChecker;
+        private readonly IOptions<PollyPolicyOptions> _pollyOptions;
         private CancellationTokenSource? _cts;
         private CancellationTokenSource? _ctsFaza2;
         private CancellationTokenSource? _ctsFaza3;
@@ -64,6 +69,8 @@ namespace Alfresco.App.UserControls
             _exportService = App.AppHost.Services.GetRequiredService<IPreviewExportService>();
             _rollbackService = App.AppHost.Services.GetRequiredService<IPreviewFolderRollbackService>();
             _moveService = App.AppHost.Services.GetRequiredService<IMoveService>();
+            _healthChecker = App.AppHost.Services.GetRequiredService<IAlfrescoHealthChecker>();
+            _pollyOptions = App.AppHost.Services.GetRequiredService<IOptions<PollyPolicyOptions>>();
 
             var config = App.AppHost.Services.GetRequiredService<IConfiguration>();
             if (config.GetValue<bool>("EnablePreviewFolderRollback"))
@@ -82,6 +89,13 @@ namespace Alfresco.App.UserControls
 
         private async void BtnStartFaza1_Click(object sender, RoutedEventArgs e)
         {
+            // Max auto-recovery attempts before giving up entirely
+            const int MaxRecoveryAttempts = 10;
+            // How many times to poll Alfresco while waiting for it to come back
+            const int HealthPollAttempts = 60;
+
+            int recoveryAttempt = 0;
+
             try
             {
                 SetButtonsRunning(true);
@@ -110,14 +124,45 @@ namespace Alfresco.App.UserControls
                     });
                 }
 
-                var result = await Task.Run(
-                    () => _previewLoadService.RunLoopAsync(_cts.Token, OnProgress, folderFilter),
-                    _cts.Token);
+                while (true)
+                {
+                    try
+                    {
+                        var result = await Task.Run(
+                            () => _previewLoadService.RunLoopAsync(_cts.Token, OnProgress, folderFilter),
+                            _cts.Token);
 
-                ProgressBar.Value = 100;
-                var msg = result ? "Faza 1 zavrsena uspesno." : "Faza 1 zavrsena sa upozorenjem (nema konfiguriranih foldera?).";
-                UpdateStatus(msg);
-                AppendLog($"=== {msg} ===");
+                        ProgressBar.Value = 100;
+                        var msg = result
+                            ? "Faza 1 zavrsena uspesno."
+                            : "Faza 1 zavrsena sa upozorenjem (nema konfiguriranih foldera?).";
+                        UpdateStatus(msg);
+                        AppendLog($"=== {msg} ===");
+                        break; // uspesno
+                    }
+                    catch (OperationCanceledException)
+                    {
+                        throw; // korisnik je prekinuo — ne recovery
+                    }
+                    catch (Alfresco.Abstraction.Models.AlfrescoTimeoutException ex)
+                    {
+                        recoveryAttempt++;
+                        if (recoveryAttempt > MaxRecoveryAttempts)
+                            throw;
+
+                        AppendLog($"[RECOVERY {recoveryAttempt}/{MaxRecoveryAttempts}] Timeout pri komunikaciji sa Alfrescom: {ex.Message}");
+                        await WaitForAlfrescoRecoveryAsync(HealthPollAttempts, recoveryAttempt);
+                    }
+                    catch (Alfresco.Abstraction.Models.AlfrescoRetryExhaustedException ex)
+                    {
+                        recoveryAttempt++;
+                        if (recoveryAttempt > MaxRecoveryAttempts)
+                            throw;
+
+                        AppendLog($"[RECOVERY {recoveryAttempt}/{MaxRecoveryAttempts}] Svi retry pokusaji iscrpljeni: {ex.Message}");
+                        await WaitForAlfrescoRecoveryAsync(HealthPollAttempts, recoveryAttempt);
+                    }
+                }
 
                 await RefreshStatisticsAsync();
                 await LoadDataAsync();
@@ -139,6 +184,44 @@ namespace Alfresco.App.UserControls
                 _cts?.Dispose();
                 _cts = null;
             }
+        }
+
+        /// <summary>
+        /// Ceka da Alfresco postane dostupan pre ponovnog pokretanja Faze 1.
+        /// Najpre saceka da se Circuit Breaker resetuje, zatim poluje health endpoint.
+        /// </summary>
+        private async Task WaitForAlfrescoRecoveryAsync(int healthPollAttempts, int recoveryAttempt)
+        {
+            // Sacekaj da CB istekne pre nego sto krenemo sa ping-om
+            // (posle C-1 fixa CB ce biti singleton — ovo ce biti kljucno)
+            var cbBreakSeconds = _pollyOptions.Value.ReadOperations.CircuitBreakerDurationOfBreakSeconds;
+            var stabilizationDelay = TimeSpan.FromSeconds(cbBreakSeconds + 5);
+
+            UpdateStatus($"[RECOVERY {recoveryAttempt}] Cekam {stabilizationDelay.TotalSeconds}s da se CB resetuje...");
+            AppendLog($"[RECOVERY {recoveryAttempt}] Stabilizaciona pauza: {stabilizationDelay.TotalSeconds}s");
+
+            await Task.Delay(stabilizationDelay, _cts!.Token);
+
+            // Poluj Alfresco dok ne odgovori
+            var pollInterval = TimeSpan.FromSeconds(30);
+            UpdateStatus($"[RECOVERY {recoveryAttempt}] Provera dostupnosti Alfresca...");
+            AppendLog($"[RECOVERY {recoveryAttempt}] Pocinjem health polling (maks {healthPollAttempts} x {pollInterval.TotalSeconds}s)...");
+
+            await _healthChecker.WaitUntilAvailableAsync(
+                pollInterval,
+                healthPollAttempts,
+                (attempt, max) =>
+                {
+                    Dispatcher.Invoke(() =>
+                    {
+                        UpdateStatus($"[RECOVERY {recoveryAttempt}] Alfresco nedostupan — pokusaj {attempt}/{max}...");
+                        AppendLog($"[RECOVERY {recoveryAttempt}] Health check {attempt}/{max}: nema odgovora. Sledeci za {pollInterval.TotalSeconds}s.");
+                    });
+                },
+                _cts!.Token);
+
+            UpdateStatus($"[RECOVERY {recoveryAttempt}] Alfresco dostupan — nastavljam Fazu 1...");
+            AppendLog($"=== [RECOVERY {recoveryAttempt}] Konekcija uspostavljena. Faza 1 se nastavlja od checkpointa. ===");
         }
 
         private void BtnStopFaza1_Click(object sender, RoutedEventArgs e)

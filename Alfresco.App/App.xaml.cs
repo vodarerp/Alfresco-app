@@ -199,6 +199,9 @@ namespace Alfresco.App
                     // Register CurrentUserService as Singleton (must be singleton to cache user data)
                     services.AddSingleton<ICurrentUserService, CurrentUserService>();
 
+                    // Health checker uses AlfrescoCurrentUserClient (no Polly) to bypass open Circuit Breaker
+                    services.AddSingleton<IAlfrescoHealthChecker, AlfrescoHealthChecker>();
+
                     services.Configure<Alfresco.Contracts.SqlServer.SqlServerOptions>(context.Configuration.GetSection("SqlServer"));
                    
                     services.AddSingleton(sp => sp.GetRequiredService<IOptions<Alfresco.Contracts.SqlServer.SqlServerOptions>>().Value);                    
