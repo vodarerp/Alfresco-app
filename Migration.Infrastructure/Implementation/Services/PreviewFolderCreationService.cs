@@ -258,7 +258,7 @@ namespace Migration.Infrastructure.Implementation.Services
 
                 // Race condition: možda je drugi thread već kreirao
                 var existing = await _alfrescoReadApi
-                    .GetFolderByNameAsync(dossierParentId, folderName, ct)
+                    .GetFolderByNameSearchAsync(dossierParentId, folderName, ct)
                     .ConfigureAwait(false);
 
                 if (existing?.Entry?.Id != null)

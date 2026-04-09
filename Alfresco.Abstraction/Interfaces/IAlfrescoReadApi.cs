@@ -24,7 +24,17 @@ namespace Alfresco.Abstraction.Interfaces
         Task<NodeResponse> GetNodeByIdAsync(string nodeId, CancellationToken ct = default);
        
         Task<bool> FolderExistsAsync(string parentFolderId, string folderName, CancellationToken ct = default);
-       
+
         Task<NodeResponse?> GetFolderByNameAsync(string parentFolderId, string folderName, CancellationToken ct = default);
+
+        /// <summary>
+        /// Proverava da li folder postoji koristeći AFTS search — ispravno radi i za foldere sa 100+ child-ova.
+        /// </summary>
+        Task<bool> FolderExistsBySearchAsync(string parentFolderId, string folderName, CancellationToken ct = default);
+
+        /// <summary>
+        /// Vraća folder po imenu koristeći AFTS search — ispravno radi i za foldere sa 100+ child-ova.
+        /// </summary>
+        Task<NodeResponse?> GetFolderByNameSearchAsync(string parentFolderId, string folderName, CancellationToken ct = default);
     }
 }

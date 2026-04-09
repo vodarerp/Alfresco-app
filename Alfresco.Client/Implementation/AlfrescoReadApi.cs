@@ -478,5 +478,81 @@ namespace Alfresco.Client.Implementation
                 return null;
             }
         }
+
+        public async Task<bool> FolderExistsBySearchAsync(string parentFolderId, string folderName, CancellationToken ct = default)
+        {
+            try
+            {
+                var escaped = folderName.Replace("\"", "\\\"");
+                var request = new PostSearchRequest
+                {
+                    Query = new QueryRequest
+                    {
+                        Language = "afts",
+                        Query = $"TYPE:\"cm:folder\" AND PARENT:\"{parentFolderId}\" AND =cm:name:\"{escaped}\""
+                    },
+                    Paging = new PagingRequest { MaxItems = 1, SkipCount = 0 }
+                };
+
+                _fileLogger.LogInformation("FolderExistsBySearchAsync: ParentFolderId: {ParentFolderId}, FolderName: {FolderName}",
+                    parentFolderId, folderName);
+
+                var result = await SearchAsync(request, ct).ConfigureAwait(false);
+                var exists = result?.List?.Entries?.Any() == true;
+
+                _fileLogger.LogInformation("FolderExistsBySearchAsync: Folder '{FolderName}' {Exists} in parent '{ParentFolderId}'",
+                    folderName, exists ? "EXISTS" : "NOT FOUND", parentFolderId);
+
+                return exists;
+            }
+            catch (Exception ex)
+            {
+                _fileLogger.LogError(ex, "FolderExistsBySearchAsync: Error. ParentFolderId: {ParentFolderId}, FolderName: {FolderName}",
+                    parentFolderId, folderName);
+                return false;
+            }
+        }
+
+        public async Task<NodeResponse?> GetFolderByNameSearchAsync(string parentFolderId, string folderName, CancellationToken ct = default)
+        {
+            try
+            {
+                var escaped = folderName.Replace("\"", "\\\"");
+                var request = new PostSearchRequest
+                {
+                    Query = new QueryRequest
+                    {
+                        Language = "afts",
+                        Query = $"TYPE:\"cm:folder\" AND PARENT:\"{parentFolderId}\" AND =cm:name:\"{escaped}\""
+                    },
+                    Paging = new PagingRequest { MaxItems = 1, SkipCount = 0 },
+                    Include = new string[] { "properties" }
+                };
+
+                _fileLogger.LogInformation("GetFolderByNameSearchAsync: ParentFolderId: {ParentFolderId}, FolderName: {FolderName}",
+                    parentFolderId, folderName);
+
+                var result = await SearchAsync(request, ct).ConfigureAwait(false);
+                var entry = result?.List?.Entries?.FirstOrDefault()?.Entry;
+
+                if (entry == null)
+                {
+                    _fileLogger.LogInformation("GetFolderByNameSearchAsync: Folder '{FolderName}' NOT FOUND in parent '{ParentFolderId}'",
+                        folderName, parentFolderId);
+                    return null;
+                }
+
+                _fileLogger.LogInformation("GetFolderByNameSearchAsync: Folder '{FolderName}' FOUND in parent '{ParentFolderId}', FolderId: {FolderId}",
+                    folderName, parentFolderId, entry.Id);
+
+                return new NodeResponse { Entry = entry };
+            }
+            catch (Exception ex)
+            {
+                _fileLogger.LogError(ex, "GetFolderByNameSearchAsync: Error. ParentFolderId: {ParentFolderId}, FolderName: {FolderName}",
+                    parentFolderId, folderName);
+                return null;
+            }
+        }
     }
 }

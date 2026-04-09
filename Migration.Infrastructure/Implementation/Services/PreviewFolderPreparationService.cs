@@ -220,7 +220,7 @@ namespace Migration.Infrastructure.Implementation.Services
             }
 
             // Tražimo dossier folder pod DOSSIERS-* parent-om
-            var nodeResponse = await _alfrescoReadApi.GetFolderByNameAsync(dossierParentId, folderName, ct)
+            var nodeResponse = await _alfrescoReadApi.GetFolderByNameSearchAsync(dossierParentId, folderName, ct)
                 .ConfigureAwait(false);
 
             if (nodeResponse?.Entry != null)
@@ -258,7 +258,7 @@ namespace Migration.Infrastructure.Implementation.Services
             if (_dossierParentCache.TryGetValue(dossierParentFolderName, out var cached))
                 return cached;
 
-            var response = await _alfrescoReadApi.GetFolderByNameAsync(rootDestId, dossierParentFolderName, ct)
+            var response = await _alfrescoReadApi.GetFolderByNameSearchAsync(rootDestId, dossierParentFolderName, ct)
                 .ConfigureAwait(false);
 
             var id = response?.Entry?.Id;
