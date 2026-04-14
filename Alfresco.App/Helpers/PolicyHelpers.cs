@@ -33,8 +33,6 @@ namespace Alfresco.App.Helpers
                     (int)r.StatusCode >= 500)
                 .Or<HttpRequestException>()
                 .Or<TimeoutRejectedException>() // Retry timeout exceptions - server može da se oporavi
-                .Or<BrokenCircuitException>() // Retry when circuit breaker is open - možda će se zatvoriti
-                .Or<BulkheadRejectedException>() // Retry when bulkhead is full - možda će se osloboditi slot
                 // Handle network failures caused by server-side connection abort
                 .Or<TaskCanceledException>(ex =>
                 {
@@ -444,7 +442,7 @@ namespace Alfresco.App.Helpers
             // Execution flow: Fallback → Retry → Timeout → CircuitBreaker → Bulkhead → HttpClient
             // This means: Each retry attempt has its own timeout. If timeout occurs, Retry policy catches it and retries.
             // Only after all retries are exhausted, Fallback catches and throws custom exception.
-            return Policy.WrapAsync(fallback, retry, timeout, circuitBreaker, bulkhead)
+            return Policy.WrapAsync(fallback, bulkhead, circuitBreaker, retry, timeout)
                 .WithPolicyKey("AlfrescoRead"); // PolicyKey for operation tracking in logs
         }
 
@@ -478,7 +476,7 @@ namespace Alfresco.App.Helpers
             // Execution flow: Fallback → Retry → Timeout → CircuitBreaker → Bulkhead → HttpClient
             // This means: Each retry attempt has its own timeout. If timeout occurs, Retry policy catches it and retries.
             // Only after all retries are exhausted, Fallback catches and throws custom exception.
-            return Policy.WrapAsync(fallback, retry, timeout, circuitBreaker, bulkhead)
+            return Policy.WrapAsync(fallback, bulkhead, circuitBreaker, retry, timeout)
                 .WithPolicyKey("AlfrescoWrite"); // PolicyKey for operation tracking in logs
         }
 
@@ -508,7 +506,7 @@ namespace Alfresco.App.Helpers
             // Execution flow: Fallback → Retry → Timeout → CircuitBreaker → Bulkhead → HttpClient
             // This means: Each retry attempt has its own timeout. If timeout occurs, Retry policy catches it and retries.
             // Only after all retries are exhausted, Fallback catches and throws custom ClientAPI exception.
-            return Policy.WrapAsync(fallback, retry, timeout, circuitBreaker, bulkhead)
+            return Policy.WrapAsync(fallback, bulkhead, circuitBreaker, retry, timeout)
                 .WithPolicyKey("ClientApi"); // PolicyKey for operation tracking in logs
         }
 

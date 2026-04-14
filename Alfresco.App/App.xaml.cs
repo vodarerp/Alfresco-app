@@ -108,14 +108,10 @@ namespace Alfresco.App
                         cli.Timeout = Timeout.InfiniteTimeSpan; // TimeOut iz polly
                     })
                         .ConfigureHttpClient((sp, cli) =>
-                        {                            
+                        {
                             var options = sp.GetRequiredService<IOptions<AlfrescoOptions>>().Value;
-                            var credentials = Convert.ToBase64String(
-                                System.Text.Encoding.ASCII.GetBytes($"{options.Username}:{options.Password}")
-                            );
                             cli.BaseAddress = new Uri(options.BaseUrl);
                             cli.DefaultRequestHeaders.Accept.Add(new System.Net.Http.Headers.MediaTypeWithQualityHeaderValue("application/json"));
-                            cli.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Basic", credentials);
                             cli.DefaultRequestHeaders.ConnectionClose = false; // Keep-Alive
                         })
                         .ConfigurePrimaryHttpMessageHandler(() => new System.Net.Http.SocketsHttpHandler
@@ -149,12 +145,8 @@ namespace Alfresco.App
                         .ConfigureHttpClient((sp, cli) =>
                         {
                             var options = sp.GetRequiredService<IOptions<AlfrescoOptions>>().Value;
-                            var credentials = Convert.ToBase64String(
-                                System.Text.Encoding.ASCII.GetBytes($"{options.Username}:{options.Password}")
-                            );
                             cli.BaseAddress = new Uri(options.BaseUrl);
                             cli.DefaultRequestHeaders.Accept.Add(new System.Net.Http.Headers.MediaTypeWithQualityHeaderValue("application/json"));
-                            cli.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Basic", credentials);
                             cli.DefaultRequestHeaders.ConnectionClose = false; // Keep-Alive
                         })
                         .ConfigurePrimaryHttpMessageHandler(() => new System.Net.Http.SocketsHttpHandler
@@ -187,12 +179,8 @@ namespace Alfresco.App
                     {
                         cli.Timeout = TimeSpan.FromSeconds(30); // Simple timeout for single API call
                         var options = sp.GetRequiredService<IOptions<AlfrescoOptions>>().Value;
-                        var credentials = Convert.ToBase64String(
-                            System.Text.Encoding.ASCII.GetBytes($"{options.Username}:{options.Password}")
-                        );
                         cli.BaseAddress = new Uri(options.BaseUrl);
                         cli.DefaultRequestHeaders.Accept.Add(new System.Net.Http.Headers.MediaTypeWithQualityHeaderValue("application/json"));
-                        cli.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Basic", credentials);
                     })
                     .AddHttpMessageHandler<BasicAuthHandler>();
 
