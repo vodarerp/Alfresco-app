@@ -315,22 +315,21 @@ namespace Migration.Infrastructure.Implementation.Services
                         "PreviewLoadService DOSSIER-{Type} skip={Skip}: {DocsCount} docs queued",
                         currFolderType, skipCount, docsToInsert.Count);
 
-                    if (pendingBatches.Count >= batchThreshold)
-                    {
-                        var acquired = await dbWriteLock.WaitAsync(0, token).ConfigureAwait(false);
-                        if (acquired)
+                   
+                         await dbWriteLock.WaitAsync(token).ConfigureAwait(false);
+                       
+                        try
                         {
-                            try
-                            {
-                                var checkpoint = _fetchedCountsPerFolder.GetValueOrDefault(currFolderType, 0);
-                                await FlushPendingBatchesAsync(pendingBatches, currFolderType, checkpoint, token).ConfigureAwait(false);
-                            }
-                            finally
-                            {
-                                dbWriteLock.Release();
-                            }
+                            //var checkpoint = skipCount + totalFetchedFromAlfresco;
+                            var checkpoint = _fetchedCountsPerFolder.GetValueOrDefault(currFolderType, 0);
+                            await FlushPendingBatchesAsync(pendingBatches, currFolderType, checkpoint, token).ConfigureAwait(false);
                         }
-                    }
+                        finally
+                        {
+                            dbWriteLock.Release();
+                        }
+                        
+                   
                 }
                 catch (OperationCanceledException) { throw; }
                 catch (Exception ex)
@@ -341,13 +340,11 @@ namespace Migration.Infrastructure.Implementation.Services
                 }
             }).ConfigureAwait(false);
 
-            // Final flush
-            {
-                var checkpoint = _fetchedCountsPerFolder.GetValueOrDefault(currFolderType, 0);
-                _fileLogger.LogInformation("PreviewLoadService DOSSIER-{Type}: Final flush - {Count} batches remaining, checkpoint={Checkpoint}",
-                    currFolderType, pendingBatches.Count, checkpoint);
-                await FlushPendingBatchesAsync(pendingBatches, currFolderType, checkpoint, ct).ConfigureAwait(false);
-            }
+            var checkpoint = _fetchedCountsPerFolder.GetValueOrDefault(currFolderType, 0);
+            _fileLogger.LogInformation("PreviewLoadService DOSSIER-{Type}: Final flush - {Count} batches remaining, checkpoint={Checkpoint}",
+                currFolderType, pendingBatches.Count, checkpoint);
+            if (pendingBatches.Count > 0)
+                await FlushPendingBatchesAsync(pendingBatches, currFolderType, checkpoint, ct).ConfigureAwait(false);          
 
             _fileLogger.LogInformation(
                 "PreviewLoadService DOSSIER-{Type}: Parallel processing done. Running total: {TotalDocs} docs",

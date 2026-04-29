@@ -806,7 +806,7 @@ namespace Alfresco.App.UserControls
                 BtnRollbackFaza3.IsEnabled = !isRunning;
         }
 
-        private void UpdateStatus(string status)
+        private void UpdateStatus(string status)   
         {
             Dispatcher.Invoke(() =>
             {
