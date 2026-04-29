@@ -342,6 +342,7 @@ namespace Migration.Infrastructure.Implementation.Services
             }).ConfigureAwait(false);
 
             // Final flush
+            if (pendingBatches.Count > 0)
             {
                 var checkpoint = _fetchedCountsPerFolder.GetValueOrDefault(currFolderType, 0);
                 _fileLogger.LogInformation("PreviewLoadService DOSSIER-{Type}: Final flush - {Count} batches remaining, checkpoint={Checkpoint}",
