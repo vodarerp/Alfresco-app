@@ -17,6 +17,7 @@ using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Linq;
+using System.Net.Http;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using System.Threading;
@@ -41,7 +42,13 @@ namespace Migration.Infrastructure.Implementation.Services
         private long _totalFailed = 0;
         private int _batchCounter = 0;
 
-        private ConcurrentDictionary<string, long> _fetchedCountsPerFolder = new();
+        // Per-folder skip sets — ConcurrentDictionary<int, byte> used as thread-safe HashSet<int>
+        private ConcurrentDictionary<string, ConcurrentDictionary<int, byte>> _processedSkipsPerFolder = new();
+        private ConcurrentDictionary<string, ConcurrentDictionary<int, byte>> _failedSkipsPerFolder = new();
+
+        // 5 total attempts (1 initial + 4 retries), delays 2/4/8/16 s
+        private static readonly int[] RetryDelaysSeconds = [2, 4, 8, 16];
+        private const int MaxRetryAttempts = 4;
 
         public PreviewLoadService(
             IAlfrescoReadApi alfrescoReadApi,
@@ -68,19 +75,20 @@ namespace Migration.Infrastructure.Implementation.Services
             var batchSize = _options.Value.DocumentTypeDiscovery.BatchSize;
             var maxDocs = _options.Value.MaxDocumentsToProcess;
 
-            // Reset per-run state so each click processes a fresh MaxDocumentsToProcess batch
+            // Reset per-run state
             _totalDocumentsProcessed = 0;
             _totalFailed = 0;
             _batchCounter = 0;
             _currentFolderTypeIndex = 0;
-            _fetchedCountsPerFolder = new ConcurrentDictionary<string, long>();
+            _processedSkipsPerFolder = new ConcurrentDictionary<string, ConcurrentDictionary<int, byte>>();
+            _failedSkipsPerFolder = new ConcurrentDictionary<string, ConcurrentDictionary<int, byte>>();
 
             _fileLogger.LogInformation("PreviewLoadService started (folderFilter={FolderFilter})", folderFilter ?? "sve");
             _uiLogger.LogInformation("PreviewLoadService started (folderFilter={FolderFilter})", folderFilter ?? "sve");
 
             await LoadCheckpointAsync(ct).ConfigureAwait(false);
 
-            var progress = new WorkerProgress
+            progressCallback?.Invoke(new WorkerProgress
             {
                 TotalItems = maxDocs,
                 ProcessedItems = _totalDocumentsProcessed,
@@ -91,14 +99,12 @@ namespace Migration.Infrastructure.Implementation.Services
                 FailedCount = 0,
                 Message = "Starting preview load...",
                 Timestamp = DateTimeOffset.UtcNow
-            };
-            progressCallback?.Invoke(progress);
+            });
 
             try
             {
                 _dossierFolders = GetSubDossiersFolders();
 
-                // Apply folder filter if specified ("PI" or "LE"); null/empty = process all
                 if (!string.IsNullOrWhiteSpace(folderFilter))
                 {
                     var key = folderFilter.Trim().ToUpperInvariant();
@@ -131,20 +137,7 @@ namespace Migration.Infrastructure.Implementation.Services
                     _currentFolderTypeIndex = i;
                     var folderPath = _dossierFolders[currFolderType];
 
-                    var startSkipCount = 0;
-                    if (_fetchedCountsPerFolder.TryGetValue(currFolderType, out var fetchedCount))
-                    {
-                        startSkipCount = (int)fetchedCount;
-                        _fileLogger.LogInformation(
-                            "PreviewLoadService: Resuming {Type} from skipCount={StartSkip} ({FetchedCount} previously fetched)",
-                            currFolderType, startSkipCount, fetchedCount);
-                    }
-
-                    await ParralelProccesDocumentsAsync(currFolderType, folderPath, startSkipCount, ct).ConfigureAwait(false);
-
-                    // Save checkpoint after each folder type completes
-                    var totalFetched = _fetchedCountsPerFolder.GetValueOrDefault(currFolderType, 0);
-                    await SaveCheckpointAsync(currFolderType, totalFetched, ct).ConfigureAwait(false);
+                    await ParralelProccesDocumentsAsync(currFolderType, folderPath, ct).ConfigureAwait(false);
 
                     progressCallback?.Invoke(new WorkerProgress
                     {
@@ -182,7 +175,7 @@ namespace Migration.Infrastructure.Implementation.Services
             return true;
         }
 
-        private async Task ParralelProccesDocumentsAsync(string currFolderType, string folderPath, int startSkipCount, CancellationToken ct)
+        private async Task ParralelProccesDocumentsAsync(string currFolderType, string folderPath, CancellationToken ct)
         {
             var batchSize = _options.Value.DocumentTypeDiscovery.BatchSize;
             var maxParallelism = _options.Value.DocumentTypeDiscovery.MaxDegreeOfParallelism > 0
@@ -194,8 +187,8 @@ namespace Migration.Infrastructure.Implementation.Services
             var totalCount = await GetTotalDocumentCountAsync(query, ct).ConfigureAwait(false);
 
             _fileLogger.LogInformation(
-                "PreviewLoadService DOSSIER-{Type}: totalCount={TotalCount}, batchSize={BatchSize}, parallelism={Parallelism}, startSkip={StartSkip}",
-                currFolderType, totalCount, batchSize, maxParallelism, startSkipCount);
+                "PreviewLoadService DOSSIER-{Type}: totalCount={TotalCount}, batchSize={BatchSize}, parallelism={Parallelism}",
+                currFolderType, totalCount, batchSize, maxParallelism);
 
             if (totalCount == 0)
             {
@@ -203,38 +196,45 @@ namespace Migration.Infrastructure.Implementation.Services
                 return;
             }
 
-            if (startSkipCount >= totalCount)
+            var processedSkips = _processedSkipsPerFolder.GetOrAdd(currFolderType, _ => new ConcurrentDictionary<int, byte>());
+            var failedSkips = _failedSkipsPerFolder.GetOrAdd(currFolderType, _ => new ConcurrentDictionary<int, byte>());
+
+            // Full skip range for this folder
+            var allSkips = Enumerable
+                .Range(0, (totalCount + batchSize - 1) / batchSize)
+                .Select(i => i * batchSize)
+                .ToList();
+
+            // Pending = full range minus already-processed
+            var pendingSkips = allSkips
+                .Where(s => !processedSkips.ContainsKey(s))
+                .ToList();
+
+            if (pendingSkips.Count == 0)
             {
                 _fileLogger.LogInformation(
-                    "PreviewLoadService DOSSIER-{Type}: Already fully fetched (startSkip={StartSkip} >= totalCount={TotalCount}), skipping",
-                    currFolderType, startSkipCount, totalCount);
+                    "PreviewLoadService DOSSIER-{Type}: All {Count} batches already processed, skipping",
+                    currFolderType, allSkips.Count);
+                await LogReconciliationAsync(currFolderType, totalCount, ct).ConfigureAwait(false);
                 return;
             }
 
-            var remainingInFolder = totalCount - startSkipCount;
-            var remainingDocs = maxDocs > 0
-                ? Math.Max(0, maxDocs - Interlocked.Read(ref _totalDocumentsProcessed))
-                : remainingInFolder;
-            var effectiveTotal = (int)Math.Min(remainingInFolder, remainingDocs > 0 ? remainingDocs : remainingInFolder);
-
-            if (maxDocs > 0 && remainingDocs <= 0)
-            {
-                _fileLogger.LogInformation("PreviewLoadService DOSSIER-{Type}: MaxDocuments limit reached, skipping", currFolderType);
-                return;
-            }
-
-            var skipValues = Enumerable
-                .Range(0, (effectiveTotal + batchSize - 1) / batchSize)
-                .Select(i => startSkipCount + i * batchSize)
+            // Prioritize previously failed skips
+            var failedFirst = new HashSet<int>(failedSkips.Keys);
+            pendingSkips = pendingSkips
+                .OrderBy(s => failedFirst.Contains(s) ? 0 : 1)
+                .ThenBy(s => s)
                 .ToList();
 
             _fileLogger.LogInformation(
-                "PreviewLoadService DOSSIER-{Type}: {BatchCount} batches to process (effectiveTotal={EffectiveTotal} of {TotalCount})",
-                currFolderType, skipValues.Count, effectiveTotal, totalCount);
+                "PreviewLoadService DOSSIER-{Type}: {Pending} batches pending ({Failed} priority-failed, {Fresh} fresh) of {Total} total",
+                currFolderType,
+                pendingSkips.Count,
+                failedFirst.Count(pendingSkips.Contains),
+                pendingSkips.Count - failedFirst.Count(pendingSkips.Contains),
+                allSkips.Count);
 
-            var pendingBatches = new ConcurrentQueue<List<PreviewDocStaging>>();
             var dbWriteLock = new SemaphoreSlim(1, 1);
-            const int batchThreshold = 5;
 
             var parallelOptions = new ParallelOptions
             {
@@ -242,138 +242,248 @@ namespace Migration.Infrastructure.Implementation.Services
                 CancellationToken = ct
             };
 
-            await Parallel.ForEachAsync(skipValues, parallelOptions, async (skipCount, token) =>
+            await Parallel.ForEachAsync(pendingSkips, parallelOptions, async (skipCount, token) =>
             {
                 if (maxDocs > 0 && Interlocked.Read(ref _totalDocumentsProcessed) >= maxDocs)
                     return;
 
-                try
+                Exception? lastException = null;
+
+                for (int attempt = 0; attempt <= MaxRetryAttempts; attempt++)
                 {
-                    var searchResult = await SearchDocumentsAsync(folderPath, skipCount, batchSize, token).ConfigureAwait(false);
-
-                    // Broj svih dokumenata koje je Alfresco vratio (pre filtera) — koristi se za skip/checkpoint
-                    var totalFetchedFromAlfresco = searchResult.Documents.Count;
-
-                    searchResult.Documents.RemoveAll(o =>
+                    try
                     {
-                        var lastParentName = o.Entry.Path?.Elements?.LastOrDefault()?.Name;
-                        return lastParentName == null || !regex.IsMatch(lastParentName);
-                    });
-
-                    var fetchedInBatch = searchResult.Documents.Count;
-                    var newDossierCount = totalFetchedFromAlfresco - fetchedInBatch;
-
-                    // Checkpoint prati UKUPNO fetchovano sa Alfresca (uključujući nove dosieje),
-                    // jer se ta vrednost koristi kao Alfresco skip pri resumeu
-                    if (totalFetchedFromAlfresco > 0)
-                    {
-                        _fetchedCountsPerFolder.AddOrUpdate(currFolderType, totalFetchedFromAlfresco, (_, existing) => existing + totalFetchedFromAlfresco);
-                    }
-
-                    if (newDossierCount > 0)
-                    {
-                        _fileLogger.LogInformation(
-                            "PreviewLoadService DOSSIER-{Type} skip={Skip}: {NewDossierCount} new-dossier docs skipped (already migrated)",
-                            currFolderType, skipCount, newDossierCount);
-                    }
-
-                    if (fetchedInBatch == 0) return;
-
-                    // Trim to remaining maxDocs budget
-                    var docs = searchResult.Documents;
-                    if (maxDocs > 0)
-                    {
-                        var remaining = maxDocs - Interlocked.Read(ref _totalDocumentsProcessed);
-                        if (remaining <= 0) return;
-                        if (docs.Count > remaining)
-                            docs = docs.Take((int)remaining).ToList();
-                    }
-
-                    // Apply mapping
-                    var docsToInsert = new List<PreviewDocStaging>();
-                    foreach (var doc in docs)
-                    {
-                        try
+                        if (attempt > 0)
                         {
-                            var previewDoc = await ApplyPreviewDocumentMappingAsync(doc.Entry, currFolderType, token).ConfigureAwait(false);
-                            docsToInsert.Add(previewDoc);
-                        }
-                        catch (Exception ex)
-                        {
-                            Interlocked.Increment(ref _totalFailed);
+                            var delaySec = RetryDelaysSeconds[Math.Min(attempt - 1, RetryDelaysSeconds.Length - 1)];
                             _fileLogger.LogWarning(
-                                "PreviewLoadService DOSSIER-{Type} skip={Skip}: Mapping failed for {Name}: {Error}",
-                                currFolderType, skipCount, doc.Entry.Name, ex.Message);
+                                "PreviewLoadService DOSSIER-{Type} skip={Skip}: Retry {Attempt}/{Max}, delay={Delay}s",
+                                currFolderType, skipCount, attempt, MaxRetryAttempts, delaySec);
+                            await Task.Delay(delaySec * 1000, token).ConfigureAwait(false);
                         }
-                    }
 
-                    if (docsToInsert.Count == 0) return;
+                        var searchResult = await SearchDocumentsAsync(folderPath, skipCount, batchSize, token).ConfigureAwait(false);
+                        var totalFetchedFromAlfresco = searchResult.Documents.Count;
 
-                    pendingBatches.Enqueue(docsToInsert);
+                        searchResult.Documents.RemoveAll(o =>
+                        {
+                            var lastParentName = o.Entry.Path?.Elements?.LastOrDefault()?.Name;
+                            return lastParentName == null || !regex.IsMatch(lastParentName);
+                        });
 
-                    _fileLogger.LogInformation(
-                        "PreviewLoadService DOSSIER-{Type} skip={Skip}: {DocsCount} docs queued",
-                        currFolderType, skipCount, docsToInsert.Count);
+                        var afterRegexFilter = searchResult.Documents.Count;
+                        var newDossierCount = totalFetchedFromAlfresco - afterRegexFilter;
 
-                   
-                         await dbWriteLock.WaitAsync(token).ConfigureAwait(false);
-                       
+                        if (newDossierCount > 0)
+                        {
+                            _fileLogger.LogInformation(
+                                "PreviewLoadService DOSSIER-{Type} skip={Skip}: {NewDossierCount} new-dossier docs regex-filtered",
+                                currFolderType, skipCount, newDossierCount);
+                        }
+
+                        var docs = searchResult.Documents;
+                        if (maxDocs > 0)
+                        {
+                            var remaining = maxDocs - Interlocked.Read(ref _totalDocumentsProcessed);
+                            if (remaining <= 0) return;
+                            if (docs.Count > remaining)
+                                docs = docs.Take((int)remaining).ToList();
+                        }
+
+                        var docsToInsert = new List<PreviewDocStaging>(docs.Count);
+                        var mappingFailed = 0;
+
+                        foreach (var doc in docs)
+                        {
+                            try
+                            {
+                                var previewDoc = await ApplyPreviewDocumentMappingAsync(doc.Entry, currFolderType, token).ConfigureAwait(false);
+                                docsToInsert.Add(previewDoc);
+                            }
+                            catch (Exception ex)
+                            {
+                                Interlocked.Increment(ref _totalFailed);
+                                mappingFailed++;
+                                _fileLogger.LogWarning(
+                                    "PreviewLoadService DOSSIER-{Type} skip={Skip}: Mapping failed for {Name}: {Error}",
+                                    currFolderType, skipCount, doc.Entry.Name, ex.Message);
+                            }
+                        }
+
+                        _fileLogger.LogInformation(
+                            "PreviewLoadService DOSSIER-{Type} skip={Skip}: fetched={F}, afterRegexFilter={R}, mappingFailed={M}, inserted={I}",
+                            currFolderType, skipCount, totalFetchedFromAlfresco, afterRegexFilter, mappingFailed, docsToInsert.Count);
+
+                        // Flush this skip's docs under the write lock, then mark as processed
+                        await dbWriteLock.WaitAsync(token).ConfigureAwait(false);
                         try
                         {
-                            //var checkpoint = skipCount + totalFetchedFromAlfresco;
-                            var checkpoint = _fetchedCountsPerFolder.GetValueOrDefault(currFolderType, 0);
-                            await FlushPendingBatchesAsync(pendingBatches, currFolderType, checkpoint, token).ConfigureAwait(false);
+                            await FlushPendingBatchesAsync(docsToInsert, currFolderType, token).ConfigureAwait(false);
+                            processedSkips.TryAdd(skipCount, 0);
+                            failedSkips.TryRemove(skipCount, out _);
                         }
                         finally
                         {
                             dbWriteLock.Release();
                         }
-                        
-                   
+
+                        // Periodic persist every ~10 successfully flushed batches
+                        if (_batchCounter % 10 == 0)
+                            await PersistCheckpointAsync(currFolderType, batchSize, token).ConfigureAwait(false);
+
+                        lastException = null;
+                        break;
+                    }
+                    catch (OperationCanceledException) when (token.IsCancellationRequested)
+                    {
+                        throw;
+                    }
+                    catch (TaskCanceledException ex) when (!token.IsCancellationRequested)
+                    {
+                        // Timeout, not user cancel — eligible for retry
+                        lastException = ex;
+                        _fileLogger.LogWarning(
+                            "PreviewLoadService DOSSIER-{Type} skip={Skip}: Timeout on attempt {Attempt}",
+                            currFolderType, skipCount, attempt + 1);
+                    }
+                    catch (HttpRequestException ex)
+                    {
+                        lastException = ex;
+                        _fileLogger.LogWarning(
+                            "PreviewLoadService DOSSIER-{Type} skip={Skip}: HttpRequestException on attempt {Attempt}: {Error}",
+                            currFolderType, skipCount, attempt + 1, ex.Message);
+                    }
+                    catch (Exception ex)
+                    {
+                        lastException = ex;
+                        _fileLogger.LogWarning(
+                            "PreviewLoadService DOSSIER-{Type} skip={Skip}: Error on attempt {Attempt}: {Error}",
+                            currFolderType, skipCount, attempt + 1, ex.Message);
+                    }
                 }
-                catch (OperationCanceledException) { throw; }
-                catch (Exception ex)
+
+                if (lastException != null)
                 {
+                    failedSkips.TryAdd(skipCount, 0);
                     _fileLogger.LogError(
-                        "PreviewLoadService DOSSIER-{Type} skip={Skip}: Batch error: {Error}",
-                        currFolderType, skipCount, ex.Message);
+                        "PreviewLoadService DOSSIER-{Type} skip={Skip}: All {Max} attempts failed. Batch added to FailedSkips.\n{StackTrace}",
+                        currFolderType, skipCount, MaxRetryAttempts + 1, lastException.ToString());
                 }
             }).ConfigureAwait(false);
 
-            var checkpoint = _fetchedCountsPerFolder.GetValueOrDefault(currFolderType, 0);
-            _fileLogger.LogInformation("PreviewLoadService DOSSIER-{Type}: Final flush - {Count} batches remaining, checkpoint={Checkpoint}",
-                currFolderType, pendingBatches.Count, checkpoint);
-            if (pendingBatches.Count > 0)
-                await FlushPendingBatchesAsync(pendingBatches, currFolderType, checkpoint, ct).ConfigureAwait(false);          
+            // Phase 2 — serial retry of remaining failed skips
+            var stillFailed = failedSkips.Keys.OrderBy(s => s).ToList();
+            if (stillFailed.Count > 0)
+            {
+                _fileLogger.LogWarning(
+                    "PreviewLoadService DOSSIER-{Type}: Phase 2 — serial retry of {Count} failed skip(s): [{Skips}]",
+                    currFolderType, stillFailed.Count, string.Join(",", stillFailed));
+
+                foreach (var skipCount in stillFailed)
+                {
+                    if (ct.IsCancellationRequested) break;
+
+                    Exception? lastException = null;
+
+                    for (int attempt = 0; attempt <= MaxRetryAttempts; attempt++)
+                    {
+                        try
+                        {
+                            if (attempt > 0)
+                            {
+                                var delaySec = RetryDelaysSeconds[Math.Min(attempt - 1, RetryDelaysSeconds.Length - 1)];
+                                await Task.Delay(delaySec * 1000, ct).ConfigureAwait(false);
+                            }
+
+                            var searchResult = await SearchDocumentsAsync(folderPath, skipCount, batchSize, ct).ConfigureAwait(false);
+                            var totalFetchedFromAlfresco = searchResult.Documents.Count;
+
+                            searchResult.Documents.RemoveAll(o =>
+                            {
+                                var lastParentName = o.Entry.Path?.Elements?.LastOrDefault()?.Name;
+                                return lastParentName == null || !regex.IsMatch(lastParentName);
+                            });
+
+                            var afterRegexFilter = searchResult.Documents.Count;
+                            var docsToInsert = new List<PreviewDocStaging>(afterRegexFilter);
+                            var mappingFailed = 0;
+
+                            foreach (var doc in searchResult.Documents)
+                            {
+                                try
+                                {
+                                    var previewDoc = await ApplyPreviewDocumentMappingAsync(doc.Entry, currFolderType, ct).ConfigureAwait(false);
+                                    docsToInsert.Add(previewDoc);
+                                }
+                                catch (Exception ex)
+                                {
+                                    Interlocked.Increment(ref _totalFailed);
+                                    mappingFailed++;
+                                    _fileLogger.LogWarning(
+                                        "PreviewLoadService Phase2 DOSSIER-{Type} skip={Skip}: Mapping failed for {Name}: {Error}",
+                                        currFolderType, skipCount, doc.Entry.Name, ex.Message);
+                                }
+                            }
+
+                            _fileLogger.LogInformation(
+                                "PreviewLoadService Phase2 DOSSIER-{Type} skip={Skip}: fetched={F}, afterRegexFilter={R}, mappingFailed={M}, inserted={I}",
+                                currFolderType, skipCount, totalFetchedFromAlfresco, afterRegexFilter, mappingFailed, docsToInsert.Count);
+
+                            await FlushPendingBatchesAsync(docsToInsert, currFolderType, ct).ConfigureAwait(false);
+                            processedSkips.TryAdd(skipCount, 0);
+                            failedSkips.TryRemove(skipCount, out _);
+                            lastException = null;
+                            break;
+                        }
+                        catch (OperationCanceledException)
+                        {
+                            throw;
+                        }
+                        catch (Exception ex)
+                        {
+                            lastException = ex;
+                            _fileLogger.LogWarning(
+                                "PreviewLoadService Phase2 DOSSIER-{Type} skip={Skip}: Attempt {Attempt} failed: {Error}",
+                                currFolderType, skipCount, attempt + 1, ex.Message);
+                        }
+                    }
+
+                    if (lastException != null)
+                    {
+                        _fileLogger.LogError(
+                            "PreviewLoadService Phase2 DOSSIER-{Type} skip={Skip}: All retries exhausted, batch permanently failed.\n{StackTrace}",
+                            currFolderType, skipCount, lastException.ToString());
+                    }
+                }
+            }
+
+            await PersistCheckpointAsync(currFolderType, batchSize, ct).ConfigureAwait(false);
+            await LogReconciliationAsync(currFolderType, totalCount, ct).ConfigureAwait(false);
 
             _fileLogger.LogInformation(
                 "PreviewLoadService DOSSIER-{Type}: Parallel processing done. Running total: {TotalDocs} docs",
                 currFolderType, _totalDocumentsProcessed);
         }
 
+        /// <summary>
+        /// Inserts <paramref name="docs"/> into the DB under a single transaction.
+        /// Does NOT update the checkpoint — that is PersistCheckpointAsync's responsibility.
+        /// </summary>
         private async Task FlushPendingBatchesAsync(
-            ConcurrentQueue<List<PreviewDocStaging>> pendingBatches,
+            IList<PreviewDocStaging> docs,
             string folderType,
-            long checkpointFetched,
             CancellationToken ct)
         {
-            var allDocs = new List<PreviewDocStaging>();
-            while (pendingBatches.TryDequeue(out var batch))
-                allDocs.AddRange(batch);
+            if (docs.Count == 0) return;
 
             await using var scope = _scopeFactory.CreateAsyncScope();
             var uow = scope.ServiceProvider.GetRequiredService<IUnitOfWork>();
             var repo = scope.ServiceProvider.GetRequiredService<IPreviewDocStagingRepository>();
-            var checkpointRepo = scope.ServiceProvider.GetRequiredService<IPreviewLoadCheckpointRepository>();
 
             await uow.BeginAsync(ct: ct).ConfigureAwait(false);
             try
             {
-                var inserted = 0;
-                if (allDocs.Count > 0)
-                    inserted = await repo.InsertManyMergeAsync(allDocs, ct).ConfigureAwait(false);
-
-                await checkpointRepo.UpsertAsync(folderType, checkpointFetched, ct).ConfigureAwait(false);
+                var inserted = await repo.InsertManyMergeAsync(docs, ct).ConfigureAwait(false);
                 await uow.CommitAsync(ct: ct).ConfigureAwait(false);
 
                 if (inserted > 0)
@@ -381,14 +491,99 @@ namespace Migration.Infrastructure.Implementation.Services
                 Interlocked.Increment(ref _batchCounter);
 
                 _fileLogger.LogInformation(
-                    "PreviewLoadService DOSSIER-{Type}: Flushed {DocCount} docs, checkpoint={Checkpoint}",
-                    folderType, inserted, checkpointFetched);
+                    "PreviewLoadService DOSSIER-{Type}: Flushed {DocCount} docs",
+                    folderType, inserted);
             }
             catch (Exception ex)
             {
                 _fileLogger.LogError("PreviewLoadService: Failed to flush batch: {Error}", ex.Message);
                 await uow.RollbackAsync(ct: ct).ConfigureAwait(false);
                 throw;
+            }
+        }
+
+        private async Task PersistCheckpointAsync(string folderType, int batchSize, CancellationToken ct)
+        {
+            try
+            {
+                var processedSkips = _processedSkipsPerFolder.GetOrAdd(folderType, _ => new ConcurrentDictionary<int, byte>());
+                var failedSkips = _failedSkipsPerFolder.GetOrAdd(folderType, _ => new ConcurrentDictionary<int, byte>());
+
+                // High-water mark: largest consecutively-processed skip + batchSize
+                var sortedProcessed = processedSkips.Keys.OrderBy(s => s).ToList();
+                long hwm = 0;
+                for (int i = 0; i < sortedProcessed.Count; i++)
+                {
+                    if (sortedProcessed[i] == i * batchSize)
+                        hwm = sortedProcessed[i] + batchSize;
+                    else
+                        break;
+                }
+
+                await using var scope = _scopeFactory.CreateAsyncScope();
+                var uow = scope.ServiceProvider.GetRequiredService<IUnitOfWork>();
+                var repo = scope.ServiceProvider.GetRequiredService<IPreviewLoadCheckpointRepository>();
+
+                await uow.BeginAsync(ct: ct).ConfigureAwait(false);
+                try
+                {
+                    await repo.UpsertCheckpointStateAsync(folderType, hwm, processedSkips.Keys, failedSkips.Keys, ct).ConfigureAwait(false);
+                    await uow.CommitAsync(ct: ct).ConfigureAwait(false);
+                    _fileLogger.LogInformation(
+                        "PreviewLoadService checkpoint persisted: {FolderType}, hwm={Hwm}, processed={P}, failed={F}",
+                        folderType, hwm, processedSkips.Count, failedSkips.Count);
+                }
+                catch
+                {
+                    await uow.RollbackAsync(ct: ct).ConfigureAwait(false);
+                    throw;
+                }
+            }
+            catch (Exception ex)
+            {
+                _fileLogger.LogWarning(
+                    "PreviewLoadService: Could not persist checkpoint for {FolderType}: {Error}",
+                    folderType, ex.Message);
+            }
+        }
+
+        private async Task LogReconciliationAsync(string folderType, int alfrescoTotal, CancellationToken ct)
+        {
+            try
+            {
+                var processedSkips = _processedSkipsPerFolder.GetOrAdd(folderType, _ => new ConcurrentDictionary<int, byte>());
+                var failedSkips = _failedSkipsPerFolder.GetOrAdd(folderType, _ => new ConcurrentDictionary<int, byte>());
+                var batchSize = _options.Value.DocumentTypeDiscovery.BatchSize;
+
+                var expectedBatches = (alfrescoTotal + batchSize - 1) / batchSize;
+                var failedSkipsList = string.Join(",", failedSkips.Keys.OrderBy(s => s));
+
+                long inDb = 0;
+                try
+                {
+                    await using var scope = _scopeFactory.CreateAsyncScope();
+                    var uow = scope.ServiceProvider.GetRequiredService<IUnitOfWork>();
+                    var repo = scope.ServiceProvider.GetRequiredService<IPreviewDocStagingRepository>();
+                    await uow.BeginAsync(ct: ct).ConfigureAwait(false);
+                    inDb = await repo.GetCountByDossierTypeAsync(folderType, ct).ConfigureAwait(false);
+                    await uow.CommitAsync(ct: ct).ConfigureAwait(false);
+                }
+                catch (Exception ex)
+                {
+                    _fileLogger.LogWarning("LogReconciliation: Could not get DB count: {Error}", ex.Message);
+                }
+
+                _fileLogger.LogInformation(
+                    "Reconciliation DOSSIER-{Type}: alfresco={Alfresco}, batches_expected={E}, " +
+                    "batches_processed={P}, batches_failed={F} (skips: [{FailedSkips}]), inDb={InDb}",
+                    folderType, alfrescoTotal, expectedBatches,
+                    processedSkips.Count, failedSkips.Count, failedSkipsList, inDb);
+            }
+            catch (Exception ex)
+            {
+                _fileLogger.LogWarning(
+                    "LogReconciliation DOSSIER-{Type}: Error: {Error}",
+                    folderType, ex.Message);
             }
         }
 
@@ -405,7 +600,6 @@ namespace Migration.Infrastructure.Implementation.Services
                 RecordInserted = DateTime.UtcNow
             };
 
-            // Extract Alfresco properties
             string? docDesc = null;
             string? existingDocType = null;
             string? existingStatus = null;
@@ -418,6 +612,7 @@ namespace Migration.Infrastructure.Implementation.Services
             string? productType = null;
             string? accountNumbers = null;
             string? jsonProperties = null;
+
             if (alfrescoEntry.Properties != null)
             {
                 string GetStr(string key) => alfrescoEntry!.Properties!.TryGetValue(key, out var value) ? value?.ToString() ?? "" : "";
@@ -433,16 +628,7 @@ namespace Migration.Infrastructure.Implementation.Services
                 productType = GetStr("ecm:bnkTypeOfProduct");
                 accountNumbers = GetStr("ecm:bnkAccountNumber");
                 jsonProperties = JsonSerializer.Serialize(alfrescoEntry.Properties);
-                //if (alfrescoEntry.Properties.TryGetValue("ecm:docDesc", out var v)) docDesc = v?.ToString();
-                //if (alfrescoEntry.Properties.TryGetValue("ecm:docType", out var v2)) existingDocType = v2?.ToString();
-                //if (alfrescoEntry.Properties.TryGetValue("ecm:docStatus", out var v3)) existingStatus = v3?.ToString();
-                //if (alfrescoEntry.Properties.TryGetValue("ecm:coreId", out var v4)) coreIdFromDoc = v4?.ToString();
-                //if (alfrescoEntry.Properties.TryGetValue("ecm:docDossierType", out var v5)) docDossierType = v5?.ToString();
-                //if (alfrescoEntry.Properties.TryGetValue("ecm:docClientType", out var v6)) docClientType = v6?.ToString();
-                //if (alfrescoEntry.Properties.TryGetValue("ecm:source", out var v7)) sourceFromDoc = v7?.ToString();
-                //if (alfrescoEntry.Properties.TryGetValue("ecm:bnkNumberOfContract", out var v8)) contractNumber = v8?.ToString();
-                //if (alfrescoEntry.Properties.TryGetValue("ecm:bnkTypeOfProduct", out var v9)) productType = v9?.ToString();
-                //if (alfrescoEntry.Properties.TryGetValue("ecm:bnkAccountNumber", out var v10)) accountNumbers = v10?.ToString();
+
                 if (alfrescoEntry.Properties.TryGetValue("ecm:datumKreiranja", out var v11))
                 {
                     if (v11 is DateTime dt) docCreationDate = dt;
@@ -450,7 +636,6 @@ namespace Migration.Infrastructure.Implementation.Services
                 }
             }
 
-            // Extract parent folder name from path
             var parentFolderName = alfrescoEntry.Path?.Elements?.LastOrDefault()?.Name;
             var parentFolderId = alfrescoEntry.Path?.Elements?.LastOrDefault()?.Id ?? alfrescoEntry.ParentId;
 
@@ -466,12 +651,10 @@ namespace Migration.Infrastructure.Implementation.Services
             doc.OriginalDocumentName = alfrescoEntry.Name;
             doc.ClientSegment = docClientType;
 
-            // CoreId: from doc property, or extract from parent folder name
             doc.CoreId = coreIdFromDoc;
             if (string.IsNullOrWhiteSpace(doc.CoreId) && !string.IsNullOrWhiteSpace(parentFolderName))
                 doc.CoreId = DossierIdFormatter.ExtractCoreId(parentFolderName);
 
-            // Apply mapping
             DocumentMapping? fullMapping = null;
             if (!string.IsNullOrWhiteSpace(docDesc))
                 fullMapping = await _opisToTipMapper.GetFullMappingAsync(docDesc, existingDocType, ct).ConfigureAwait(false);
@@ -484,7 +667,6 @@ namespace Migration.Infrastructure.Implementation.Services
             doc.CategoryCode = fullMapping?.OznakaKategorije;
             doc.CategoryName = fullMapping?.NazivKategorije;
 
-            // Status
             var statusInfo = DocumentStatusDetectorV3.DetermineStatus(fullMapping, existingStatus);
             doc.IsActive = statusInfo.IsActive ? 1 : 0;
             doc.NewAlfrescoStatus = statusInfo.Status;
@@ -492,13 +674,11 @@ namespace Migration.Infrastructure.Implementation.Services
             if (string.IsNullOrWhiteSpace(doc.OriginalDocumentCode))
                 doc.OriginalDocumentCode = statusInfo.OriginalCode;
 
-            // Destination dossier type
             var destinationType = DestinationRootFolderDeterminator.DetermineAndResolve(
                 doc.DocumentType,
                 tipDosijea,
                 doc.ClientSegment);
 
-            // Fallback from parent folder name prefix
             if (destinationType == DossierType.Unknown && !string.IsNullOrWhiteSpace(parentFolderName))
             {
                 var prefix = DossierIdFormatter.ExtractPrefix(parentFolderName);
@@ -515,7 +695,6 @@ namespace Migration.Infrastructure.Implementation.Services
             doc.TargetDossierType = ((int)destinationType).ToString();
             doc.Source = sourceFromDoc ?? SourceDetector.GetSource(destinationType);
 
-            // Destination folder name (used by Faza 2 to find/create the folder)
             if (!string.IsNullOrWhiteSpace(parentFolderName))
             {
                 string? productTypeToUse = doc.ProductType;
@@ -536,12 +715,8 @@ namespace Migration.Infrastructure.Implementation.Services
 
         private string BuildPreviewSearchQuery(string ancestorId)
         {
-            
+            var query = $"ANCESTOR:\"{ancestorId}\" AND TYPE:\"cm:content\"";
 
-            var query = $"ANCESTOR:\"{ancestorId}\" " +
-                        $"AND TYPE:\"cm:content\"";
-
-            // Add date filter if enabled
             if (_options.Value.DocumentTypeDiscovery.UseDateFilter)
             {
                 var dateFrom = _options.Value.DocumentTypeDiscovery.DateFrom;
@@ -549,16 +724,12 @@ namespace Migration.Infrastructure.Implementation.Services
 
                 if (!string.IsNullOrWhiteSpace(dateFrom) && !string.IsNullOrWhiteSpace(dateTo))
                 {
-                    // Parse and format date
                     if (DateTime.TryParse(dateFrom, out var fromDate) && DateTime.TryParse(dateTo, out var toDate))
-                    {
-                        //query += $" AND ecm\\:docCreationDate:[{fromDate:yyyy-MM-dd} TO {toDate:yyyy-MM-dd}]";
                         query += $" AND cm\\:created:[{fromDate:yyyy-MM-dd} TO {toDate:yyyy-MM-dd}]";
-                    }
                 }
             }
 
-                return query;
+            return query;
         }
 
         private async Task<int> GetTotalDocumentCountAsync(string query, CancellationToken ct)
@@ -586,7 +757,10 @@ namespace Migration.Infrastructure.Implementation.Services
                 Sort = new List<SortRequest>
                 {
                     new SortRequest { Type = "FIELD", Field = "created", Ascending = true },
-                    new SortRequest { Type = "FIELD", Field = "name", Ascending = true }
+                    new SortRequest { Type = "FIELD", Field = "name", Ascending = true },
+                    // Third sort for stable skip-pagination; if Alfresco rejects this field,
+                    // try "cmis:objectId" or "id" as alternatives.
+                    new SortRequest { Type = "FIELD", Field = "sys:node-uuid", Ascending = true }
                 },
                 Include = new[] { "properties", "path" }
             };
@@ -619,55 +793,31 @@ namespace Migration.Infrastructure.Implementation.Services
             try
             {
                 await uow.BeginAsync(ct: ct).ConfigureAwait(false);
-                var piFetched = await repo.GetFetchedCountAsync("PI", ct).ConfigureAwait(false);
-                var leFetched = await repo.GetFetchedCountAsync("LE", ct).ConfigureAwait(false);
 
-                if (piFetched > 0)
+                foreach (var folderType in new[] { "PI", "LE" })
                 {
-                    _fetchedCountsPerFolder["PI"] = piFetched;
-                    _fileLogger.LogInformation("PreviewLoadService checkpoint: PI={PiFetched} previously fetched", piFetched);
+                    var state = await repo.GetCheckpointStateAsync(folderType, ct).ConfigureAwait(false);
+
+                    var processedSet = _processedSkipsPerFolder.GetOrAdd(folderType, _ => new ConcurrentDictionary<int, byte>());
+                    var failedSet = _failedSkipsPerFolder.GetOrAdd(folderType, _ => new ConcurrentDictionary<int, byte>());
+
+                    foreach (var s in state.ProcessedSkips)
+                        processedSet.TryAdd(s, 0);
+
+                    foreach (var s in state.FailedSkips)
+                        failedSet.TryAdd(s, 0);
+
+                    _fileLogger.LogInformation(
+                        "PreviewLoadService checkpoint loaded: {FolderType} — hwm={Hwm}, processed={P}, failed={F}",
+                        folderType, state.FetchedCount, state.ProcessedSkips.Count, state.FailedSkips.Count);
                 }
 
-                if (leFetched > 0)
-                {
-                    _fetchedCountsPerFolder["LE"] = leFetched;
-                    _fileLogger.LogInformation("PreviewLoadService checkpoint: LE={LeFetched} previously fetched", leFetched);
-                }
                 await uow.CommitAsync(ct: ct).ConfigureAwait(false);
-
             }
             catch (Exception ex)
             {
                 await uow.RollbackAsync(ct: ct).ConfigureAwait(false);
-
                 _fileLogger.LogWarning("PreviewLoadService: Could not load checkpoint, starting fresh. Error: {Error}", ex.Message);
-            }
-        }
-
-        private async Task SaveCheckpointAsync(string folderType, long totalFetched, CancellationToken ct)
-        {
-            try
-            {
-                await using var scope = _scopeFactory.CreateAsyncScope();
-                var uow = scope.ServiceProvider.GetRequiredService<IUnitOfWork>();
-                var repo = scope.ServiceProvider.GetRequiredService<IPreviewLoadCheckpointRepository>();
-
-                await uow.BeginAsync(ct: ct).ConfigureAwait(false);
-                try
-                {
-                    await repo.UpsertAsync(folderType, totalFetched, ct).ConfigureAwait(false);
-                    await uow.CommitAsync(ct: ct).ConfigureAwait(false);
-                    _fileLogger.LogInformation("PreviewLoadService checkpoint saved: {FolderType}={TotalFetched}", folderType, totalFetched);
-                }
-                catch
-                {
-                    await uow.RollbackAsync(ct: ct).ConfigureAwait(false);
-                    throw;
-                }
-            }
-            catch (Exception ex)
-            {
-                _fileLogger.LogWarning("PreviewLoadService: Could not save checkpoint for {FolderType}: {Error}", folderType, ex.Message);
             }
         }
 
