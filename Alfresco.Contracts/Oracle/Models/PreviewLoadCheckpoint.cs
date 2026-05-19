@@ -24,5 +24,22 @@ namespace Alfresco.Contracts.Oracle.Models
         /// Vreme poslednjeg ažuriranja
         /// </summary>
         public DateTime UpdatedAt { get; set; }
+
+        /// <summary>
+        /// JSON lista skip-vrednosti koje su uspešno obrađene (System.Text.Json, int[]).
+        /// NULL za stare redove — fallback na TotalFetched.
+        /// </summary>
+        public string? ProcessedSkipsJson { get; set; }
+
+        /// <summary>
+        /// JSON lista skip-vrednosti koje su pale u svim retry pokušajima.
+        /// NULL za stare redove.
+        /// </summary>
+        public string? FailedSkipsJson { get; set; }
+
+        /// <summary>
+        /// Vreme poslednjeg upisa skip setova.
+        /// </summary>
+        public DateTime? LastUpdatedAt { get; set; }
     }
 }
